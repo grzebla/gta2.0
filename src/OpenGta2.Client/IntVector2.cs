@@ -49,9 +49,24 @@ public struct IntVector2
     {
         return !lhs.Equals(rhs);
     }
+    
+    public static IntVector2 operator +(IntVector2 lhs, IntVector2 rhs)
+    {
+        return new IntVector2(lhs.X + rhs.X, lhs.Y + rhs.Y);
+    }
+
+    public static IntVector2 operator -(IntVector2 lhs, IntVector2 rhs)
+    {
+        return new IntVector2(lhs.X - rhs.X, lhs.Y - rhs.Y);
+    }
 
     public static implicit operator Vector2(IntVector2 vec)
     {
         return new Vector2(vec.X, vec.Y);
+    }
+
+    public override string ToString()
+    {
+        return $"{{{X}, {Y}}}";
     }
 }

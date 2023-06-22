@@ -15,7 +15,11 @@ public struct IntVector3
         Y = y;
         Z = z;
     }
-    
+
+    public IntVector3(IntVector2 vector, int z) : this(vector.X, vector.Y, z)
+    {
+    }
+
     public static IntVector3 Floor(Vector3 vec)
     {
         return new IntVector3((int)vec.X, (int)vec.Y, (int)vec.Z);
@@ -51,9 +55,24 @@ public struct IntVector3
     {
         return !lhs.Equals(rhs);
     }
+    
+    public static IntVector3 operator +(IntVector3 lhs, IntVector3 rhs)
+    {
+        return new IntVector3(lhs.X + rhs.X, lhs.Y + rhs.Y, lhs.Z + rhs.Z);
+    }
+
+    public static IntVector3 operator -(IntVector3 lhs, IntVector3 rhs)
+    {
+        return new IntVector3(lhs.X - rhs.X, lhs.Y - rhs.Y, lhs.Z - rhs.Z);
+    }
 
     public static implicit operator Vector3(IntVector3 vec)
     {
         return new Vector3(vec.X, vec.Y, vec.Z);
+    }
+    
+    public override string ToString()
+    {
+        return $"{{{X}, {Y}, {Z}}}";
     }
 }

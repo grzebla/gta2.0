@@ -99,14 +99,7 @@ public static class SlopeGenerator
 
         static ref FaceInfo GetFace(ref BlockInfo block, Face face, Rotation rotation)
         {
-            switch (Rotate(face, rotation))
-            {
-                case Face.Left: return ref block.Left;
-                case Face.Right: return ref block.Right;
-                case Face.Top: return ref block.Top;
-                case Face.Bottom: return ref block.Bottom;
-                default: return ref block.Lid;
-            }
+            return ref block.GetFace(Rotate(face, rotation));
         }
     }
 

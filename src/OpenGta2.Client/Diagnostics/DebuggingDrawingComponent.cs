@@ -18,6 +18,7 @@ public class DebuggingDrawingComponent : DrawableGameComponent
     private SpriteFont? _font;
     private DebugLineEffect? _debugLineEffect;
     private float _time;
+    private bool _drawDiagnostics;
 
     private static readonly VertexPositionColor[] _blockVertices =
     {
@@ -54,14 +55,22 @@ public class DebuggingDrawingComponent : DrawableGameComponent
         _font = Game.AssetManager.GetDebugFont();
         _debugLineEffect = Game.AssetManager.CreateDebugLineEffect();
     }
-    
+
+    public override void Update(GameTime gameTime)
+    {
+        if (_controls.IsKeyDown(Keys.F1))
+        {
+            _drawDiagnostics = !_drawDiagnostics;
+        }
+    }
+
     public override void Draw(GameTime gameTime) => Draw(gameTime.GetDelta());
 
     public void Draw(float deltaTime)
     {
         PerformanceCounters.Drawing.StartMeasurement("Debug");
 
-        if (_controls.IsKeyPressed(Keys.F1))
+        if (_drawDiagnostics)
         {
             DrawDiagnosticHighlights();
         }

@@ -35,6 +35,7 @@ public record Map(CompressedMap CompressedMap, MapObject[] Objects, MapZone[] Zo
         
         return CompressedMap.Blocks[column.Blocks[z - column.Offset]];
     }
+    
 
     public int GetGroundZ(int x, int y)
     {

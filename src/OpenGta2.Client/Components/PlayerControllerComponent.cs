@@ -1,5 +1,6 @@
 ﻿using System;
 using Microsoft.Xna.Framework;
+using Microsoft.Xna.Framework.Input;
 using OpenGta2.Client.Diagnostics;
 using OpenGta2.Client.Levels;
 using OpenGta2.Client.Peds;
@@ -14,6 +15,7 @@ public class PlayerControllerComponent : BaseComponent
     private readonly LevelProvider _levelProvider;
     private readonly Camera _camera;
     private Ped? _player;
+    private bool _moveSlow;
     public PlayerControllerComponent(GtaGame game, Controls controls, PedManager pedManager, LevelProvider levelProvider, Camera camera) : base(game)
     {
         _controls = controls;
@@ -48,12 +50,17 @@ public class PlayerControllerComponent : BaseComponent
         if (_controls.IsKeyPressed(Control.Backward))
             fd--;
 
+        if (_controls.IsKeyDown(Keys.F2))
+        {
+            _moveSlow = !_moveSlow;
+        }
+
         _player.Rotation += lr * MathHelper.TwoPi * gameTime.GetDelta();
             
         var heading = new Vector2(MathF.Sin(-_player.Rotation), MathF.Cos(-_player.Rotation));
-        var delta = heading * fd * gameTime.GetDelta() * 2;
+        var delta = heading * fd * gameTime.GetDelta() * 2 * (_moveSlow ? 0.1f : 1);
 
-        const float playerWidth = (18f / 64);
+        const float playerWidth = 0.1f;//(18f / 64);
 
         DiagnosticHighlight.Add(_player.Position - new Vector3(playerWidth/2, playerWidth/2, 0), new Vector3(playerWidth, playerWidth, 1), Color.Blue);
 
