@@ -8,7 +8,7 @@ public class SoundLibrary
     private readonly byte[] _data;
     private readonly SoundEntry[] _entries;
 
-    private Random _random = new();
+    private readonly Random _random = new();
 
     public SoundLibrary(byte[] data, SoundEntry[] entries)
     {
@@ -48,10 +48,10 @@ public class SoundLibrary
         return new Sound(new SoundStream(header, new Memory<byte>(_data, entry.Offset, entry.Size)), entry);
     }
 
-    private class SoundStream : Stream
+    private sealed class SoundStream : Stream
     {
         private readonly byte[] _header;
-        private Memory<byte> _data;
+        private readonly Memory<byte> _data;
 
         public SoundStream(byte[] header, Memory<byte> data)
         {

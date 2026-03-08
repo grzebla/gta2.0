@@ -4,7 +4,7 @@ namespace OpenGta2.Client.Utilities
 {
     internal static class ThrowHelper
     {
-        public static Exception GetContentNotLoaded() => new InvalidOperationException("The content of this component has not yet been loaded.");
-        public static Exception GetLevelNotLoaded() => new InvalidOperationException("No level is currently loaded.");
+        public static InvalidOperationException GetContentNotLoaded() => new("The content of this component has not yet been loaded.");
+        public static InvalidOperationException GetLevelNotLoaded() => new("No level is currently loaded.");
     }
 }

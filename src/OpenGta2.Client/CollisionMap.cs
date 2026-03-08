@@ -27,7 +27,7 @@ public class CollisionMap
     
     private Vector2 CalculateMovement(Vector2 point, int z, float radius, Vector2 delta)
     {
-        var depth = 3;
+        // var depth = 3;
         while (true)
         {
             if (delta == Vector2.Zero) return point;
@@ -49,17 +49,17 @@ public class CollisionMap
             if (collision.HasValue)
             {
                 return collision.Value.HitPosition;
-                var deltaMissing = target - collision.Value.HitPosition;
-
-                var absNormal = new Vector2(MathF.Abs(collision.Value.HitNormal.X), MathF.Abs(collision.Value.HitNormal.Y));
-                var otherDirection = Vector2.One - absNormal;
-
-                delta = deltaMissing * otherDirection;
-
-                if (--depth == 0) return collision.Value.HitPosition;
-
-                point = point + (collision.Value.HitPosition - point) * 0.9f;
-                continue;
+                // var deltaMissing = target - collision.Value.HitPosition;
+                //
+                // var absNormal = new Vector2(MathF.Abs(collision.Value.HitNormal.X), MathF.Abs(collision.Value.HitNormal.Y));
+                // var otherDirection = Vector2.One - absNormal;
+                //
+                // delta = deltaMissing * otherDirection;
+                //
+                // if (--depth == 0) return collision.Value.HitPosition;
+                //
+                // point = point + (collision.Value.HitPosition - point) * 0.9f;
+                // continue;
             }
 
             return target;

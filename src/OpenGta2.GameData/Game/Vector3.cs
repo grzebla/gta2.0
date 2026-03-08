@@ -2,9 +2,11 @@
 
 public struct Vector3 : IFormattable
 {
+#pragma warning disable CA1051
     public float X;
     public float Y;
     public float Z;
+#pragma warning restore CA1051
 
     public Vector3(float x, float y, float z)
     {
@@ -17,5 +19,5 @@ public struct Vector3 : IFormattable
     
     public override string ToString() => $"({X}, {Y}, {Z})";
     public string ToString(string? format, IFormatProvider? formatProvider) => $"({X.ToString(format, formatProvider)}, {Y.ToString(format, formatProvider)}, {Z.ToString(format, formatProvider)})";
-    public string ToString(string? format) => $"({X.ToString(format)}, {Y.ToString(format)}, {Z.ToString(format)})";
+    public string ToString(string? format) => $"({X:format}, {Y:format}, {Z:format})";
 }
