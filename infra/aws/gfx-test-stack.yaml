@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  OpenGTA2 - GPU graphics test host (Windows Server 2022 on EC2 G4dn) driven by
+  GTA20 - GPU graphics test host (Windows Server 2022 on EC2 G4dn) driven by
   GitHub Actions through AWS Systems Manager. No inbound network access.
   COST WARNING: creating this stack launches the instance immediately
   (~0.74 USD/h for g4dn.xlarge Windows in eu-north-1). The instance stops itself
@@ -11,7 +11,7 @@ Description: >-
 Parameters:
   ProjectTag:
     Type: String
-    Default: OpenGTA2
+    Default: GTA20
     AllowedPattern: "^[A-Za-z0-9-]{1,32}$"
   InstanceType:
     Type: String
@@ -110,7 +110,7 @@ Resources:
   HostSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: OpenGTA2 GPU test host - no inbound, HTTPS/HTTP egress only
+      GroupDescription: GTA20 GPU test host - no inbound, HTTPS/HTTP egress only
       VpcId: !Ref VpcId
       SecurityGroupEgress:
         - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: "SSM, S3, driver downloads" }
@@ -122,7 +122,7 @@ Resources:
   HostRole:
     Type: AWS::IAM::Role
     Properties:
-      Path: /opengta2/
+      Path: /gta20/
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -172,7 +172,7 @@ Resources:
   HostInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
-      Path: /opengta2/
+      Path: /gta20/
       Roles: [!Ref HostRole]
 
   # ---------------------------------------------------------------- GPU host
@@ -208,7 +208,7 @@ Resources:
         Fn::Base64: |
           <powershell>
           $ErrorActionPreference = 'Stop'
-          $root = 'C:\OpenGTA2'
+          $root = 'C:\GTA20'
           New-Item -ItemType Directory -Force -Path $root | Out-Null
           $watchdog = @'
           $ErrorActionPreference = 'Continue'
@@ -218,14 +218,14 @@ Resources:
             $v = Invoke-RestMethod -Uri 'http://169.254.169.254/latest/meta-data/tags/instance/MaxRuntimeMinutes' -Headers @{ 'X-aws-ec2-metadata-token' = $t }
             if ([int]$v -ge 15 -and [int]$v -le 180) { $minutes = [int]$v }
           } catch { }
-          Add-Content -Path 'C:\OpenGTA2\watchdog.log' -Value ("{0:o} boot; shutdown in {1} min" -f (Get-Date), $minutes)
-          & shutdown.exe /s /f /t ($minutes * 60) /c "OpenGTA2 watchdog: MaxRuntimeMinutes reached" /d p:0:0
+          Add-Content -Path 'C:\GTA20\watchdog.log' -Value ("{0:o} boot; shutdown in {1} min" -f (Get-Date), $minutes)
+          & shutdown.exe /s /f /t ($minutes * 60) /c "GTA20 watchdog: MaxRuntimeMinutes reached" /d p:0:0
           '@
           Set-Content -Path "$root\watchdog.ps1" -Value $watchdog -Encoding UTF8
           $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File $root\watchdog.ps1"
           $trigger = New-ScheduledTaskTrigger -AtStartup
           $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
-          Register-ScheduledTask -TaskName 'OpenGTA2-Watchdog' -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
+          Register-ScheduledTask -TaskName 'GTA20-Watchdog' -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
           & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root\watchdog.ps1"
           </powershell>
       Tags:
@@ -244,7 +244,7 @@ Resources:
   ReaperRole:
     Type: AWS::IAM::Role
     Properties:
-      Path: /opengta2/
+      Path: /gta20/
       AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -279,7 +279,7 @@ Resources:
     DependsOn: ReaperLogGroup
     Properties:
       FunctionName: !Sub "${AWS::StackName}-reaper"
-      Description: Stops OpenGTA2 GPU test hosts running longer than MaxRuntimeMinutes + grace.
+      Description: Stops GTA20 GPU test hosts running longer than MaxRuntimeMinutes + grace.
       Runtime: python3.13
       Architectures: [arm64]
       Handler: index.handler
@@ -330,7 +330,7 @@ Resources:
   ReaperSchedule:
     Type: AWS::Events::Rule
     Properties:
-      Description: Run the OpenGTA2 GPU host reaper every 10 minutes.
+      Description: Run the GTA20 GPU host reaper every 10 minutes.
       ScheduleExpression: rate(10 minutes)
       State: ENABLED
       Targets:

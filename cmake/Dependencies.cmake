@@ -3,7 +3,7 @@
 include(FetchContent)
 set(FETCHCONTENT_QUIET ON)
 
-if(G2N_BUILD_TESTS)
+if(GTA20_BUILD_TESTS)
     FetchContent_Declare(doctest
         URL https://github.com/doctest/doctest/archive/refs/tags/v2.5.3.tar.gz
         URL_HASH SHA256=174ebc4e769928959614789c5b4e9c3d0a0f81a62bb608756b127bfebfb21331
@@ -18,12 +18,12 @@ FetchContent_Declare(nlohmann_json_src
     URL_HASH SHA256=b8cb0ef2dd7f57f18933997c9934bb1fa962594f701cd5a8d3c2c80541559372
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(nlohmann_json_src)
-add_library(g2n_nlohmann_json INTERFACE)
-target_include_directories(g2n_nlohmann_json SYSTEM INTERFACE ${nlohmann_json_src_SOURCE_DIR}/include)
-add_library(g2n::json ALIAS g2n_nlohmann_json)
+add_library(gta20_nlohmann_json INTERFACE)
+target_include_directories(gta20_nlohmann_json SYSTEM INTERFACE ${nlohmann_json_src_SOURCE_DIR}/include)
+add_library(gta20::json ALIAS gta20_nlohmann_json)
 
-if(G2N_BUILD_APP)
-    if(G2N_SDL_PROVIDER STREQUAL "system")
+if(GTA20_BUILD_APP)
+    if(GTA20_SDL_PROVIDER STREQUAL "system")
         find_package(SDL3 3.4 CONFIG REQUIRED)
     else()
         FetchContent_Declare(SDL3
@@ -39,8 +39,8 @@ if(G2N_BUILD_APP)
         FetchContent_MakeAvailable(SDL3)
     endif()
     if(TARGET SDL3::SDL3-static)
-        set(G2N_SDL_TARGET SDL3::SDL3-static CACHE INTERNAL "")
+        set(GTA20_SDL_TARGET SDL3::SDL3-static CACHE INTERNAL "")
     else()
-        set(G2N_SDL_TARGET SDL3::SDL3 CACHE INTERNAL "")
+        set(GTA20_SDL_TARGET SDL3::SDL3 CACHE INTERNAL "")
     endif()
 endif()

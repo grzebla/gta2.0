@@ -1,10 +1,10 @@
-#include "g2n/assets/file_io.hpp"
+#include "gta20/assets/file_io.hpp"
 
 #include <algorithm>
 #include <cctype>
 #include <fstream>
 
-namespace g2n::assets {
+namespace gta20::assets {
 namespace {
 
 bool iequals(const std::string& a, const std::string& b) {
@@ -68,4 +68,4 @@ Result<std::filesystem::path> resolve_game_path(const std::filesystem::path& gam
     return current;
 }
 
-} // namespace g2n::assets
+} // namespace gta20::assets

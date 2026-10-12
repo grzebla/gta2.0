@@ -2,7 +2,7 @@
 
 Cel: automatycznie uruchamiać oryginalne GTA 2 (PC 10.5 — wersja referencyjna
 [GTA2_RE](https://github.com/CriminalRETeam/gta2_re)) z prawdziwą grafiką,
-żeby porównywać je z OpenGTA2. **Nie zakładamy, że GTA 2 działa na G4dn** —
+żeby porównywać je z GTA2.0. **Nie zakładamy, że GTA 2 działa na G4dn** —
 najpierw uruchamia się osobny test kompatybilności DirectDraw/Direct3D
 (`gfx-compat`), a dopiero po wyniku `COMPATIBLE` włącza się pełną automatyzację
 (`gfx-e2e`).
@@ -15,8 +15,8 @@ flowchart LR
     D[workflow_dispatch<br/>gfx-compat / gfx-e2e<br/>właściciel + potwierdzenie kosztu] --> S[gfx-session.yml<br/>tylko main]
     S --> X[ensure-stopped<br/>if: always]
   end
-  S -- OIDC --> R1[rola opengta2-gfx-ci<br/>start/stop + SSM + S3 runs/]
-  X -- OIDC --> R2[rola opengta2-gfx-ci-stop<br/>tylko stop]
+  S -- OIDC --> R1[rola gta20-gfx-ci<br/>start/stop + SSM + S3 runs/]
+  X -- OIDC --> R2[rola gta20-gfx-ci-stop<br/>tylko stop]
   subgraph AWS[Projekt AWS, eu-north-1]
     R1 --> EC2[EC2 g4dn.xlarge<br/>Windows Server 2022<br/>brak ruchu przychodzącego]
     R1 --> SSM[Systems Manager<br/>Run Command]
@@ -29,7 +29,7 @@ flowchart LR
 
 Przebieg jednej sesji (`scripts/ci/ec2-gpu-session.sh`):
 
-1. `resolve` — znajduje dokładnie jedną instancję z tagami `Project=OpenGTA2`, `Purpose=gfx-test`.
+1. `resolve` — znajduje dokładnie jedną instancję z tagami `Project=GTA20`, `Purpose=gfx-test`.
 2. `start` — uruchamia zatrzymaną instancję i czeka, aż agent SSM będzie `Online`.
 3. `upload` — kopiuje `tests/gfx/windows/*` i macierz do `s3://…/runs/<run>/scripts/`.
 4. `run` — `AWS-RunPowerShellScript` uruchamia `Invoke-GfxCompat.ps1` jako SYSTEM.
@@ -48,7 +48,7 @@ Przebieg jednej sesji (`scripts/ci/ec2-gpu-session.sh`):
 
 | Warstwa | Mechanizm | Działa bez GitHuba? |
 |---|---|---|
-| System | Zadanie `OpenGTA2-Watchdog` przy każdym starcie: `shutdown /s` po `MaxRuntimeMinutes` (tag, domyślnie 60). `InstanceInitiatedShutdownBehavior=stop`. Instalowane w UserData przy pierwszym starcie. | tak |
+| System | Zadanie `GTA20-Watchdog` przy każdym starcie: `shutdown /s` po `MaxRuntimeMinutes` (tag, domyślnie 60). `InstanceInitiatedShutdownBehavior=stop`. Instalowane w UserData przy pierwszym starcie. | tak |
 | AWS | Lambda `…-reaper` co 10 min zatrzymuje host działający dłużej niż `MaxRuntimeMinutes + 10`. | tak |
 | IAM | Rola CI nie może `RunInstances`, `ModifyInstanceAttribute`, `CreateTags`, `TerminateInstances` ani nic w IAM (jawny Deny). Może tylko start/stop istniejącego, otagowanego hosta. Tagu `MaxRuntimeMinutes` nie da się zmienić z CI. | tak |
 | AWS | Szablon dopuszcza wyłącznie `g4dn.xlarge` / `g4dn.2xlarge`. Spot jest i tak zablokowany przez SCP projektu. | tak |
@@ -71,18 +71,18 @@ pierwszy bootstrap (sterownik + restarty) może dodać 10–15 min.
 
 ## Uprawnienia IAM
 
-**`opengta2-gfx-ci`** (zaufanie, wszystkie warunki `StringEquals`: `aud=sts.amazonaws.com`, `sub=repo:grzebla/OpenGTA2:ref:refs/heads/main`, `repository_id=1415959822`, `repository_owner_id=12907536`, `actor_id=12907536`, `job_workflow_ref=grzebla/OpenGTA2/.github/workflows/gfx-session.yml@refs/heads/main`; sesja ≤ 1 h)
+**`gta20-gfx-ci`** (zaufanie, wszystkie warunki `StringEquals`: `aud=sts.amazonaws.com`, `sub=repo:grzebla/gta2.0:ref:refs/heads/main`, `repository_id=1415959822`, `repository_owner_id=12907536`, `actor_id=12907536`, `job_workflow_ref=grzebla/gta2.0/.github/workflows/gfx-session.yml@refs/heads/main`; sesja ≤ 1 h)
 
 | Akcja | Zasób / warunek |
 |---|---|
 | `ec2:DescribeInstances`, `ec2:DescribeInstanceStatus`, `ssm:DescribeInstanceInformation`, `ssm:GetCommandInvocation`, `ssm:ListCommand*`, `ssm:CancelCommand` | `*` (brak uprawnień na poziomie zasobu) |
-| `ec2:StartInstances`, `ec2:StopInstances` | instancje z tagami `Project=OpenGTA2` i `Purpose=gfx-test` |
+| `ec2:StartInstances`, `ec2:StopInstances` | instancje z tagami `Project=GTA20` i `Purpose=gfx-test` |
 | `ssm:SendCommand` | dokument `AWS-RunPowerShellScript` + instancje z tymi tagami |
 | `s3:PutObject`, `s3:GetObject` | `runs/*`, `ssm-output/*` |
 | `s3:ListBucket` | prefiksy `runs/`, `ssm-output/` |
 | **Deny** `ec2:RunInstances`, `ModifyInstanceAttribute`, `CreateTags`, `DeleteTags`, `TerminateInstances`, `iam:*` | `*` |
 
-**`opengta2-gfx-ci-stop`** (zaufanie jak wyżej, bez `actor_id`): `ec2:DescribeInstances`, `ssm:CancelCommand`, `ec2:StopInstances` na otagowanym hoście.
+**`gta20-gfx-ci-stop`** (zaufanie jak wyżej, bez `actor_id`): `ec2:DescribeInstances`, `ssm:CancelCommand`, `ec2:StopInstances` na otagowanym hoście.
 
 **Rola instancji**: `AmazonSSMManagedInstanceCore`; odczyt `runs/*`, `game/*`, `tools/*`; zapis `runs/*/results/*`, `ssm-output/*`; odczyt bucketu sterowników GRID.
 
@@ -142,7 +142,7 @@ Kroki oznaczone 💰 tworzą płatne zasoby — wykonuj je dopiero po świadomej
 4. 💰 Stos hosta (instancja startuje od razu; watchdog wyłączy ją po 60 min):
 
    ```bash
-   aws cloudformation deploy --region eu-north-1 --stack-name opengta2-gfx \
+   aws cloudformation deploy --region eu-north-1 --stack-name gta20-gfx \
      --template-file infra/aws/gfx-test-stack.yaml --capabilities CAPABILITY_IAM \
      --parameter-overrides VpcId=vpc-012515c9ad46fee92 SubnetId=<subnet domyślnego VPC>
    ```
@@ -150,13 +150,13 @@ Kroki oznaczone 💰 tworzą płatne zasoby — wykonuj je dopiero po świadomej
 5. Stos OIDC (bezpłatny):
 
    ```bash
-   aws cloudformation deploy --region eu-north-1 --stack-name opengta2-github-oidc \
+   aws cloudformation deploy --region eu-north-1 --stack-name gta20-github-oidc \
      --template-file infra/aws/github-oidc.yaml --capabilities CAPABILITY_NAMED_IAM \
-     --parameter-overrides ArtifactsBucketName=opengta2-gfx-artifacts-<account-id>
+     --parameter-overrides ArtifactsBucketName=gta20-gfx-artifacts-<account-id>
    ```
 
 6. Gra: spakuj własną instalację GTA 2 10.5 do zip, wgraj do
-   `s3://opengta2-gfx-artifacts-<account-id>/game/gta2-10.5.zip`, wpisz jej SHA-256 do
+   `s3://gta20-gfx-artifacts-<account-id>/game/gta2-10.5.zip`, wpisz jej SHA-256 do
    `game.sha256` w macierzy. Plików gry nie commituj (`.gitignore`).
 7. GitHub: zmienne repozytorium `AWS_REGION`, `GFX_BUCKET`, `AWS_GFX_ROLE_ARN`,
    `AWS_GFX_STOP_ROLE_ARN` (ustawione 2026-10-12; ARN-y są deterministyczne i zaczną

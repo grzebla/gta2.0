@@ -17,7 +17,7 @@ case "$1 $2" in
     if [[ "$*" == *"--filters"* ]]; then printf "%s\n" "${FAKE_IDS-i-0123456789abcdef0}"; else printf '%s\n' "${FAKE_STATE:-stopped}"; fi ;;
   "ssm describe-instance-information") echo Online ;;
   "ssm send-command") echo "cmd-123" ;;
-  "cloudformation describe-stacks") echo "opengta2-gfx-artifacts-433213574600" ;;
+  "cloudformation describe-stacks") echo "gta20-gfx-artifacts-433213574600" ;;
   "service-quotas get-service-quota") echo "${FAKE_QUOTA:-0.0}" ;;
   "ec2 describe-vpcs") echo "vpc-012515c9ad46fee92" ;;
   "ec2 describe-subnets") echo "subnet-01ca4e08a6f9fa5b3" ;;
@@ -47,7 +47,7 @@ log_has() { grep -q -- "$1" "$WORK/aws.log"; }
 log_lacks() { ! grep -q -- "$1" "$WORK/aws.log"; }
 
 export PATH="$WORK/bin:$PATH" FAKE_LOG="$WORK/aws.log" RUNNER_TEMP="$WORK" \
-       AWS_REGION=eu-north-1 GFX_BUCKET=opengta2-gfx-artifacts-433213574600 RUN_ID=123-1
+       AWS_REGION=eu-north-1 GFX_BUCKET=gta20-gfx-artifacts-433213574600 RUN_ID=123-1
 unset GITHUB_ENV
 
 run() { bash "$SCRIPT" "$@"; }
@@ -94,7 +94,7 @@ assert "no CloudFormation deploy without quota" log_lacks "cloudformation deploy
 check "deploy without confirmation changes nothing" 1 env CONFIRM=no FAKE_QUOTA=4.0 bash "$DEPLOY"
 assert "no CloudFormation deploy without confirmation" log_lacks "cloudformation deploy"
 check "deploy runs after quota + confirmation" 0 env CONFIRM=uruchom-ec2 FAKE_QUOTA=4.0 bash "$DEPLOY"
-assert "deploy used the gfx template in eu-north-1" both log_has "cloudformation deploy --stack-name opengta2-gfx" log_has "SubnetId=subnet-01ca4e08a6f9fa5b3"
+assert "deploy used the gfx template in eu-north-1" both log_has "cloudformation deploy --stack-name gta20-gfx" log_has "SubnetId=subnet-01ca4e08a6f9fa5b3"
 rm -rf "$ROOT/gfx-results"/local-* 2>/dev/null
 
 echo "---"

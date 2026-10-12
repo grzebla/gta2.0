@@ -46,5 +46,5 @@ mv "$W/tree" ~/Games/GTA2-10.5
 | tylko 10.5 | teksty f/g/i (`.gxt`), `softdll.dll`, `player/*`, pliki launchera Freeloader |
 
 Wniosek: formaty map i grafiki są w pełni zgodne (to te same pliki). Silnik używa danych 9.6
-(`G2N_GAME_DIR=~/Games/GTA2`); 10.5 służy jako binarka referencyjna (np. testy na EC2 zgodne z
-adresami GTA2_RE). Test: `G2N_GAME_DIR_105=~/Games/GTA2-10.5` włącza porównanie w `[gamedata]`.
+(`GTA20_GAME_DIR=~/Games/GTA2`); 10.5 służy jako binarka referencyjna (np. testy na EC2 zgodne z
+adresami GTA2_RE). Test: `GTA20_GAME_DIR_105=~/Games/GTA2-10.5` włącza porównanie w `[gamedata]`.

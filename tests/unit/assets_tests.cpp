@@ -3,13 +3,13 @@
 #include <cstdlib>
 #include <filesystem>
 
-#include "g2n/assets/chunk_file.hpp"
-#include "g2n/assets/file_io.hpp"
-#include "g2n/assets/gmp_map.hpp"
-#include "g2n/assets/gmp_writer.hpp"
+#include "gta20/assets/chunk_file.hpp"
+#include "gta20/assets/file_io.hpp"
+#include "gta20/assets/gmp_map.hpp"
+#include "gta20/assets/gmp_writer.hpp"
 
-using namespace g2n;
-using namespace g2n::assets;
+using namespace gta20;
+using namespace gta20::assets;
 
 namespace {
 std::vector<std::byte> bytes(std::initializer_list<int> v) {
@@ -120,10 +120,10 @@ TEST_CASE("GMP: synthetic test map parses and has roads, fields and buildings") 
     CHECK(m.zones()[0].name == "SYNTHETIC");
 }
 
-TEST_CASE("[gamedata] original GTA 2 map parses (needs G2N_GAME_DIR)") {
-    const char* dir = std::getenv("G2N_GAME_DIR");
+TEST_CASE("[gamedata] original GTA 2 map parses (needs GTA20_GAME_DIR)") {
+    const char* dir = std::getenv("GTA20_GAME_DIR");
     if (dir == nullptr) {
-        MESSAGE("G2N_GAME_DIR not set - skipping original-data test");
+        MESSAGE("GTA20_GAME_DIR not set - skipping original-data test");
         return;
     }
     for (const char* level : {"data/wil.gmp", "data/ste.gmp", "data/bil.gmp"}) {

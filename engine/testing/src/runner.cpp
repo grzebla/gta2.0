@@ -1,15 +1,15 @@
-#include "g2n/testing/runner.hpp"
+#include "gta20/testing/runner.hpp"
 
 #include <algorithm>
 #include <cmath>
 #include <optional>
 #include <set>
 
-#include "g2n/assets/file_io.hpp"
-#include "g2n/assets/gmp_writer.hpp"
-#include "g2n/sim/world.hpp"
+#include "gta20/assets/file_io.hpp"
+#include "gta20/assets/gmp_writer.hpp"
+#include "gta20/sim/world.hpp"
 
-namespace g2n::testing {
+namespace gta20::testing {
 namespace {
 
 class EngineAdapter final : public SimulationAdapter {
@@ -17,7 +17,7 @@ public:
     explicit EngineAdapter(std::string game_dir) : game_dir_(std::move(game_dir)) {}
 
     std::string id() const override { return "engine"; }
-    // Bump when the captured semantics of g2n::sim change (golden traces must be regenerated).
+    // Bump when the captured semantics of gta20::sim change (golden traces must be regenerated).
     std::string version() const override { return "prototype-1"; }
 
     Result<bool> initialize(const Scenario& scenario) override {
@@ -143,4 +143,4 @@ Result<Trace> run_scenario(const Scenario& scenario, SimulationAdapter& adapter)
     return trace;
 }
 
-} // namespace g2n::testing
+} // namespace gta20::testing

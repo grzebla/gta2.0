@@ -17,5 +17,5 @@ tylko po teście porównawczym z danymi `originalGta2`.
 | 8 | Skrypty misji, teksty, HUD | misja testowa przechodzi w obu grach |
 | 9 | Dźwięk, zapis gry, frontend | — |
 
-Zasada wydajności: każda optymalizacja zaczyna się od pomiaru (`g2n-headless bench`,
-`gta2n --frames`), a regresje wydajności są wychwytywane w CI (podsumowanie benchmarku).
+Zasada wydajności: każda optymalizacja zaczyna się od pomiaru (`gta20-headless bench`,
+`gta2 --frames`), a regresje wydajności są wychwytywane w CI (podsumowanie benchmarku).

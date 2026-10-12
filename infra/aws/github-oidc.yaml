@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  OpenGTA2 - GitHub Actions OIDC trust and least-privilege CI role for the GPU
+  GTA20 - GitHub Actions OIDC trust and least-privilege CI role for the GPU
   graphics tests. The role can only start/stop the existing tagged test host,
   send SSM commands to it and use the runs/ prefix of the artifacts bucket.
   It cannot launch, modify or terminate instances.
@@ -17,7 +17,7 @@ Parameters:
     AllowedPattern: "^[A-Za-z0-9-]{1,39}$"
   GitHubRepo:
     Type: String
-    Default: OpenGTA2
+    Default: gta2.0
     AllowedPattern: "^[A-Za-z0-9._-]{1,100}$"
   GitHubRepositoryId:
     Type: String
@@ -46,7 +46,7 @@ Parameters:
     Description: Output ArtifactsBucketName of the gfx-test stack.
   ProjectTag:
     Type: String
-    Default: OpenGTA2
+    Default: GTA20
 
 Conditions:
   CreateProvider: !Equals [!Ref ExistingOidcProviderArn, ""]
@@ -64,8 +64,8 @@ Resources:
   GfxCiRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: opengta2-gfx-ci
-      Path: /opengta2/
+      RoleName: gta20-gfx-ci
+      Path: /gta20/
       MaxSessionDuration: 3600
       Description: Assumed by the gfx-session workflow on main, started by the repository owner.
       AssumeRolePolicyDocument:
@@ -152,8 +152,8 @@ Resources:
   GfxStopRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: opengta2-gfx-ci-stop
-      Path: /opengta2/
+      RoleName: gta20-gfx-ci-stop
+      Path: /gta20/
       MaxSessionDuration: 3600
       Description: Cleanup-only role - can describe and stop the tagged GPU test host, nothing else.
       AssumeRolePolicyDocument:

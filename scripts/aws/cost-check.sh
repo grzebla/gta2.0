@@ -4,8 +4,8 @@
 # shellcheck source=common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-echo "## EC2 instances (Project=OpenGTA2)"
-aws ec2 describe-instances --filters Name=tag:Project,Values=OpenGTA2 \
+echo "## EC2 instances (Project=GTA20)"
+aws ec2 describe-instances --filters Name=tag:Project,Values=GTA20 \
   --query 'Reservations[].Instances[].[InstanceId,InstanceType,State.Name,LaunchTime]' --output table
 echo "## EBS volumes not deleted (any) and snapshots owned by this account"
 # shellcheck disable=SC2016 # JMESPath literals, not shell
@@ -15,14 +15,14 @@ echo "## Elastic IPs (billed when allocated)"
 aws ec2 describe-addresses --query 'Addresses[].[PublicIp,AllocationId,InstanceId]' --output table
 echo "## CloudFormation stacks"
 aws cloudformation list-stacks --stack-status-filter CREATE_COMPLETE UPDATE_COMPLETE DELETE_FAILED ROLLBACK_COMPLETE \
-  --query "StackSummaries[?starts_with(StackName,'opengta2')].[StackName,StackStatus]" --output table
-echo "## S3 buckets (opengta2*) and size"
-for b in $(aws s3api list-buckets --query "Buckets[?starts_with(Name,'opengta2')].Name" --output text); do
+  --query "StackSummaries[?starts_with(StackName,'gta20')].[StackName,StackStatus]" --output table
+echo "## S3 buckets (gta20*) and size"
+for b in $(aws s3api list-buckets --query "Buckets[?starts_with(Name,'gta20')].Name" --output text); do
   echo "$b: $(aws s3 ls "s3://$b" --recursive --summarize | awk '/Total Size/ {printf "%.1f MiB", $3/1048576}')"
 done
 echo "## Lambda / log groups"
-aws lambda list-functions --query "Functions[?starts_with(FunctionName,'opengta2')].FunctionName" --output text
-aws logs describe-log-groups --log-group-name-prefix /aws/lambda/opengta2 --query 'logGroups[].[logGroupName,storedBytes]' --output text
+aws lambda list-functions --query "Functions[?starts_with(FunctionName,'gta20')].FunctionName" --output text
+aws logs describe-log-groups --log-group-name-prefix /aws/lambda/gta20 --query 'logGroups[].[logGroupName,storedBytes]' --output text
 echo "## Budgets"
 aws budgets describe-budgets --region us-east-1 --account-id "$(aws sts get-caller-identity --query Account --output text)" \
   --query 'Budgets[].[BudgetName,BudgetLimit.Amount,CalculatedSpend.ActualSpend.Amount]' --output table || true

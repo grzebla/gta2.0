@@ -1,8 +1,8 @@
-#include "g2n/assets/chunk_file.hpp"
+#include "gta20/assets/chunk_file.hpp"
 
-#include "g2n/core/byte_reader.hpp"
+#include "gta20/core/byte_reader.hpp"
 
-namespace g2n::assets {
+namespace gta20::assets {
 
 std::optional<Chunk> ChunkFile::find(std::string_view type) const {
     for (const auto& chunk : chunks) {
@@ -36,4 +36,4 @@ Result<ChunkFile> parse_chunk_file(std::span<const std::byte> bytes) {
     return file;
 }
 
-} // namespace g2n::assets
+} // namespace gta20::assets

@@ -5,11 +5,11 @@
 #include <set>
 #include <sstream>
 
-#include "g2n/testing/compare.hpp"
-#include "g2n/testing/runner.hpp"
+#include "gta20/testing/compare.hpp"
+#include "gta20/testing/runner.hpp"
 
-using namespace g2n;
-using namespace g2n::testing;
+using namespace gta20;
+using namespace gta20::testing;
 
 namespace {
 
@@ -160,7 +160,7 @@ TEST_CASE("Compare: structural differences are all reported, header first") {
 
 TEST_CASE("Runner: wall-slide scenario really collides and slides (SYNTHETIC map)") {
     auto scenario =
-        load_scenario(std::string(G2N_SOURCE_DIR) + "/tests/conformance/scenarios/synthetic-wall-slide.json");
+        load_scenario(std::string(GTA20_SOURCE_DIR) + "/tests/conformance/scenarios/synthetic-wall-slide.json");
     REQUIRE_MESSAGE(scenario, (scenario ? "" : scenario.error().message));
     auto adapter = make_engine_adapter();
     auto trace = run_scenario(scenario.value(), *adapter);

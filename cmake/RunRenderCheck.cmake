@@ -1,17 +1,20 @@
 # Renders a real GTA 2 city fragment offscreen and checks the image is a textured city, not
-# a blank or single-colour frame. Skipped (CTest SKIP) without G2N_GAME_DIR or a usable GPU device.
-if(NOT DEFINED ENV{G2N_GAME_DIR} OR "$ENV{G2N_GAME_DIR}" STREQUAL "")
-    message("SKIP: G2N_GAME_DIR not set")
+# a blank or single-colour frame. Skipped (CTest SKIP) without GTA20_GAME_DIR or a usable GPU device.
+if((NOT DEFINED ENV{GTA20_GAME_DIR} OR "$ENV{GTA20_GAME_DIR}" STREQUAL "") AND DEFINED ENV{G2N_GAME_DIR})
+    set(ENV{GTA20_GAME_DIR} "$ENV{G2N_GAME_DIR}") # pre-rename name
+endif()
+if(NOT DEFINED ENV{GTA20_GAME_DIR} OR "$ENV{GTA20_GAME_DIR}" STREQUAL "")
+    message("SKIP: GTA20_GAME_DIR not set")
     return()
 endif()
-execute_process(COMMAND ${GTA2N} --offscreen 640x360 --zoom 24 --level ${LEVEL} --screenshot ${OUT}
+execute_process(COMMAND ${GTA2_EXE} --offscreen 640x360 --zoom 24 --level ${LEVEL} --screenshot ${OUT}
                 RESULT_VARIABLE rc OUTPUT_VARIABLE out ERROR_VARIABLE err)
 if(err MATCHES "SDL_CreateGPUDevice")
     message("SKIP: no GPU device: ${err}")
     return()
 endif()
 if(NOT rc EQUAL 0)
-    message(FATAL_ERROR "gta2n failed (${rc}): ${err}")
+    message(FATAL_ERROR "gta2 failed (${rc}): ${err}")
 endif()
 string(REGEX MATCH "unique_colours=([0-9]+) covered=([0-9.]+)" _ "${out}")
 set(unique ${CMAKE_MATCH_1})

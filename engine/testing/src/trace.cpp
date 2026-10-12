@@ -1,4 +1,4 @@
-#include "g2n/testing/trace.hpp"
+#include "gta20/testing/trace.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -9,7 +9,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace g2n::testing {
+namespace gta20::testing {
 namespace {
 
 using nlohmann::json;
@@ -158,4 +158,4 @@ Result<bool> write_trace_file(const Trace& trace, const std::string& path) {
     return true;
 }
 
-} // namespace g2n::testing
+} // namespace gta20::testing

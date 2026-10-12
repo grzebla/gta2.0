@@ -1,16 +1,16 @@
 cmake_minimum_required(VERSION 3.25)
 
-project(gta2_native
+project(GTA20
     VERSION 0.1.0
-    DESCRIPTION "Native, cross-platform reimplementation of GTA 2 (C++20, SDL3, SDL_GPU)"
+    DESCRIPTION "GTA2.0: native, cross-platform reimplementation of GTA 2 (C++20, SDL3, SDL_GPU)"
     LANGUAGES C CXX)
 
-option(G2N_BUILD_APP "Build the SDL3/SDL_GPU application (needs SDL3)" ON)
-option(G2N_BUILD_TESTS "Build unit tests (doctest)" ON)
-option(G2N_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
-option(G2N_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
-set(G2N_SDL_PROVIDER "fetch" CACHE STRING "Where SDL3 comes from: fetch (pinned source) or system (find_package)")
-set_property(CACHE G2N_SDL_PROVIDER PROPERTY STRINGS fetch system)
+option(GTA20_BUILD_APP "Build the SDL3/SDL_GPU application (needs SDL3)" ON)
+option(GTA20_BUILD_TESTS "Build unit tests (doctest)" ON)
+option(GTA20_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" ON)
+option(GTA20_SANITIZE "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
+set(GTA20_SDL_PROVIDER "fetch" CACHE STRING "Where SDL3 comes from: fetch (pinned source) or system (find_package)")
+set_property(CACHE GTA20_SDL_PROVIDER PROPERTY STRINGS fetch system)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -32,15 +32,15 @@ add_subdirectory(engine/assets)
 add_subdirectory(engine/sim)
 add_subdirectory(engine/scene)
 add_subdirectory(engine/testing)
-add_subdirectory(apps/g2n-headless)
+add_subdirectory(apps/gta20-headless)
 
-if(G2N_BUILD_APP)
+if(GTA20_BUILD_APP)
     add_subdirectory(engine/platform)
     add_subdirectory(engine/render)
-    add_subdirectory(apps/gta2n)
+    add_subdirectory(apps/gta2)
 endif()
 
-if(G2N_BUILD_TESTS)
+if(GTA20_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests/unit)
     add_subdirectory(tests/conformance)

@@ -1,6 +1,0 @@
-add_executable(gta2n main.cpp)
-target_link_libraries(gta2n PRIVATE g2n::core g2n::assets g2n::sim g2n::scene g2n::render g2n::platform)
-g2n_target_defaults(gta2n)
-if(APPLE)
-    set_target_properties(gta2n PROPERTIES MACOSX_BUNDLE OFF)
-endif()

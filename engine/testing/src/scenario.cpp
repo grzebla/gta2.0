@@ -1,4 +1,4 @@
-#include "g2n/testing/scenario.hpp"
+#include "gta20/testing/scenario.hpp"
 
 #include <array>
 #include <cmath>
@@ -10,7 +10,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace g2n::testing {
+namespace gta20::testing {
 namespace {
 
 using nlohmann::json;
@@ -247,4 +247,4 @@ sim::InputFrame InputTimeline::at(i64 tick) const {
     return {frames_[static_cast<std::size_t>(tick)]};
 }
 
-} // namespace g2n::testing
+} // namespace gta20::testing

@@ -15,13 +15,13 @@
       "name": "asan",
       "inherits": "base",
       "displayName": "Debug + ASan/UBSan (Clang/GCC)",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "G2N_SANITIZE": "ON" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "GTA20_SANITIZE": "ON" }
     },
     {
       "name": "headless",
       "inherits": "base",
       "displayName": "Simulation, assets and tests only - no SDL, no GPU",
-      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "G2N_BUILD_APP": "OFF" }
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release", "GTA20_BUILD_APP": "OFF" }
     }
   ],
   "buildPresets": [

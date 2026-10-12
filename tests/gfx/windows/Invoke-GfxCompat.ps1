@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  OpenGTA2 graphics test orchestrator. Runs as SYSTEM through SSM Run Command.
+  GTA20 graphics test orchestrator. Runs as SYSTEM through SSM Run Command.
 
 .DESCRIPTION
   Mode 'probe'  - bootstrap + environment report only (GPU, driver, sessions, dxdiag).
@@ -18,7 +18,7 @@ param(
     [Parameter(Mandatory)] [ValidatePattern('^[A-Za-z0-9-]{1,64}$')] [string] $RunId,
     [ValidateSet('probe', 'compat', 'e2e')] [string] $Mode = 'compat',
     [ValidatePattern('^(all|[a-z0-9-]+(,[a-z0-9-]+)*)$')] [string] $Cases = 'all',
-    [string] $Root = 'C:\OpenGTA2',
+    [string] $Root = 'C:\GTA20',
     [string] $TestUser = 'gta2runner'
 )
 
@@ -153,7 +153,7 @@ if ($Mode -ne 'probe') {
         if ($missing) { throw "unknown case id(s): $($missing -join ', ')" }
     }
 
-    $taskName = 'OpenGTA2-GfxCase'
+    $taskName = 'GTA20-GfxCase'
     $runner = Join-Path $scriptDir 'Run-Gta2Case.ps1'
     foreach ($c in $selected) {
         $caseDir = Join-Path $resultsDir "cases\$($c.id)"

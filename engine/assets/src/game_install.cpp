@@ -1,13 +1,13 @@
-#include "g2n/assets/game_install.hpp"
+#include "gta20/assets/game_install.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstdlib>
 
-#include "g2n/assets/file_io.hpp"
-#include "g2n/core/byte_reader.hpp"
+#include "gta20/assets/file_io.hpp"
+#include "gta20/core/byte_reader.hpp"
 
-namespace g2n::assets {
+namespace gta20::assets {
 
 std::optional<std::string> pe_file_version(std::span<const std::byte> exe) {
     // VS_FIXEDFILEINFO starts with the signature 0xFEEF04BD, followed by the struct
@@ -57,7 +57,10 @@ Result<GameInstall> inspect_game_dir(const std::filesystem::path& root) {
 }
 
 std::filesystem::path game_dir_from_environment() {
-    const char* value = std::getenv("G2N_GAME_DIR");
+    const char* value = std::getenv("GTA20_GAME_DIR");
+    if (value == nullptr || *value == '\0') {
+        value = std::getenv("G2N_GAME_DIR"); // pre-rename name, still honoured
+    }
     if (value == nullptr || *value == '\0') {
         return {};
     }
@@ -74,4 +77,4 @@ std::filesystem::path game_dir_from_environment() {
     return path;
 }
 
-} // namespace g2n::assets
+} // namespace gta20::assets

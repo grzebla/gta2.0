@@ -23,7 +23,7 @@ New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
-Add-Type -Namespace OpenGta2 -Name Native -MemberDefinition @'
+Add-Type -Namespace Gta20 -Name Native -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool GetWindowRect(System.IntPtr hWnd, out RECT rect);
 [DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr hWnd);
 [DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
@@ -31,7 +31,7 @@ Add-Type -Namespace OpenGta2 -Name Native -MemberDefinition @'
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
 public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 '@
-[OpenGta2.Native]::SetProcessDPIAware() | Out-Null
+[Gta20.Native]::SetProcessDPIAware() | Out-Null
 
 Import-Module (Join-Path $PSScriptRoot 'GfxAnalysis.psm1') -Force
 
@@ -99,7 +99,7 @@ try {
             changedRatio = $diff.ChangedRatio
             sizeChanged  = $diff.SizeChanged
             processAlive = -not $proc.HasExited
-            foreground   = ([OpenGta2.Native]::GetForegroundWindow() -eq $proc.MainWindowHandle)
+            foreground   = ([Gta20.Native]::GetForegroundWindow() -eq $proc.MainWindowHandle)
         }
     }
 
@@ -108,11 +108,11 @@ try {
     if ($proc.HasExited) {
         $result.exitCode = $proc.ExitCode
     } elseif ($proc.MainWindowHandle -ne [IntPtr]::Zero) {
-        $r = New-Object OpenGta2.Native+RECT
-        [OpenGta2.Native]::GetWindowRect($proc.MainWindowHandle, [ref] $r) | Out-Null
+        $r = New-Object Gta20.Native+RECT
+        [Gta20.Native]::GetWindowRect($proc.MainWindowHandle, [ref] $r) | Out-Null
         $result.window = [ordered]@{
             title   = $proc.MainWindowTitle
-            visible = [OpenGta2.Native]::IsWindowVisible($proc.MainWindowHandle)
+            visible = [Gta20.Native]::IsWindowVisible($proc.MainWindowHandle)
             left = $r.Left; top = $r.Top; right = $r.Right; bottom = $r.Bottom
         }
     }

@@ -6,7 +6,7 @@
 set -euo pipefail
 EMAIL="${1:?usage: $0 <alert-email> [monthly-usd]}"
 AMOUNT="${2:-15}"
-NAME="opengta2-gfx-monthly"
+NAME="gta20-gfx-monthly"
 [[ "$AMOUNT" =~ ^[0-9]{1,5}$ ]] || { echo "invalid amount" >&2; exit 1; }
 [[ "$EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+$ ]] || { echo "invalid e-mail" >&2; exit 1; }
 

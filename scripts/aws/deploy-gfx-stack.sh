@@ -22,7 +22,7 @@ aws cloudformation deploy --stack-name "$GFX_STACK" \
   --template-file infra/aws/gfx-test-stack.yaml \
   --capabilities CAPABILITY_IAM \
   --parameter-overrides "VpcId=$vpc" "SubnetId=$subnet" \
-  --tags Project=OpenGTA2
+  --tags Project=GTA20
 
 instance=$(stack_output "$GFX_STACK" InstanceId)
 bucket=$(stack_output "$GFX_STACK" ArtifactsBucketName)

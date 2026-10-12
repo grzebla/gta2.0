@@ -3,15 +3,15 @@
 #include <array>
 #include <set>
 
-#include "g2n/core/angle.hpp"
-#include "g2n/core/byte_reader.hpp"
-#include "g2n/core/camera2d.hpp"
-#include "g2n/core/clock.hpp"
-#include "g2n/core/diagnostics.hpp"
-#include "g2n/core/handle_pool.hpp"
-#include "g2n/core/rng.hpp"
+#include "gta20/core/angle.hpp"
+#include "gta20/core/byte_reader.hpp"
+#include "gta20/core/camera2d.hpp"
+#include "gta20/core/clock.hpp"
+#include "gta20/core/diagnostics.hpp"
+#include "gta20/core/handle_pool.hpp"
+#include "gta20/core/rng.hpp"
 
-using namespace g2n;
+using namespace gta20;
 
 TEST_CASE("Fixed: exact Q16.16 arithmetic") {
     const Fixed a = Fixed::from_ratio(3, 2);

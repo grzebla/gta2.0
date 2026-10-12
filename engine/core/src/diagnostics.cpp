@@ -1,4 +1,4 @@
-#include "g2n/core/diagnostics.hpp"
+#include "gta20/core/diagnostics.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -13,7 +13,7 @@
 #include <sys/resource.h>
 #endif
 
-namespace g2n {
+namespace gta20 {
 
 u64 peak_rss_bytes() {
 #if defined(_WIN32)
@@ -53,4 +53,4 @@ DurationStats summarize(std::vector<u64> samples_ns) {
     return s;
 }
 
-} // namespace g2n
+} // namespace gta20

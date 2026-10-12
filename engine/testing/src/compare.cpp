@@ -1,4 +1,4 @@
-#include "g2n/testing/compare.hpp"
+#include "gta20/testing/compare.hpp"
 
 #include <algorithm>
 #include <map>
@@ -8,7 +8,7 @@
 
 #include <nlohmann/json.hpp>
 
-namespace g2n::testing {
+namespace gta20::testing {
 namespace {
 
 void compare_headers(const TraceHeader& e, const TraceHeader& a, std::vector<Divergence>& out) {
@@ -263,4 +263,4 @@ std::string report_to_json(const ComparisonReport& r) {
     return j.dump(2);
 }
 
-} // namespace g2n::testing
+} // namespace gta20::testing

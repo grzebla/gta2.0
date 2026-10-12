@@ -1,9 +1,9 @@
-#include "g2n/assets/gmp_map.hpp"
+#include "gta20/assets/gmp_map.hpp"
 
-#include "g2n/assets/chunk_file.hpp"
-#include "g2n/core/byte_reader.hpp"
+#include "gta20/assets/chunk_file.hpp"
+#include "gta20/core/byte_reader.hpp"
 
-namespace g2n::assets {
+namespace gta20::assets {
 namespace {
 
 BlockInfo read_block(ByteReader& r) {
@@ -184,4 +184,4 @@ Result<GmpMap> parse_gmp(std::span<const std::byte> bytes, MapEncoding preferred
     return map;
 }
 
-} // namespace g2n::assets
+} // namespace gta20::assets

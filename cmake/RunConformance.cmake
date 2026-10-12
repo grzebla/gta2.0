@@ -13,7 +13,7 @@ if(MODE STREQUAL "determinism")
     endif()
 else()
     if(NOT EXISTS ${GOLDEN})
-        message(FATAL_ERROR "missing golden trace ${GOLDEN} (generate with: g2n-headless run <scenario> --out <golden>)")
+        message(FATAL_ERROR "missing golden trace ${GOLDEN} (generate with: gta20-headless run <scenario> --out <golden>)")
     endif()
     execute_process(COMMAND ${HEADLESS} compare ${GOLDEN} ${WORK}/a.jsonl --scenario ${SCENARIO}
                             --markdown ${WORK}/report.md --json ${WORK}/report.json
