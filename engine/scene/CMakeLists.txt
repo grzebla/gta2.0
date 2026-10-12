@@ -1,5 +1,6 @@
 # Render-API-independent draw lists: testable without SDL or a GPU.
 add_library(gta20_scene
+    src/block_geometry.cpp
     src/draw_list.cpp)
 add_library(gta20::scene ALIAS gta20_scene)
 target_include_directories(gta20_scene PUBLIC include)
