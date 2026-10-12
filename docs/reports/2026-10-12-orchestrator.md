@@ -133,3 +133,32 @@ Koszty i ryzyka do akceptacji:
 - zużycie limitów subskrypcji Claude i ChatGPT;
 - minuty GitHub Actions (push gałęzi integracyjnej najwyżej co 6 h);
 - praca tylko przy zalogowanym, nieuśpionym Macu.
+
+## 9. Dodatek (2026-10-13): Gatekeeper — ostateczne review i merge
+
+Na prośbę właściciela dodano trzeciego agenta. **Gatekeeper** (`gpt-6.1-sol`, model sprawdzony
+na żywo; inny niż Astra) ocenia całe PR-y do `main` i scala je przez Orchestrator. Merge jest
+możliwy dopiero po twardych bramkach: zielone CI na sprawdzanym commicie, scalalność, brak danych
+gry i sekretów, w PR agentów wyłącznie praca zatwierdzona przez Astrę, dzienny limit. Szczegóły:
+`tools/orchestrator/README.md`.
+
+| Co | Stan |
+|---|---|
+| Bramki na prawdziwych PR | **na żywo**: #2 przechodzi; #3–#6 czekają (stos) |
+| Review modelu na prawdziwym PR #2 | **na żywo, dry run** (5,5 min, niczego nie scalono) |
+| Merge, przepinanie stosu, zadania naprawcze i uzupełniające, limity | atrapy GitHuba z prawdziwymi merge w lokalnym `origin` (13 testów) |
+| Merge na GitHubie | **nie wykonano**; zrobi to pętla po `start` albo `release run` |
+
+Werdykt dry run dla PR #2: `REQUEST_CHANGES` z jednym blokerem.
+`tests/scripts/ec2-gpu-session.test.sh` kasuje wszystkie `gfx-results/local-*`, czyli także
+wyniki prawdziwych uruchomień operatora. Bloker potwierdzony w kodzie. Cztery uwagi „major”
+(framework porównań: `inf` w tolerancji, duplikaty encji, pochodzenie śladów; brak kontroli NULL
+w rendererze) staną się zadaniami po scaleniu.
+
+Pierwsza wersja promptu stosowała politykę agentów do PR-ów właściciela (blokowała np. narzędzia
+AWS). Zakres został doprecyzowany i zweryfikowany ponownym przebiegiem.
+
+Błąd znaleziony przy testach i naprawiony: test `resume` na tymczasowym repo uruchomił prawdziwy
+LaunchAgent. Demon zobaczył `STOPPED` i zakończył się bez skutków (3 starty, zero wywołań
+agentów). Usługę może teraz włączyć tylko repo, którego dotyczy plist, a testy blokują
+`launchctl`.

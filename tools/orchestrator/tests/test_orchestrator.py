@@ -15,6 +15,7 @@ import time
 import unittest
 from pathlib import Path
 
+os.environ["GTA20_NO_LAUNCHD"] = "1"  # tests must never touch the real LaunchAgent
 HERE = Path(__file__).resolve().parent
 PKG_ROOT = HERE.parent
 sys.path.insert(0, str(PKG_ROOT))
@@ -307,6 +308,164 @@ class SimulationTests(SimCase):
         self.assertEqual(cli_main(["--repo", repo, "status", "--json"]), 0)
         self.assertEqual(cli_main(["--repo", repo, "report"]), 0)
         self.assertTrue((self.env.cfg.state_dir / "report.html").exists())
+
+
+# ------------------------------------------------------------------------------- Gatekeeper
+class GatekeeperTests(SimCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.env.cfg.data["release"]["every_s"] = 10 ** 9  # only explicit steps in these tests
+
+    def _integration_pr(self, port, **kw) -> None:
+        port.add_pr(6, "agents/integration", "main", draft=True, **kw)
+
+    def test_merges_approved_integration_pr(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.finish_one_task(self.env, orch)
+        self._integration_pr(port)
+        called, msg = orch.gatekeeper.step()
+        self.assertTrue(called)
+        self.assertIn("MERGED", msg)
+        self.assertEqual(port.merged, [6])
+        main_log = subprocess.run(["git", "log", "--format=%s", "origin/main"], cwd=self.env.repo,
+                                  capture_output=True, text=True)
+        subprocess.run(["git", "fetch", "-q", "origin"], cwd=self.env.repo)
+        main_log = subprocess.run(["git", "log", "--format=%s", "origin/main"], cwd=self.env.repo,
+                                  capture_output=True, text=True).stdout
+        self.assertIn("[T0001] simulated change", main_log)
+        self.assertEqual(self.env.db.decisions(1)[0]["decision"], "GATEKEEPER_MERGE")
+        self.assertIn("Gatekeeper MERGED PR #6",
+                      (self.env.cfg.worktree("integration") / "docs/agent-memory/DECISIONS.md").read_text())
+        self.assertTrue(gk.calls[0]["cwd"].endswith("/wt/release"))
+
+    def test_red_ci_creates_fix_task_without_model_call(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.finish_one_task(self.env, orch)
+        self._integration_pr(port, checks="fail")
+        called, msg = orch.gatekeeper.step()
+        self.assertFalse(called)
+        self.assertEqual(gk.calls, [])
+        fix = [t for t in self.env.db.tasks() if t["created_by"] == "gatekeeper"]
+        self.assertEqual(len(fix), 1)
+        self.assertEqual((fix[0]["status"], fix[0]["priority"]), ("READY", 0))
+        orch.gatekeeper.step()  # same head: no duplicate task
+        self.assertEqual(len([t for t in self.env.db.tasks() if t["created_by"] == "gatekeeper"]), 1)
+        self.assertEqual(port.merged, [])
+
+    def test_pending_ci_holds(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.finish_one_task(self.env, orch)
+        self._integration_pr(port, checks="pending")
+        called, msg = orch.gatekeeper.step()
+        self.assertFalse(called)
+        self.assertEqual(port.merged, [])
+        self.assertEqual(gk.calls, [])
+
+    def test_unapproved_commit_on_integration_blocks_merge(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.finish_one_task(self.env, orch)
+        wt = self.env.cfg.worktree("integration")
+        (wt / "sneaky.txt").write_text("not reviewed\n")
+        subprocess.run(["git", "add", "-A"], cwd=wt, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "sneak in a change"], cwd=wt, check=True)
+        subprocess.run(["git", "push", "-q", "origin", "agents/integration"], cwd=wt, check=True)
+        self._integration_pr(port)
+        called, msg = orch.gatekeeper.step()
+        self.assertFalse(called)
+        self.assertIn("GATES_FAILED", msg)
+        self.assertEqual(port.merged, [])
+
+    def test_model_merge_cannot_override_game_data_gate(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.human_branch(self.env, "feat-data")
+        wt = self.env.tmp / "h-feat-data"
+        (wt / "wil.gmp").write_bytes(b"GBMP")
+        subprocess.run(["git", "add", "-A"], cwd=wt, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "oops"], cwd=wt, check=True)
+        subprocess.run(["git", "push", "-q", "origin", "feat-data"], cwd=wt, check=True)
+        port.add_pr(9, "feat-data", "main")
+        called, msg = orch.gatekeeper.step()
+        self.assertFalse(called)
+        self.assertEqual(port.merged, [])
+        self.assertEqual(port.comments[0][0], 9)
+
+    def test_stack_is_merged_bottom_up_and_retargeted(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.human_branch(self.env, "feat-a")
+        sim.human_branch(self.env, "feat-b", start="feat-a")
+        port.add_pr(2, "feat-a", "main")
+        port.add_pr(3, "feat-b", "feat-a")
+        self.assertIn("MERGED", orch.gatekeeper.step()[1])
+        self.assertEqual(port.retargets, [(3, "main")])
+        self.assertIn("MERGED", orch.gatekeeper.step()[1])
+        self.assertEqual(port.merged, [2, 3])
+
+    def test_skips_labels_drafts_and_foreign_authors(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.human_branch(self.env, "feat-l")
+        sim.human_branch(self.env, "feat-d")
+        sim.human_branch(self.env, "feat-f")
+        port.add_pr(4, "feat-l", "main", labels=["do-not-merge"])
+        port.add_pr(5, "feat-d", "main", draft=True)
+        port.add_pr(7, "feat-f", "main", author="someone-else")
+        called, msg = orch.gatekeeper.step()
+        self.assertEqual((called, msg), (False, ""))
+        self.assertEqual(port.merged, [])
+        reasons = dict(json.loads(self.env.db.get_meta("gatekeeper_skipped")))
+        self.assertIn("label", reasons["4"] if "4" in reasons else reasons[4])
+
+    def test_request_changes_comments_once_per_head(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env, decisions=["REQUEST_CHANGES", "MERGE"])
+        sim.human_branch(self.env, "feat-r")
+        port.add_pr(8, "feat-r", "main")
+        orch.gatekeeper.step()
+        orch.gatekeeper.step()  # same head: not reviewed again
+        self.assertEqual(len(gk.calls), 1)
+        self.assertEqual(len(port.comments), 1)
+        self.assertEqual(port.merged, [])
+
+    def test_dry_run_never_merges(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.human_branch(self.env, "feat-y")
+        port.add_pr(11, "feat-y", "main")
+        called, msg = orch.gatekeeper.step(dry_run=True)
+        self.assertTrue(called)
+        self.assertIn("dry run", msg)
+        self.assertEqual(port.merged, [])
+
+    def test_daily_merge_cap(self) -> None:
+        self.env.cfg.data["release"]["max_merges_per_day"] = 1
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.human_branch(self.env, "feat-1")
+        sim.human_branch(self.env, "feat-2")
+        port.add_pr(12, "feat-1", "main")
+        port.add_pr(13, "feat-2", "main")
+        orch.gatekeeper.step()
+        orch.gatekeeper.step()
+        self.assertEqual(port.merged, [12])
+
+    def test_merge_with_major_findings_creates_follow_up_task(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env, decisions=["MERGE_WITH_FINDINGS"])
+        sim.human_branch(self.env, "feat-m")
+        port.add_pr(15, "feat-m", "main")
+        self.assertIn("MERGED", orch.gatekeeper.step()[1])
+        follow = [t for t in self.env.db.tasks() if t["created_by"] == "gatekeeper"]
+        self.assertEqual(len(follow), 1)
+        self.assertIn("PR #15", follow[0]["title"])
+
+    def test_never_manages_foreign_launch_agent(self) -> None:
+        from gta20_orchestrator import service
+        self.assertFalse(service.manages(self.env.repo))
+        with self.assertRaises(SystemExit):
+            service.enable()
+
+    def test_loop_runs_gatekeeper_when_due(self) -> None:
+        self.env.cfg.data["release"]["every_s"] = 0
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.human_branch(self.env, "feat-z")
+        port.add_pr(14, "feat-z", "main")
+        orch.setup()
+        self.assertIn("gatekeeper: PR #14: MERGED", orch.step())
 
 
 # ------------------------------------------------------------------------------- stage D

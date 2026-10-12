@@ -54,6 +54,26 @@ DEFAULTS: Dict[str, Any] = {
             "files.pythonhosted.org",
         ],
     },
+    # Gatekeeper: final independent review + merge. A different model than Astra on purpose.
+    "gatekeeper": {
+        "agent": "codex",
+        "command": "codex",
+        "model": "gpt-6.1-sol",
+        "reasoning_effort": "high",
+        "timeout_s": 2400,
+        "codex_home": "~/.codex",
+    },
+    "release": {
+        "enabled": True,
+        "target_branch": "main",
+        "merge_method": "merge",          # merge commit: history is never rewritten
+        "every_s": 3 * 3600,              # how often the loop looks at open PRs
+        "max_merges_per_day": 6,
+        "min_checks": 3,
+        "eligible": "owner_and_integration",  # or "integration_only"
+        "skip_labels": ["do-not-merge", "hold", "wip"],
+        "max_diff_chars": 80000,
+    },
     "limits": {
         "max_attempts_per_task": 3,
         "max_agent_failures_per_task": 3,

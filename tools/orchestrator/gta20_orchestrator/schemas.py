@@ -76,3 +76,16 @@ CLAUDE_REPORT = _obj({
     "unresolved": STRS,
     "questions_for_astra": STRS,
 })
+
+GATEKEEPER_REVIEW = _obj({
+    "decision": {"type": "string", "enum": ["MERGE", "REQUEST_CHANGES", "HOLD", "NEEDS_HUMAN"]},
+    "rationale": STR,
+    "findings": {"type": "array", "items": _obj({
+        "severity": {"type": "string", "enum": ["blocker", "major", "minor"]},
+        "file": STR,
+        "issue": STR,
+    })},
+    "merge_subject": STR,
+    "changelog": NSTR,
+    "human_question": NSTR,
+})

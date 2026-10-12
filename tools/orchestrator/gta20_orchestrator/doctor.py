@@ -84,6 +84,11 @@ def live_checks(cfg: Config) -> List[Result]:
         r.append(("OK", "Astra live call", "model verified from rollout: %s" % info["model"]))
     except AgentError as exc:
         r.append(("FAIL", "Astra live call", str(exc)[:300]))
+    try:
+        info = CodexAgent(cfg["gatekeeper"]).probe(tmp / "gatekeeper")
+        r.append(("OK", "Gatekeeper live call", "model verified from rollout: %s" % info["model"]))
+    except AgentError as exc:
+        r.append(("FAIL", "Gatekeeper live call", str(exc)[:300]))
     claude = ClaudeAgent(cfg["claude"])
     try:
         info = claude.probe(tmp / "claude")

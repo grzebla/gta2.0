@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from . import __version__
 
@@ -76,9 +76,28 @@ def install(repo: Path, state_dir: Path, source_pkg: Path, git_sha: str) -> Dict
     return {"installed": str(target), "launcher": str(LAUNCHER), "plist": str(PLIST)}
 
 
+def installed_repo() -> Optional[Path]:
+    """Repository the installed LaunchAgent supervises (from its --repo argument)."""
+    try:
+        args = plistlib.loads(PLIST.read_bytes()).get("ProgramArguments", [])
+        return Path(args[args.index("--repo") + 1]).resolve()
+    except (OSError, ValueError, IndexError, plistlib.InvalidFileException):
+        return None
+
+
+def manages(repo: Path) -> bool:
+    """True only when the installed service belongs to this repository and launchd use is allowed
+    (tests set GTA20_NO_LAUNCHD=1 so they can never touch the real service)."""
+    if os.environ.get("GTA20_NO_LAUNCHD") == "1" or not PLIST.exists():
+        return False
+    return installed_repo() == Path(repo).resolve()
+
+
 def enable() -> List[str]:
     """Load the LaunchAgent (starts it now and at every login)."""
     msgs = []
+    if os.environ.get("GTA20_NO_LAUNCHD") == "1":
+        raise SystemExit("launchd use disabled (GTA20_NO_LAUNCHD=1)")
     if not PLIST.exists():
         raise SystemExit("service not installed: run `gta20-orchestrator service install` first")
     if loaded():

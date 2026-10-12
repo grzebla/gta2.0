@@ -71,6 +71,14 @@ def make_agents(cfg: Config):
     return CodexAgent(cfg["astra"]), ClaudeAgent(cfg["claude"])
 
 
+def make_gatekeeper(cfg: Config):
+    from .adapters.codex import CodexAgent
+    from .github import GitHubPort
+    agent = CodexAgent(cfg["gatekeeper"])
+    agent.name = "gatekeeper"
+    return agent, GitHubPort(cfg["github_repo"])
+
+
 def open_db(cfg: Config) -> D.Database:
     database = D.Database(cfg.state_dir)
     gi = cfg.repo_root / ".gitignore"
@@ -95,7 +103,8 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         print(json.dumps(snap, indent=1, ensure_ascii=False))
     else:
         print(report.format_status(snap, pid))
-        print("  service:           %s" % ("loaded" if service.loaded() else "not loaded"))
+        print("  service:           %s" % (("loaded" if service.loaded() else "not loaded")
+                                            if service.manages(cfg.repo_root) else "not installed for this repo"))
         print("  report:            %s" % (cfg.state_dir / "report.md"))
     return 0
 
@@ -132,10 +141,12 @@ def run_loop(cfg: Config, *, max_steps: Optional[int], daemon: bool, fake: bool 
             spec = json.loads(Path(fake_spec).read_text()) if fake_spec else {}
             astra = FakeAstra(plans=spec.get("astra_plans"), reviews=spec.get("astra_reviews"))
             claude = FakeClaude(script=spec.get("claude_script"))
+            gk_agent, port = None, None  # the Gatekeeper never runs against fakes outside the sim
             logging.warning("using FAKE agents (%s)", fake_spec or "default")
         else:
             astra, claude = make_agents(cfg)
-        orch = Orchestrator(cfg, database, astra, claude)
+            gk_agent, port = make_gatekeeper(cfg)
+        orch = Orchestrator(cfg, database, astra, claude, gatekeeper=gk_agent, github_port=port)
         install_signal_handlers(orch)
         result = orch.run(max_steps=max_steps, on_step=lambda: report.write(database, cfg.state_dir))
         report.write(database, cfg.state_dir)
@@ -156,8 +167,8 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     if args.foreground or args.max_steps is not None:
         setup_logging(cfg.state_dir, args.verbose)
         return run_loop(cfg, max_steps=args.max_steps, daemon=False)
-    if not service.PLIST.exists():
-        print("LaunchAgent not installed. Use `service install` first, or `start --foreground`.")
+    if not service.manages(cfg.repo_root):
+        print("No LaunchAgent installed for this repository. Use `service install` first, or `start --foreground`.")
         return 1
     for msg in service.enable():
         print(msg)
@@ -184,7 +195,7 @@ def cmd_resume(cfg: Config, args: argparse.Namespace) -> int:
             database.set_meta("loop_reason", "resumed by the owner")
         database.set_meta("start_times", "[]")
     set_desired(database, RUNNING, "resume")
-    if not report.daemon_pid(cfg.state_dir) and service.PLIST.exists():
+    if not report.daemon_pid(cfg.state_dir) and service.manages(cfg.repo_root):
         for msg in service.enable():
             print(msg)
     print("resumed")
@@ -202,7 +213,7 @@ def cmd_stop(cfg: Config, args: argparse.Namespace) -> int:
         print("stop requested: the daemon stops the current agent call and exits (state is checkpointed)")
     else:
         print("stopped (no daemon running)")
-    if args.unload:
+    if args.unload and service.manages(cfg.repo_root):
         print(service.disable())
     return 0
 
@@ -348,6 +359,37 @@ def cmd_service(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_release(cfg: Config, args: argparse.Namespace) -> int:
+    """Gatekeeper by hand: `status` (gates only, no model), `review` (model review, never merges),
+    `run` (review and merge when everything passes)."""
+    from .release import Gatekeeper
+    database = open_db(cfg)
+    astra, claude = make_agents(cfg)
+    gk_agent, port = make_gatekeeper(cfg)
+    orch = Orchestrator(cfg, database, astra, claude, gatekeeper=gk_agent, github_port=port)
+    gk = Gatekeeper(orch, gk_agent, port)
+    # A manual run is independent of the daemon's desired state; Ctrl-C still stops it cleanly.
+    orch.agent_should_stop = lambda: orch.stop_requested
+    install_signal_handlers(orch)
+    if args.action == "status":
+        for line in gk.status_lines():
+            print(line)
+        return 0
+    lock = Lock(cfg.state_dir)
+    if not lock.acquire():
+        print("the orchestrator daemon is running; it runs the Gatekeeper itself (or stop it first)")
+        return 1
+    try:
+        setup_logging(cfg.state_dir, args.verbose)
+        orch.setup()
+        called, msg = gk.step(dry_run=args.action == "review", only_pr=args.pr)
+        print(msg or "nothing to review (see `release status`)")
+        report.write(database, cfg.state_dir)
+        return 0
+    finally:
+        lock.release()
+
+
 def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
     from . import doctor
     return doctor.run(cfg, live=args.live)
@@ -406,6 +448,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("service", help="launchd LaunchAgent")
     s.add_argument("action", choices=["install", "uninstall", "status"])
     s.set_defaults(fn=cmd_service)
+    s = sub.add_parser("release", help="Gatekeeper: final review and merge of PRs")
+    s.add_argument("action", choices=["status", "review", "run"])
+    s.add_argument("--pr", type=int)
+    s.set_defaults(fn=cmd_release)
     s = sub.add_parser("simulate", help="run the loop against scripted fake agents in a temp repo")
     s.add_argument("scenario", nargs="?", default="all")
     s.add_argument("--keep", action="store_true")

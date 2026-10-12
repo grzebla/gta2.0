@@ -172,3 +172,92 @@ def fake_plan(milestone_id: str, titles: List[str], depends: Optional[Dict[int, 
         "tasks": tasks, "cancel_tasks": [], "memory_updates": empty_memory(), "needs_human": None,
         "release_candidate": False,
     }
+
+
+class FakeGatekeeper:
+    name = "gatekeeper"
+
+    def __init__(self, decisions: Optional[List[str]] = None, default: str = "MERGE"):
+        self.decisions = list(decisions or [])
+        self.default = default
+        self.calls: List[Dict[str, Any]] = []
+
+    def run(self, *, kind: str, prompt: str, cwd: Path, run_dir: Path, schema: Any, should_stop: Any,
+            **_: Any) -> AgentResult:
+        self.calls.append({"kind": kind, "cwd": str(cwd)})
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "prompt.md").write_text(prompt)
+        d = self.decisions.pop(0) if self.decisions else self.default
+        with_findings = d == "MERGE_WITH_FINDINGS"
+        d = "MERGE" if with_findings else d
+        if d == "quota":
+            raise QuotaExceeded("codex usage limit", reset_at=time.time() + 1)
+        out = {"decision": d, "rationale": "simulated %s" % d,
+               "findings": [] if (d == "MERGE" and not with_findings) else [{"severity": "major", "file": "x",
+                                                                              "issue": "simulated"}],
+               "merge_subject": "Merge simulated", "changelog": "simulated merge" if d == "MERGE" else None,
+               "human_question": "simulated?" if d == "NEEDS_HUMAN" else None}
+        return AgentResult(session_id="fake-gk-%s" % uuid.uuid4().hex[:6], model="fake-gatekeeper", output=out)
+
+    def probe(self, run_dir: Path) -> Dict[str, Any]:
+        return {"ok": True, "checked_at": time.time()}
+
+
+class FakeGitHub:
+    """In-memory PRs over a local bare origin. merge() really merges into the target on origin."""
+
+    def __init__(self, repo: Path, owner: str = "grzebla"):
+        self.repo = repo
+        self.owner = owner
+        self.prs: Dict[int, Dict[str, Any]] = {}
+        self.checks_by_pr: Dict[int, List[Dict[str, Any]]] = {}
+        self.merged: List[int] = []
+        self.comments: List[tuple] = []
+        self.retargets: List[tuple] = []
+
+    def add_pr(self, number: int, head: str, base: str = "main", *, draft: bool = False, author: Optional[str] = None,
+               checks: str = "pass", labels: Optional[List[str]] = None) -> None:
+        _git(self.repo, "fetch", "-q", "origin")
+        self.prs[number] = {"number": number, "title": "PR %d" % number, "body": "", "url": "sim://%d" % number,
+                            "headRefName": head, "baseRefName": base,
+                            "headRefOid": _git(self.repo, "rev-parse", "origin/" + head), "isDraft": draft,
+                            "mergeable": "MERGEABLE", "mergeStateStatus": "DRAFT" if draft else "CLEAN",
+                            "labels": [{"name": l} for l in labels or []], "author": {"login": author or self.owner}}
+        self.set_checks(number, checks)
+
+    def set_checks(self, number: int, bucket: str) -> None:
+        self.checks_by_pr[number] = [{"name": "ci-%d" % i, "bucket": bucket, "state": bucket, "workflow": "native-ci"}
+                                     for i in range(3)]
+
+    def open_prs(self) -> List[Dict[str, Any]]:
+        return [dict(p) for n, p in sorted(self.prs.items()) if n not in self.merged]
+
+    def checks(self, number: int) -> List[Dict[str, Any]]:
+        return self.checks_by_pr.get(number, [])
+
+    def mark_ready(self, number: int) -> bool:
+        self.prs[number]["isDraft"] = False
+        return True
+
+    def merge(self, number: int, head_sha: str, method: str, subject: str) -> tuple:
+        pr = self.prs[number]
+        if pr["headRefOid"] != head_sha or pr["isDraft"]:
+            return False, "head mismatch or draft"
+        tmp = self.repo.parent / ("merge-%d" % number)
+        _git(self.repo.parent, "clone", "-q", str(self.repo.parent / "origin.git"), str(tmp))
+        _git(tmp, "config", "user.email", "sim@example.invalid")
+        _git(tmp, "config", "user.name", "sim")
+        _git(tmp, "checkout", "-q", pr["baseRefName"])
+        _git(tmp, "merge", "-q", "--no-ff", "-m", subject, head_sha)
+        _git(tmp, "push", "-q", "origin", pr["baseRefName"])
+        self.merged.append(number)
+        return True, "merged"
+
+    def retarget(self, number: int, base: str) -> bool:
+        self.prs[number]["baseRefName"] = base
+        self.retargets.append((number, base))
+        return True
+
+    def comment(self, number: int, body: str) -> bool:
+        self.comments.append((number, body))
+        return True

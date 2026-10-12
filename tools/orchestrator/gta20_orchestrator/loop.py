@@ -48,7 +48,7 @@ class Halt(Exception):
 
 class Orchestrator:
     def __init__(self, cfg: Any, database: D.Database, astra: Any, claude: Any, *, use_github: bool = True,
-                 sleep: Callable[[float], None] = time.sleep):
+                 sleep: Callable[[float], None] = time.sleep, gatekeeper: Any = None, github_port: Any = None):
         self.cfg = cfg
         self.db = database
         self.astra = astra
@@ -63,6 +63,10 @@ class Orchestrator:
         self.wt_int = cfg.worktree("integration")
         self.runs_dir = cfg.state_dir / "runs"
         self.tools_dir: Optional[Path] = None
+        self.gatekeeper = None
+        if gatekeeper is not None and github_port is not None and cfg["release"].get("enabled", True):
+            from .release import Gatekeeper
+            self.gatekeeper = Gatekeeper(self, gatekeeper, github_port)
 
     # ------------------------------------------------------------------ control helpers
     def request_stop(self, *_: Any) -> None:
@@ -247,7 +251,7 @@ class Orchestrator:
 
     def quota_text(self) -> str:
         out = []
-        for name in ("astra", "claude"):
+        for name in ("astra", "claude", "gatekeeper"):
             row = self.db.quota(name)
             if row:
                 out.append("- %s: %s reset=%s" % (name, row["state"], local_time(row["reset_at"]) if row["reset_at"] else "-"))
@@ -274,9 +278,19 @@ class Orchestrator:
         return sha
 
     # ------------------------------------------------------------------ step
+    def release_due(self) -> bool:
+        if self.gatekeeper is None:
+            return False
+        last = float(self.db.get_meta("gatekeeper_last_check", "0") or 0)
+        return now() - last >= float(self.cfg["release"]["every_s"])
+
     def step(self) -> str:
         self.daily_cap()
         task = self.db.active_task()
+        if task is None and self.release_due():
+            called, msg = self.gatekeeper.step()
+            if msg:
+                return "gatekeeper: " + msg
         if task is None:
             done = self.db.count_tasks(D.DONE)
             last = int(self.db.get_meta("arch_review_at_done", "0") or 0)
@@ -590,15 +604,26 @@ class Orchestrator:
                 pr_url = pr.get("url")
             else:
                 pr_url = github.create_draft_pr(
-                    self.cfg["github_repo"], integ, self.cfg["base_branch"],
+                    self.cfg["github_repo"], integ, self.pr_base(),
                     "Agents: integration branch (Astra-approved tasks)",
-                    "Work approved by Astra and integrated by the GTA2.0 orchestrator. Draft: the human "
-                    "owner reviews and merges.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)")
+                    "Work approved by Astra and integrated by the GTA2.0 orchestrator. The Gatekeeper "
+                    "(final independent review) merges it once CI is green and every gate passes; label "
+                    "`do-not-merge` to stop that.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)")
         with self.db.tx():
             self.db.set_meta("last_push_at", str(now()))
             self.db.event("pushed", agent="orchestrator", commits=[gitops.rev(self.wt_int)], outcome=integ,
                           detail={"pr": pr_url})
         return True
+
+    def pr_base(self) -> str:
+        """The configured base until it has been merged into the release target, then the target."""
+        base, target, remote = self.cfg["base_branch"], self.cfg["release"]["target_branch"], self.cfg["remote"]
+        try:
+            gitops.git(self.repo, "fetch", "--quiet", remote)
+            gitops.git(self.repo, "merge-base", "--is-ancestor", "%s/%s" % (remote, base), "%s/%s" % (remote, target))
+            return target
+        except gitops.GitError:
+            return base
 
     # ------------------------------------------------------------------ main loop
     def sleep_until(self, until: float) -> None:
