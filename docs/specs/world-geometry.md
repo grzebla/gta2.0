@@ -37,7 +37,7 @@ Dwa dodatkowe oznaczenia, które **nie** są dowodem zachowania oryginału:
 | Testy T0001 | `tests/unit/scene_tests.cpp:135-255` | [A] | kod spełnia kontrakt T0001 (płaszczyzny, nawinięcie, translacja, wspólne krawędzie). Oczekiwania są **syntetyczne** (`scene_tests.cpp:39-40`), wyprowadzone z kontraktu, nie z oryginału. |
 | Osie mapy | `tests/unit/gamedata_tests.cpp:141-174` | [A] | Tylko `wil.gmp`, tylko komórki wewnętrzne x, y ∈ 1..254 (`:157-158`), wszystkie z = 0..7 (`:156`). Liczone są słowa `left`/`right`/`top`/`bottom` z bitem `wall` i kaflem ≠ 0 (`:162`). Sąsiad na tym samym z w kierunku `−x`/`+x`/`−y`/`+y` jest „otwarty”, gdy `!solid(...)`, gdzie `solid` = pokrywa ≠ 0 **lub** dowolna ściana boczna z bitem `wall` (`:58-60`) — „otwarty” nie znaczy „pusty” (np. blok bez pokrywy z kaflami ścian bez bitu `wall` jest otwarty, a blok drogi z pokrywą nie). Asercje (`:170-172`): > 1000 takich ścian na stronę, otwarty sąsiad w kierunku dokumentu w > 75 %, w kierunku zamienionych osi (`left`→`y−1`, `right`→`y+1`, `top`→`x−1`, `bottom`→`x+1`, `:153`) w < 35 %. Liczby 84–86 % / ~20 % (`gmp.md:24-25`, komentarz `gamedata_tests.cpp:143`) to [D]. |
 | Kafle zarezerwowane | `tests/unit/gamedata_tests.cpp:96-111`, `:214-233` | [A] | Wszystko liczone po **unikalnych rekordach bloków** (`unique_blocks()`, `:98`, `:224`), nie po komórkach mapy — bez ważenia liczbą użyć. W `wil`/`ste`/`bil` żaden rekord nie ma ściany bocznej z kaflem ≥ 992 (`:101`); każdy kafel ścian i pokryw jest < `tile_count` stylu (= 992) albo = 1023 (`:227`); wśród rekordów z pokrywą 1023 co najmniej 95 % ma skos 49–52 (`:104-110`, osobno dla każdego miasta). Mapy `mike1*` i pozostałe nie są tym objęte. |
-| 98,8 % / 992–1022 tylko w `mike1*` | `docs/formats/gmp.md:28-30` | [D] | Brak testu, który to powtarza. `gmp.md` nie zapisuje mianownika; jedyną powtarzalną metodą w repo jest liczenie po unikalnych rekordach bloków (wiersz wyżej), więc 98,8 % należy czytać jako odsetek rekordów, nie komórek mapy. |
+| 98,8 % / 992–1022 tylko w `mike1*` | `docs/formats/gmp.md:28-30` | [D] | Brak testu, który to powtarza. **Mianownik 98,8 % jest nieznany**: `gmp.md` go nie zapisuje, a metoda obecnego testu (unikalne rekordy) nie mówi, jak liczono wcześniejszy pomiar (rekordy czy komórki mapy). Zweryfikowane jest tylko ≥ 95 % po unikalnych rekordach z wiersza wyżej. |
 | CMAP | `tests/unit/gamedata_tests.cpp:121-139` | [A] | tylko `wil.gmp` i `mike1m.gmp`: oba chunki się dekodują, a DMAP ma **więcej unikalnych bloków** niż CMAP. Test **nie** porównuje komórek; „inna, starsza wersja miasta” i „inne pokrywy” (`gmp.md:17`, `:27`) to [D]. |
 | Układ kolumn DMAP 100 % | `docs/formats/gmp.md:16`, `:23` | [D] | parser przechodzi na 17 mapach (`gamedata_tests.cpp:77-90`), ale przyleganie kolumn nie jest asercją. |
 | Orientacja pokryw, obrót, odbicie | `docs/formats/gmp.md:31-32`, `docs/reports/2026-10-12-original-assets.md` (sekcja 6–7) | [W] | zrzuty **naszego** silnika (lokalnie `~/Games/GTA2-work/review/*.png`, opisane w lokalnym `REPORT.md`): pasy ciągłe, napisy „SLOW” nieodbite. To nie są zrzuty oryginału ani porównanie automatyczne. |
@@ -207,8 +207,10 @@ gdzie `c` to punkt główny (piksele), `f` ogniskowa (piksele), `w` szerokość 
 poziomu w jednostkach świata, `H` wysokość kamery w tych samych jednostkach.
 
 **Co jest obserwowalne, a co nie.** Obraz zależy tylko od `K`, `r` i `c`. Wielkości `f`, `w`, `h` i
-`H` osobno **nie są identyfikowalne** ze zrzutów: zwiększenie `w` przy proporcjonalnie mniejszym
-`f`, albo przeskalowanie razem `h` i `H`, daje identyczne piksele. W szczególności **proporcja
+`H` osobno **nie są identyfikowalne** ze zrzutów, bo istnieją przekształcenia zachowujące zarówno
+`K`, jak i `r`: (a) `w → λw`, `f → f/λ` (przy stałych `h`, `H`); (b) `h → λh`, `H → λH`, `f → λf`
+(przy stałym `w`). Oba dają identyczne piksele. (Samo przeskalowanie `h` i `H` bez `f` zmienia `K`,
+a więc obraz — nie jest niezmiennikiem.) Przekształcenie (b) zmienia `h / w`, więc **proporcja
 `h / w` (czy blok jest sześcianem) pozostaje nierozstrzygnięta** — zrzuty z góry jej nie mierzą, a
 przy tym modelu do odtworzenia obrazu nie jest potrzebna. Rozstrzygnęłaby ją tylko niezależna
 kalibracja: wielkość znana jednocześnie w jednostkach poziomych i pionowych świata (np. wewnętrzne
@@ -253,9 +255,11 @@ dla tego procesu nieaktualny (sekcja 1). **Żaden scenariusz nie ma dziś dowodu
 **Odtwarzalność — dwa tryby ustawienia, ta sama scena w obu środowiskach:**
 
 * **Tryb M (miejsce w oryginalnej mapie, domyślny):** obie strony renderują ten sam plik mapy i stylu
-  z `GTA20_GAME_DIR` (np. `wil.gmp` + `wil.sty`). Scena = współrzędne (x, y, z) bloków; kamera
-  oryginału jest nad stojącym pieszym, więc zapisuje się pozycję pieszego, a nasz silnik ustawia
-  środek kamery w tym samym punkcie mapy i tę samą rozdzielczość. Miejsca wybiera lokalne zapytanie
+  z `GTA20_GAME_DIR` (np. `wil.gmp` + `wil.sty`). Scena = współrzędne (x, y, z) bloków. Że kamera
+  oryginału w spoczynku stoi dokładnie nad pieszym, jest **[H]**. Zanim pozycja pieszego posłuży do
+  ustawienia naszej kamery, trzeba zmierzyć poziome przesunięcie kamery względem pieszego (np. `c`
+  z WG-PROJ wobec rzutu pozycji pieszego); dopiero wtedy nasz silnik ustawia środek kamery w
+  odpowiednim punkcie mapy, przy tej samej rozdzielczości co zrzut. Miejsca wybiera lokalne zapytanie
   do danych mapy (zwraca tylko współrzędne i słowa ścian, nie piksele), np. „trzy wolnostojące
   kolumny o różnych poziomach górnej pokrywy w promieniu kadru”. Zależność: sposób doprowadzenia
   pieszego oryginału do zadanego miejsca i odczytania jego pozycji — nieustalony.
@@ -265,11 +269,20 @@ dla tego procesu nieaktualny (sekcja 1). **Żaden scenariusz nie ma dziś dowodu
   tryb S jest tylko zapasowy.
 
 **Porównania między różnymi scenami** (np. gdy referencja i nasz render nie dają się ustawić
-identycznie): porównuje się wyłącznie wielkości niezależne od sceny — `r`, `K` podzielone przez
-wysokość okna w pikselach, `c` jako ułamek wymiarów okna, izotropię, regułę widoczności ścian jako
-funkcję znaku przesunięcia bloku względem `c` w osi x i y, oraz tabelę etykiet A–D dla każdej
-kombinacji obrót/odbicie. Odpowiedniość ustala się po tych kluczach (poziom pokrywy, ćwiartka,
-kombinacja), nie po pikselach. Porównanie surowych pikseli tylko w tej samej scenie i rozdzielczości.
+identycznie). Bez warunków dodatkowych porównywalne są tylko wielkości dyskretne: reguła
+widoczności ścian jako funkcja znaku przesunięcia bloku względem `c` w osi x i y oraz tabela
+etykiet A–D dla każdej kombinacji obrót/odbicie; odpowiedniość ustala się po kluczach (ćwiartka,
+kombinacja), nie po pikselach. Wielkości ciągłe — `r`, `K` podzielone przez wysokość okna, `c` jako
+ułamek wymiarów okna, izotropia — wolno przenosić między zrzutami **tylko warunkowo**:
+
+* że stan kamery w spoczynku jest stały, to [H] — najpierw musi to potwierdzić pomiar stabilności
+  (sekcja 6.2, pkt 4) w kilku miejscach;
+* że `K` skaluje się z wysokością okna, a `c` z jego wymiarami (normalizacja rozdzielczości), to
+  [H] — najpierw trzeba zmierzyć `K` i `c` w co najmniej dwóch rozdzielczościach oryginału.
+
+Dopóki któryś warunek nie jest potwierdzony, porównuje się tylko zrzuty w dopasowanych warunkach
+(ta sama scena, rozdzielczość i stan kamery) albo kalibruje `K`, `r`, `c` osobno dla każdego zrzutu
+na podstawie jego własnych pokryw. Surowe piksele — tylko w tej samej scenie i rozdzielczości.
 
 | Nazwa | Ustawienie (tryb) | Obserwowany wynik | Pochodzenie referencji | Dowód dziś |
 |---|---|---|---|---|
