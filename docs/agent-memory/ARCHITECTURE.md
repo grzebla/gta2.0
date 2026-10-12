@@ -1,22 +1,26 @@
-# ARCHITECTURE — decisions in force
+# ARCHITECTURE
 
-1. Own engine in C++20, no OpenGTA2/MonoGame/.NET (owner decision 2026-10-12).
-2. SDL3 + SDL_GPU; shaders: MSL source for Metal, GLSL->SPIR-V (glslang, committed, freshness
-   checked in CI), HLSL compiled at build time (dxc/fxc). Bindings: vertex uniforms b0/space1
-   (set 1), fragment sampler t0/s0 space2 (set 2).
-3. Module boundaries enforced by `scripts/ci/check-module-boundaries.sh`: core, assets, sim,
-   scene and testing never include SDL, render or platform headers; core and assets never
-   include sim/scene/testing; sim never includes scene/testing. `sim` stays headless,
-   deterministic, fixed point.
-4. Dependencies via FetchContent pinned by URL + SHA-256 (SDL 3.4.18, doctest 2.5.3,
-   nlohmann/json 3.12.0). Warnings are errors; clang-format 23.1.3, clang-tidy 22.1.8.
-5. Map facts (verified on original data): column index y*256+x; DMAP column = 1+(height-offset)
-   dwords; lid tile 1023 marks 3-sided diagonal slopes; tiles 992-1022 reserved; rotation codes
-   turn clockwise on screen; flip mirrors in tile space before rotation; lid lighting factors are
-   unknown (not applied) - to be measured on the original.
-6. Style facts: GBST version 700; palettes stored in dword columns (BGRA); tiles 64x64 in a 4x4
-   grid per 256x256 page.
-7. GTA2_RE is a behavioural reference only (names of functions in docs), never copied.
-8. Development is run by the orchestrator (`tools/orchestrator`): Astra plans/reviews (read-only),
-   Claude implements on `agent/<task>` branches, approved work is merged into
-   `agents/integration`; humans merge PRs.
+## Existing implementation
+
+- Native C++20 engine using SDL3 and SDL_GPU. Simulation stays headless, deterministic and fixed point.
+- Module boundaries are enforced by scripts/ci/check-module-boundaries.sh. Core, assets, sim, scene and testing cannot include SDL/render/platform. Core/assets cannot depend on higher modules; sim cannot depend on scene/testing.
+- Scene owns CPU draw descriptions and tile-atlas generation. QuadInstance is a 40-byte GPU-facing layout. Preserve it while introducing world geometry separately.
+- Current shaders use two-dimensional quad positions with z=0. Rendering blends atlas samples and has no depth attachment.
+- MSL is compiled at runtime; GLSL has committed SPIR-V with freshness checks; Windows builds HLSL with dxc/fxc. Every world-render change must cover all three shader paths.
+- Pinned dependencies and warnings-as-errors remain in force. The headless CMake preset disables the SDL application and builds scene unit tests.
+
+## M1 direction
+
+Start with pure CPU face geometry in engine/scene. Its unit block occupies [x,x+1] × [y,y+1] × [z,z+1], with outward triangle winding. This is a helper contract, not yet proof of original-game elevation semantics.
+
+Subsequent work adds independently tested UV transforms, indexed world meshes, an evidence-backed map-to-world elevation convention, projection and depth, then slopes and caching. Keep GPU resource ownership in render. Establish original face semantics before applying neighbour-face removal or interpreting collision bits as visibility.
+
+## Format evidence and limits
+
+- DMAP column index is y*256+x; column records contain height-offset indices beginning at offset.
+- Documented side axes are left -X, right +X, top -Y, bottom +Y.
+- Existing tests and docs say legacy CMAP differs from DMAP. The contrary parse_gmp header comment is stale.
+- Lid tile 1023 usually marks three-sided diagonal slopes, but exceptions exist. Tiles 992–1022 occur in bonus maps. Do not sample these as ordinary style tiles or turn marker geometry into white atlas faces.
+- Existing docs report visual validation of lid rotation/flip on Downtown. Wall orientation and slope mapping still require evidence and automated comparisons.
+- Lid lighting factors remain unknown and unapplied.
+- GTA2_RE may inform behavioural specifications; its code must never be copied. Label source facts, measured facts and hypotheses separately.
