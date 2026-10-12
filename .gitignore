@@ -21,3 +21,10 @@ obj/
 # Claude Code runtime state
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
+
+# C++ build trees and fetched dependencies
+/build/
+/.deps/
+/out/
+compile_commands.json
+*.bmp

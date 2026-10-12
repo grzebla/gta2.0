@@ -1,5 +1,5 @@
 {
-  // SYNTHETIC: no input; only the seeded random walker moves. Verifies that seeded
+  // SYNTHETIC: no input; only the seeded wanderers move. Verifies that seeded
   // randomness is reproducible across machines. Not GTA 2 data.
   "schemaVersion": 1,
   "id": "synthetic-idle-random-walk",
