@@ -656,10 +656,10 @@ class Orchestrator:
                     return HALTED
                 self.sleep_fn(min(300.0, float(self.limits["poll_s"]) * 2))
             on_step()
-        final = STOPPED if (self.stop_requested or self.db.get_meta("desired_state") == STOPPED) else RUNNING
-        self.set_loop_state(final, "stopped by the owner" if final == STOPPED else "step limit reached")
+        by_owner = self.stop_requested or self.db.get_meta("desired_state") == STOPPED
+        self.set_loop_state(STOPPED, "stopped by the owner" if by_owner else "step limit reached")
         on_step()
-        return final
+        return STOPPED
 
 
 def install_signal_handlers(orch: Orchestrator) -> None:
