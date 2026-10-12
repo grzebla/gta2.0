@@ -45,7 +45,7 @@ jobs:
       - name: cfn-lint
         run: |
           python3 -m pip install --user --quiet cfn-lint==1.57.2
-          python3 -m cfnlint --regions eu-north-1 -- infra/aws/*.yaml
+          "$HOME/.local/bin/cfn-lint" --regions eu-north-1 -- infra/aws/*.yaml
 
       - name: JSON validity
         run: jq empty tests/gfx/compat-matrix.json
