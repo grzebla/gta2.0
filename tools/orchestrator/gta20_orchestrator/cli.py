@@ -338,7 +338,9 @@ def cmd_service(cfg: Config, args: argparse.Namespace) -> int:
             set_desired(database, STOPPED, "service installed (not started)")
         for k, v in info.items():
             print("%-10s %s" % (k, v))
-        print("installed but NOT started. Start the autonomous loop with: gta20-orchestrator start")
+        print("installed, autonomous work NOT started. macOS may load the LaunchAgent right away (Background\n"
+              "Items); the daemon then exits at once because the desired state is STOPPED.\n"
+              "Start the autonomous loop with: gta20-orchestrator start")
     elif args.action == "uninstall":
         print(service.uninstall())
     else:

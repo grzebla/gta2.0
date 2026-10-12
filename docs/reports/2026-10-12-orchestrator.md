@@ -59,7 +59,7 @@ prompt idzie przez stdin.
 | Rozpoznawanie formatu limitu Claude/Codex | testy jednostkowe na strukturach zaobserwowanych na żywo | prawdziwy limit nie był celowo wyczerpywany |
 | Ścieżki chronione, brak postępu, `NEEDS_HUMAN`, wszystko zablokowane, pauza/stop | atrapy | 8 scenariuszy + testy jednostkowe |
 | launchd: start, crash → restart, czysty stop bez restartu | **na żywo** (osobna etykieta, atrapy agentów) | `launchctl` bootstrap; SIGKILL → nowy PID; stop → kod 0, brak restartu |
-| Usługa produkcyjna | **przygotowana, NIE uruchomiona** | plist zainstalowany, stan `STOPPED` |
+| Usługa produkcyjna | **przygotowana, praca autonomiczna NIE uruchomiona** | plist zainstalowany. macOS sam go wczytał; demon zobaczył `STOPPED` i zakończył się kodem 0 bez restartu |
 | Wielodniowa praca | **nieuruchomiona** (wymaga Twojej zgody) | — |
 | Migracja na maszynę 24/7 | tylko opisana | README |
 | CI | **zielone** | PR #4, #5, #6 (w tym nowe zadanie `orchestrator-tests`) |

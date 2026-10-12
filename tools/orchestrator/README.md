@@ -119,7 +119,10 @@ po każdym kroku).
 
 1. `$B service install` kopiuje kod do `~/.local/share/gta20-orchestrator/<wersja>-<sha>`
    (agent pracujący w repo nie zmieni kodu nadzorcy), tworzy `~/.local/bin/gta20-orchestrator`
-   oraz `~/Library/LaunchAgents/com.gta20.orchestrator.plist`. **Niczego nie uruchamia.**
+   oraz `~/Library/LaunchAgents/com.gta20.orchestrator.plist`. **Nie uruchamia pracy
+   autonomicznej.** macOS (Background Task Management) może od razu wczytać nowy plist i
+   pokazać powiadomienie o elemencie w tle. Demon startuje wtedy, widzi stan `STOPPED`, kończy
+   się kodem 0, a launchd go nie restartuje (sprawdzone).
 2. **Jedno polecenie uruchamiające pracę wielodniową:** `gta20-orchestrator start`
    (`launchctl bootstrap gui/$UID …`).
 
