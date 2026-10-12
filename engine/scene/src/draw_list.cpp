@@ -1,5 +1,7 @@
 #include "g2n/scene/draw_list.hpp"
 
+#include "g2n/assets/sty_style.hpp"
+
 #include <algorithm>
 #include <cmath>
 
@@ -8,6 +10,7 @@ namespace {
 
 QuadInstance cell_quad(int x, int y, u8 r, u8 g, u8 b) {
     QuadInstance q;
+    q.uv = TileAtlas::white_uv();
     q.center_x = static_cast<float>(x) + 0.5f;
     q.center_y = static_cast<float>(y) + 0.5f;
     q.r = r;
@@ -16,15 +19,107 @@ QuadInstance cell_quad(int x, int y, u8 r, u8 g, u8 b) {
     return q;
 }
 
+struct VisibleCells {
+    int x0, y0, x1, y1;
+};
+
+VisibleCells clip(const Rect& visible) {
+    return {std::max(0, static_cast<int>(std::floor(visible.min.x))),
+            std::max(0, static_cast<int>(std::floor(visible.min.y))),
+            std::min(assets::kMapWidth - 1, static_cast<int>(std::floor(visible.max.x))),
+            std::min(assets::kMapHeight - 1, static_cast<int>(std::floor(visible.max.y)))};
+}
+
 } // namespace
 
+UvRect TileAtlas::slot_uv(u16 slot) {
+    // Half-texel inset keeps nearest/linear sampling inside the slot.
+    constexpr float inv = 1.0f / static_cast<float>(kSize);
+    const int column_index = slot % kColumns;
+    const int row_index = slot / kColumns; // integer grid row, intentionally truncated
+    const auto col = static_cast<float>(column_index);
+    const auto row = static_cast<float>(row_index);
+    return {(col * kSlotSize + 0.5f) * inv, (row * kSlotSize + 0.5f) * inv, ((col + 1) * kSlotSize - 0.5f) * inv,
+            ((row + 1) * kSlotSize - 0.5f) * inv};
+}
+
+namespace {
+
+void fill_white_slot(TileAtlas& atlas) {
+    const int sx = (TileAtlas::kWhiteSlot % TileAtlas::kColumns) * TileAtlas::kSlotSize;
+    const int sy = (TileAtlas::kWhiteSlot / TileAtlas::kColumns) * TileAtlas::kSlotSize;
+    for (int y = 0; y < TileAtlas::kSlotSize; ++y) {
+        for (int x = 0; x < TileAtlas::kSlotSize; ++x) {
+            const auto at =
+                (static_cast<std::size_t>(sy + y) * TileAtlas::kSize + static_cast<std::size_t>(sx + x)) * 4;
+            atlas.rgba[at] = atlas.rgba[at + 1] = atlas.rgba[at + 2] = atlas.rgba[at + 3] = 255;
+        }
+    }
+}
+
+} // namespace
+
+TileAtlas make_white_atlas() {
+    TileAtlas atlas;
+    atlas.rgba.assign(static_cast<std::size_t>(TileAtlas::kSize) * TileAtlas::kSize * 4, 0);
+    fill_white_slot(atlas);
+    return atlas;
+}
+
+TileAtlas build_tile_atlas(const assets::StyStyle& style) {
+    TileAtlas atlas = make_white_atlas();
+    const auto count = static_cast<u16>(std::min<std::size_t>(style.tile_count(), TileAtlas::kWhiteSlot));
+    std::vector<u8> tile(static_cast<std::size_t>(assets::kTileSize) * assets::kTileSize * 4);
+    for (u16 t = 0; t < count; ++t) {
+        style.decode_tile(t, tile);
+        const int sx = (t % TileAtlas::kColumns) * TileAtlas::kSlotSize;
+        const int sy = (t / TileAtlas::kColumns) * TileAtlas::kSlotSize;
+        for (int y = 0; y < assets::kTileSize; ++y) {
+            std::copy_n(
+                tile.begin() + static_cast<std::ptrdiff_t>(y) * assets::kTileSize * 4, assets::kTileSize * 4,
+                atlas.rgba.begin() +
+                    static_cast<std::ptrdiff_t>(
+                        (static_cast<std::size_t>(sy + y) * TileAtlas::kSize + static_cast<std::size_t>(sx)) * 4));
+        }
+    }
+    atlas.tile_count = count;
+    return atlas;
+}
+
+void append_map_textured(DrawList& list, const assets::GmpMap& map, const Rect& visible, u16 tile_count) {
+    constexpr float kQuarterTurn = 1.5707963f;
+    // Lid lighting (bits 10-11: 0 normal, 1-3 increasingly dark) is NOT applied: the document
+    // gives no factors and guessed ones visibly distorted roofs. To be measured on the original.
+    const VisibleCells c = clip(visible);
+    for (int z = 0; z < assets::kMapLevels; ++z) {
+        for (int y = c.y0; y <= c.y1; ++y) {
+            for (int x = c.x0; x <= c.x1; ++x) {
+                const auto& block = map.block_at(x, y, z);
+                const auto lid = block.lid_face();
+                // 0 = blank; 1023 = dummy marking 3-sided diagonal slopes; 992-1022 are reserved
+                // for the engine (format documents) - none of these is a drawable style tile.
+                if (lid.tile == 0 || lid.tile >= tile_count) {
+                    continue;
+                }
+                QuadInstance q;
+                q.center_x = static_cast<float>(x) + 0.5f;
+                q.center_y = static_cast<float>(y) + 0.5f;
+                q.uv = TileAtlas::slot_uv(lid.tile);
+                if (lid.flip) {
+                    std::swap(q.uv.u0, q.uv.u1); // mirror horizontally in tile space, before rotation
+                }
+                // Hypothesis (docs/formats/sty.md): rotation codes turn the tile clockwise on screen.
+                q.rotation = static_cast<float>(static_cast<int>(lid.rotation)) * kQuarterTurn;
+                list.add(q);
+            }
+        }
+    }
+}
+
 void append_map(DrawList& list, const assets::GmpMap& map, const Rect& visible) {
-    const int x0 = std::max(0, static_cast<int>(std::floor(visible.min.x)));
-    const int y0 = std::max(0, static_cast<int>(std::floor(visible.min.y)));
-    const int x1 = std::min(assets::kMapWidth - 1, static_cast<int>(std::floor(visible.max.x)));
-    const int y1 = std::min(assets::kMapHeight - 1, static_cast<int>(std::floor(visible.max.y)));
-    for (int y = y0; y <= y1; ++y) {
-        for (int x = x0; x <= x1; ++x) {
+    const VisibleCells c = clip(visible);
+    for (int y = c.y0; y <= c.y1; ++y) {
+        for (int x = c.x0; x <= c.x1; ++x) {
             const int z = map.top_level(x, y);
             if (z < 0) {
                 continue;
@@ -55,6 +150,7 @@ void append_map(DrawList& list, const assets::GmpMap& map, const Rect& visible) 
 void append_entities(DrawList& list, const std::vector<EntityView>& entities) {
     for (const auto& e : entities) {
         QuadInstance body;
+        body.uv = TileAtlas::white_uv();
         body.center_x = e.position.x;
         body.center_y = e.position.y;
         body.width = e.size;

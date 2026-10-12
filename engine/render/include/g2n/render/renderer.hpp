@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,10 @@ public:
 
     /// "metal", "direct3d12" or "vulkan".
     [[nodiscard]] std::string backend() const;
+
+    /// Uploads the RGBA8 texture atlas sampled by every quad (replaces the previous one).
+    /// Until called, a 1x1 white texture is bound so untextured quads render as flat colours.
+    Result<bool> set_atlas(u32 width, u32 height, std::span<const u8> rgba);
 
     /// Renders to the window's swapchain. Returns false when no swapchain image is
     /// available (e.g. minimised) - not an error.

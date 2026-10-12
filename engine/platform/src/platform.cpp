@@ -79,6 +79,7 @@ InputSnapshot poll_input() {
     s.attack = keys[SDL_SCANCODE_LCTRL] || keys[SDL_SCANCODE_RCTRL];
     s.jump = keys[SDL_SCANCODE_SPACE];
     s.enter_exit = keys[SDL_SCANCODE_RETURN];
+    s.toggle_camera = keys[SDL_SCANCODE_TAB];
     return s;
 }
 

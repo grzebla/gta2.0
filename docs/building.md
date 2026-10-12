@@ -62,11 +62,15 @@ Po zmianie GLSL uruchom skrypt i zacommituj `.spv` — CI sprawdza, czy pliki s�
 
 ## Dane gry
 
-Repozytorium nie zawiera żadnych plików GTA 2. Aby użyć własnej, legalnie posiadanej
-instalacji:
+Repozytorium nie zawiera żadnych plików GTA 2. Przygotowanie lokalnej instalacji z
+oryginalnych instalatorów (bez ich uruchamiania): [`tools/gta2-install/README.md`](../tools/gta2-install/README.md).
+Zweryfikowane: wydanie 9.6 (Rockstar 2004, kompletne) i 10.5 (Freeloader, bez muzyki i filmów) mają
+identyczne mapy i style. Aby użyć instalacji:
 
 ```bash
 export G2N_GAME_DIR=/ścieżka/do/GTA2
-./build/release/bin/gta2n --level data/wil.gmp     # nazwy plików rozpoznawane bez względu na wielkość liter
-ctest --preset release                             # włącza też testy [gamedata]
+./build/release/bin/gta2n --level data/wil.gmp     # wil/ste/bil; styl .sty dobierany automatycznie
+./build/release/bin/gta2n --level data/ste.gmp --camera 100,60 --zoom 12   # Tab = kamera swobodna
+ctest --preset release                             # włącza testy [gamedata] i gamedata.render.*
+G2N_GAME_DIR_105=~/Games/GTA2-10.5 ctest ...        # dodatkowo porównanie danych 9.6 i 10.5
 ```

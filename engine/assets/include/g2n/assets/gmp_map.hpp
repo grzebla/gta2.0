@@ -92,7 +92,7 @@ public:
     [[nodiscard]] int top_level(int x, int y) const;
 
 private:
-    friend Result<GmpMap> parse_gmp(std::span<const std::byte>);
+    friend Result<GmpMap> parse_gmp(std::span<const std::byte>, MapEncoding);
     static std::size_t cell(int x, int y, int z) {
         return (static_cast<std::size_t>(z) * kMapHeight + static_cast<std::size_t>(y)) * kMapWidth +
                static_cast<std::size_t>(x);
@@ -104,7 +104,10 @@ private:
     MapEncoding encoding_ = MapEncoding::Compressed32;
 };
 
-/// Parses a GBMP file. Uses DMAP, else CMAP, else UMAP. Unknown chunks are ignored.
-[[nodiscard]] Result<GmpMap> parse_gmp(std::span<const std::byte> bytes);
+/// Parses a GBMP file. Uses the preferred encoding if present, else DMAP, CMAP, UMAP in that
+/// order. Unknown chunks (e.g. EDIT, present in every original map) are ignored. Original PC maps
+/// contain both DMAP and CMAP describing the same city (verified by tests on real data).
+[[nodiscard]] Result<GmpMap> parse_gmp(std::span<const std::byte> bytes,
+                                       MapEncoding preferred = MapEncoding::Compressed32);
 
 } // namespace g2n::assets

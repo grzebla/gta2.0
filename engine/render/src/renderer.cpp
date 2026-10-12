@@ -56,6 +56,8 @@ struct Renderer::Impl {
     SDL_GPUShader* vertex_shader = nullptr;
     SDL_GPUShader* fragment_shader = nullptr;
     SDL_GPUBuffer* corner_buffer = nullptr;
+    SDL_GPUTexture* atlas = nullptr;
+    SDL_GPUSampler* sampler = nullptr;
     SDL_GPUBuffer* instance_buffer = nullptr;
     SDL_GPUTransferBuffer* instance_transfer = nullptr;
     u32 instance_capacity = 0; // in instances
@@ -84,6 +86,10 @@ struct Renderer::Impl {
             SDL_ReleaseGPUBuffer(device, instance_buffer);
         if (corner_buffer != nullptr)
             SDL_ReleaseGPUBuffer(device, corner_buffer);
+        if (sampler != nullptr)
+            SDL_ReleaseGPUSampler(device, sampler);
+        if (atlas != nullptr)
+            SDL_ReleaseGPUTexture(device, atlas);
         if (fragment_shader != nullptr)
             SDL_ReleaseGPUShader(device, fragment_shader);
         if (vertex_shader != nullptr)
@@ -100,6 +106,7 @@ struct Renderer::Impl {
         vs.stage = SDL_GPU_SHADERSTAGE_VERTEX;
         vs.num_uniform_buffers = 1;
         fs.stage = SDL_GPU_SHADERSTAGE_FRAGMENT;
+        fs.num_samplers = 1;
         if ((formats & SDL_GPU_SHADERFORMAT_MSL) != 0) {
             vs.format = fs.format = SDL_GPU_SHADERFORMAT_MSL;
             vs.code = fs.code = g2n_quad_msl;
@@ -144,12 +151,13 @@ struct Renderer::Impl {
             {0, sizeof(float) * 2, SDL_GPU_VERTEXINPUTRATE_VERTEX, 0},
             {1, sizeof(scene::QuadInstance), SDL_GPU_VERTEXINPUTRATE_INSTANCE, 0},
         }};
-        const std::array<SDL_GPUVertexAttribute, 5> attributes = {{
+        const std::array<SDL_GPUVertexAttribute, 6> attributes = {{
             {0, 0, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, 0},
             {1, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(scene::QuadInstance, center_x)},
             {2, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2, offsetof(scene::QuadInstance, width)},
             {3, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT, offsetof(scene::QuadInstance, rotation)},
             {4, 1, SDL_GPU_VERTEXELEMENTFORMAT_UBYTE4_NORM, offsetof(scene::QuadInstance, r)},
+            {5, 1, SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4, offsetof(scene::QuadInstance, uv)},
         }};
         SDL_GPUColorTargetDescription target{};
         target.format = format;
@@ -187,6 +195,75 @@ struct Renderer::Impl {
         SDL_ReleaseGPUGraphicsPipeline(device, pipelines[1].second); // evict
         pipelines[1] = {format, pipeline};
         return pipeline;
+    }
+
+    Result<bool> upload_atlas(u32 width, u32 height, std::span<const u8> rgba) {
+        if (rgba.size() != static_cast<std::size_t>(width) * height * 4 || width == 0 || height == 0) {
+            return make_error("atlas pixel data does not match its size");
+        }
+        SDL_GPUTextureCreateInfo info{};
+        info.type = SDL_GPU_TEXTURETYPE_2D;
+        info.format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
+        info.usage = SDL_GPU_TEXTUREUSAGE_SAMPLER;
+        info.width = width;
+        info.height = height;
+        info.layer_count_or_depth = 1;
+        info.num_levels = 1;
+        SDL_GPUTexture* texture = SDL_CreateGPUTexture(device, &info);
+        SDL_GPUTransferBufferCreateInfo transfer_info{};
+        transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
+        transfer_info.size = static_cast<Uint32>(rgba.size());
+        SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device, &transfer_info);
+        if (texture == nullptr || transfer == nullptr) {
+            if (texture != nullptr) {
+                SDL_ReleaseGPUTexture(device, texture);
+            }
+            if (transfer != nullptr) {
+                SDL_ReleaseGPUTransferBuffer(device, transfer);
+            }
+            return make_error(sdl_error("creating the atlas texture"));
+        }
+        std::memcpy(SDL_MapGPUTransferBuffer(device, transfer, false), rgba.data(), rgba.size());
+        SDL_UnmapGPUTransferBuffer(device, transfer);
+        SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
+        SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
+        SDL_GPUTextureTransferInfo src{};
+        src.transfer_buffer = transfer;
+        SDL_GPUTextureRegion dst{};
+        dst.texture = texture;
+        dst.w = width;
+        dst.h = height;
+        dst.d = 1;
+        SDL_UploadToGPUTexture(copy, &src, &dst, false);
+        SDL_EndGPUCopyPass(copy);
+        const bool submitted = SDL_SubmitGPUCommandBuffer(cmd);
+        SDL_ReleaseGPUTransferBuffer(device, transfer);
+        if (!submitted) {
+            SDL_ReleaseGPUTexture(device, texture);
+            return make_error(sdl_error("SDL_SubmitGPUCommandBuffer"));
+        }
+        if (atlas != nullptr) {
+            SDL_WaitForGPUIdle(device); // the previous atlas may still be in use
+            SDL_ReleaseGPUTexture(device, atlas);
+        }
+        atlas = texture;
+        return true;
+    }
+
+    Result<bool> create_sampler() {
+        SDL_GPUSamplerCreateInfo info{};
+        info.min_filter = SDL_GPU_FILTER_NEAREST; // pixel-art tiles: no blurring between texels
+        info.mag_filter = SDL_GPU_FILTER_NEAREST;
+        info.mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST;
+        info.address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        info.address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        info.address_mode_w = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE;
+        sampler = SDL_CreateGPUSampler(device, &info);
+        if (sampler == nullptr) {
+            return make_error(sdl_error("SDL_CreateGPUSampler"));
+        }
+        constexpr std::array<u8, 4> white = {255, 255, 255, 255};
+        return upload_atlas(1, 1, white);
     }
 
     Result<bool> upload_corners() {
@@ -278,6 +355,8 @@ struct Renderer::Impl {
             SDL_BindGPUVertexBuffers(pass, 0, bindings.data(), static_cast<Uint32>(bindings.size()));
             const auto matrix = camera.view_projection(size);
             SDL_PushGPUVertexUniformData(cmd, 0, matrix.data(), static_cast<Uint32>(sizeof(float) * matrix.size()));
+            const SDL_GPUTextureSamplerBinding binding{atlas, sampler};
+            SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
             SDL_DrawGPUPrimitives(pass, 6, static_cast<Uint32>(list.quads().size()), 0, 0);
         }
         SDL_EndGPURenderPass(pass);
@@ -312,7 +391,14 @@ Result<std::unique_ptr<Renderer>> Renderer::create(SDL_Window* window, const Ren
     if (auto corners = impl->upload_corners(); !corners) {
         return corners.error();
     }
+    if (auto sampler = impl->create_sampler(); !sampler) {
+        return sampler.error();
+    }
     return std::unique_ptr<Renderer>(new Renderer(std::move(impl)));
+}
+
+Result<bool> Renderer::set_atlas(u32 width, u32 height, std::span<const u8> rgba) {
+    return impl_->upload_atlas(width, height, rgba);
 }
 
 std::string Renderer::backend() const {
