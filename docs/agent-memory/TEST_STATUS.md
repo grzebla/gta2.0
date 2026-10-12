@@ -1,34 +1,11 @@
 # TEST STATUS
 
-## Independently checked in this planning review
+T0001 revision: 76ef0295fdb4fd4a8d33bb8e28bf64e1be9e7ce0. Review BLOCKED pending verification infrastructure.
 
-Revision: 8f820b7806946cbc5a4663e5d4a24eab60e69c1c.
+Independently verified: source and test coverage, clean worktree, four-file task scope, module-boundary check exit 0, working-tree and commit-diff whitespace checks exit 0. Git emitted sandbox cache warnings.
 
-- scripts/ci/check-module-boundaries.sh: passed.
-- git diff --check: exit 0; no tracked changes reported. Git emitted sandbox warnings about creating its temporary xcrun cache.
-- Source inspection confirms headless scene tests are supported by the headless preset.
-- No build directory or executable test results were available. No configure/build/CTest run was attempted in the read-only checkout.
-- native-ci defines native builds, sanitizers and static checks. Its Vulkan render smoke is explicitly non-gating.
+Supplied orchestrator evidence: Debug configure, build and CTest each exited 0; test counts were not supplied.
 
-## Historical results supplied by project memory
+Developer-reported only: headless CTest 56/56; geometry filter 5 cases and 588 assertions. The filtered run retained GTA20_GAME_DIR. clang-format 23.1.3 was not run.
 
-These were not independently rerun on the reviewed HEAD.
-
-| Suite | Reported result |
-|---|---|
-| macOS ARM64 Debug CTest with original data | 54/54 |
-| CTest without original data | 54/54, data tests return early |
-| ASan/UBSan with data | 51/51 |
-| Original-data tests | 9 cases, 448880 assertions |
-| Offscreen district lid checks | 3/3 |
-| Native CI | Green on PR #3 head |
-| Orchestrator tests | 30/30 |
-| Original-game comparisons | None |
-
-No agents/integration CI run was supplied. These historical counts are not M1 acceptance evidence.
-
-## Next verification
-
-M1-001 requires five new [world-geometry] doctests, complete headless CTest, module boundaries, formatting and diff checks. All new cases must execute without game data or a GPU.
-
-M1 later requires explicit 17-map execution, independently expected slope/UV geometry, synthetic depth/alpha rendering checks, local original-game comparisons, district review, cache counters, performance baselines and Metal/D3D12/Vulkan evidence. Missing original data cannot satisfy the local acceptance gate.
+This read-only review checkout has no build outputs or test logs, and no formatter was found. Approval requires independently recorded asset-free headless configure/build/CTest, all five geometry cases, and the pinned formatting check. M1 remains incomplete; no original-game fidelity claim is established.
