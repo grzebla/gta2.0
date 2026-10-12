@@ -33,45 +33,25 @@ public struct RECT { public int Left; public int Top; public int Right; public i
 '@
 [OpenGta2.Native]::SetProcessDPIAware() | Out-Null
 
-function Measure-Frame([System.Drawing.Bitmap] $Bitmap) {
-    $rect = New-Object System.Drawing.Rectangle 0, 0, $Bitmap.Width, $Bitmap.Height
-    $data = $Bitmap.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly,
-        [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-    try {
-        $bytes = New-Object byte[] ($data.Stride * $data.Height)
-        [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
-    } finally {
-        $Bitmap.UnlockBits($data)
-    }
-    $colors = New-Object 'System.Collections.Generic.HashSet[int]'
-    $samples = 0; $black = 0
-    # Sample every 4th pixel in both directions - enough to tell "black/blank" from "rendered".
-    for ($y = 0; $y -lt $data.Height; $y += 4) {
-        $row = $y * $data.Stride
-        for ($x = 0; $x -lt $data.Width; $x += 4) {
-            $i = $row + $x * 4
-            $b = $bytes[$i]; $g = $bytes[$i + 1]; $r = $bytes[$i + 2]
-            [void] $colors.Add(($r -shl 16) -bor ($g -shl 8) -bor $b)
-            if (($r + $g + $b) -lt 24) { $black++ }
-            $samples++
-        }
-    }
-    [pscustomobject]@{
-        width        = $data.Width
-        height       = $data.Height
-        uniqueColors = $colors.Count
-        blackRatio   = [math]::Round($black / [math]::Max($samples, 1), 4)
-    }
-}
+Import-Module (Join-Path $PSScriptRoot 'GfxAnalysis.psm1') -Force
 
-function Save-Screen([string] $Path) {
+function Get-ScreenSample([string] $Path) {
     $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
     $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
     $gfx = [System.Drawing.Graphics]::FromImage($bmp)
     try {
         $gfx.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bmp.Size)
         $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
-        return Measure-Frame $bmp
+        $rect = New-Object System.Drawing.Rectangle 0, 0, $bmp.Width, $bmp.Height
+        $data = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly,
+            [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        try {
+            $bytes = New-Object byte[] ($data.Stride * $data.Height)
+            [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
+            return Get-FrameSample -Bytes $bytes -Width $data.Width -Height $data.Height -Stride $data.Stride
+        } finally {
+            $bmp.UnlockBits($data)
+        }
     } finally {
         $gfx.Dispose(); $bmp.Dispose()
     }
@@ -91,6 +71,12 @@ $result = [ordered]@{
 
 $proc = $null
 try {
+    # Desktop before the game starts: frames must differ from it to count as "rendered",
+    # otherwise a live process over an unchanged desktop would look like success.
+    $baseline = Get-ScreenSample (Join-Path $outDir 'baseline-desktop.png')
+    $result.baseline = [ordered]@{ width = $baseline.Width; height = $baseline.Height;
+        uniqueColors = $baseline.UniqueColors; blackRatio = $baseline.BlackRatio }
+
     $exe = Join-Path $case.gameDir $case.exe
     $proc = Start-Process -FilePath $exe -WorkingDirectory $case.gameDir -PassThru
     $result.pid = $proc.Id
@@ -100,15 +86,18 @@ try {
         $wait = [double]$at - ((Get-Date) - $t0).TotalSeconds
         if ($wait -gt 0) { Start-Sleep -Milliseconds ([int]($wait * 1000)) }
         $png = Join-Path $outDir ('frame-{0:D3}s.png' -f [int]$at)
-        $m = Save-Screen $png
+        $m = Get-ScreenSample $png
+        $diff = Compare-FrameSample -Baseline $baseline -Frame $m
         $proc.Refresh()
         $result.frames += [ordered]@{
             atSeconds    = [int]$at
             file         = (Split-Path -Leaf $png)
-            width        = $m.width
-            height       = $m.height
-            uniqueColors = $m.uniqueColors
-            blackRatio   = $m.blackRatio
+            width        = $m.Width
+            height       = $m.Height
+            uniqueColors = $m.UniqueColors
+            blackRatio   = $m.BlackRatio
+            changedRatio = $diff.ChangedRatio
+            sizeChanged  = $diff.SizeChanged
             processAlive = -not $proc.HasExited
             foreground   = ([OpenGta2.Native]::GetForegroundWindow() -eq $proc.MainWindowHandle)
         }

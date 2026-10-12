@@ -1,0 +1,21 @@
+{
+  // SYNTHETIC: runs the engine's PROTOTYPE movement rules on the SYNTHETIC test map.
+  // Neither the rules nor the map describe GTA 2; this checks the pipeline
+  // (input replay, fixed step, capture, comparison) and engine determinism.
+  "schemaVersion": 1,
+  "id": "synthetic-drive-turn-brake",
+  "description": "Accelerate, turn left while moving, then brake. Pipeline + regression smoke test.",
+  "provenance": "synthetic",
+  "simulation": { "tickRateHz": 30, "ticks": 180, "seed": 20261012 },
+  "inputs": [
+    { "fromTick": 0, "toTick": 89, "buttons": ["forward"] },
+    { "fromTick": 45, "toTick": 74, "buttons": ["left"] },
+    { "fromTick": 90, "toTick": 179, "buttons": ["backward"] }
+  ],
+  "capture": { "everyTicks": 1 },
+  // Fixed-point simulation: exact equality on every platform.
+  "tolerances": {
+    "default": { "absolute": 0 },
+    "kinds": { "player": { "headingUnits": { "absolute": 0, "wrapPeriod": 65536 } } }
+  }
+}

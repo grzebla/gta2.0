@@ -8,7 +8,7 @@ Legenda: ✅ zweryfikowane · ⏳ czeka na zewnętrzną decyzję · 🧑 wymaga 
 |---|---|---|
 | Plan projektu | PAID, aktywny, 120 USD kredytów | ✅ |
 | Region | eu-north-1; G4dn (`xlarge`, `2xlarge`) w strefach a, b, c | ✅ |
-| Limit „Running On-Demand G and VT instances” | 0 vCPU; wniosek o 4 vCPU `CASE_OPENED` (zgłoszenie `179182732600608`) | ⏳ |
+| Limit „Running On-Demand G and VT instances” | 4 vCPU (zgłoszenie `179182732600608` zamknięte 2026-10-12 19:43 UTC) | ✅ |
 | SCP: `iam:CreateOpenIDConnectProvider` | **explicitDeny** (symulacja IAM) — wymaga advanced features | 🧑 |
 | SCP: `ec2:RunInstances` g4dn, `cloudformation:CreateStack`, `lambda:CreateFunction`, `events:PutRule`, `s3:CreateBucket`, `ssm:SendCommand`, `iam:CreateRole`/`PassRole`, `budgets:*` | allowed | ✅ |
 | SCP: Spot, CloudFormation w us-east-1, `s3:GetObject` z bucketów sterowników AWS w us-east-1 | explicitDeny — projekt tego nie używa | ✅ |
@@ -87,7 +87,7 @@ akcje budżetowe nie zastąpią mechanizmów A–D. Te zatrzymują hosta w ciąg
 
 | # | Krok | Kto | |
 |---|---|---|---|
-| 1 | Wniosek o limit GPU zatwierdzony (≥ 4 vCPU) | AWS | ⏳ |
+| 1 | Wniosek o limit GPU zatwierdzony (≥ 4 vCPU) | AWS | ✅ |
 | 2 | Advanced features aktywowane (warunek utworzenia dostawcy OIDC) | Ty, AWS Settings | 🧑 |
 | 3 | Budżet z alertami: `infra/aws/create-budget.sh <e-mail> 15` — najlepiej przed krokiem 2 | Ty lub ja po zgodzie | 🧑 |
 | 4 | Stos `opengta2-gfx` (instancja startuje od razu, watchdog wyłączy ją po 60 min) | Ty lub ja po zgodzie | 💰🧑 |
@@ -117,9 +117,10 @@ akcje budżetowe nie zastąpią mechanizmów A–D. Te zatrzymują hosta w ciąg
 
 | Werdykt | Znaczenie |
 |---|---|
-| `PASS` | proces żyje po 30 s, ≥ 1 zrzut z ≥ 24 unikalnymi kolorami i ≤ 97% czerni, ostatni zrzut nadal wyrenderowany, tryb zgodny z żądanym |
+| `PASS` | proces żyje po 30 s, ≥ 1 zrzut z ≥ 24 unikalnymi kolorami, ≤ 97% czerni i zmianą ≥ 25% pikseli względem pulpitu bazowego, ostatni zrzut nadal wyrenderowany, tryb zgodny z żądanym |
 | `PASS_FELL_BACK_TO_FULLSCREEN` | jak PASS, ale okno nie wyszło i gra przełączyła się na pełny ekran (`start_mode` 0 → 1) |
 | `FAIL_PROCESS_EXITED` | proces zakończył się przed końcem obserwacji |
+| `FAIL_NO_VISIBLE_CHANGE` | proces żyje, ale ekran nie różni się od pulpitu sprzed startu gry (nic nie narysowano na ekranie) |
 | `FAIL_BLANK_SCREEN` | żaden zrzut nie spełnia progów (czarny/pusty ekran) |
 | `FAIL_RENDER_STOPPED` | coś wyrenderowano, ale ostatni zrzut jest pusty (zawieszenie, utrata urządzenia) |
 | `ERROR*` | błąd infrastruktury testu (brak wrappera, brak `result.json`, timeout przypadku) |
@@ -130,6 +131,7 @@ akcje budżetowe nie zastąpią mechanizmów A–D. Te zatrzymują hosta w ciąg
 |---|---|---|
 | `COMPATIBLE` | ≥ 1 przypadek `PASS*` | promocja: `GFX_E2E_CASES=<id PASS>`, `GFX_E2E_ENABLED=true` |
 | `INCOMPATIBLE` | 0 przypadków `PASS*`, probe OK | G4dn z tą konfiguracją nie renderuje GTA 2 — analiza zrzutów i dxdiag przed dalszymi kosztami |
+| `INFRASTRUCTURE_ERROR` | wszystkie przypadki `ERROR*` | błąd środowiska testu — nie jest wynikiem kompatybilności |
 | brak `summary.json` | błąd infrastruktury | nie traktować jako wyniku kompatybilności |
 
 Dodatkowa informacja (nie wpływa na werdykt): `gpuProcessSeen=true` potwierdza, że

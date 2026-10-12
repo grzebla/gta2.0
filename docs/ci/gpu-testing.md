@@ -95,7 +95,7 @@ pierwszy bootstrap (sterownik + restarty) może dodać 10–15 min.
 | SCP projektu (Free i Paid) zawiera `Deny iam:*Provider*` | nie da się utworzyć dostawcy GitHub OIDC | aktywować advanced features w AWS Settings (decyzja właściciela) |
 | Limit „Running On-Demand G and VT instances” w eu-north-1 = **0 vCPU** | G4dn się nie uruchomi | wniosek o limit ≥ 4 vCPU (Service Quotas, kod `L-DB2E81BA`) |
 | Plan projektu: **FREE** (100 USD kredytów, wygasa 2027-04-12) | koszty G4dn zużywają kredyty; wniosek o limit GPU może zostać odrzucony | ewentualnie przejście na plan Paid |
-| Sterowniki GRID/gaming leżą w bucketach S3 w us-east-1; SCP `RegionFloor`/`UsEast1Partitional` nie przepuszcza `s3:GetObject` w us-east-1 | instalacja GRID prawdopodobnie się nie powiedzie | bootstrap przechodzi do strategii `url` (publiczny sterownik NVIDIA data center dla T4 — uzupełnić `driver.url` i `driver.sha256`) albo `none` |
+| Sterowniki GRID/gaming leżą w bucketach S3 w us-east-1; SCP `RegionFloor`/`UsEast1Partitional` nie przepuszcza `s3:GetObject` w us-east-1 | instalacja GRID prawdopodobnie się nie powiedzie | strategia `url`: publiczny sterownik NVIDIA 581.80 (R580) dla Windows Server 2022/2025 z SHA-256 i weryfikacją podpisu Authenticode; sterowniki Tesla startują w TCC, więc bootstrap jednorazowo przełącza T4 na WDDM (skuteczność potwierdzi `probe`) |
 | `CloudFormation` w us-east-1 zablokowane, `AWS::Budgets::Budget` niedostępny w eu-north-1 | budżetu nie da się utworzyć szablonem | `infra/aws/create-budget.sh` (API Budgets) |
 | Spot zablokowany przez SCP | tylko on-demand | — |
 
@@ -114,12 +114,20 @@ dgVoodoo2 v2.87.5 (oba przypięte SHA-256 z GitHub Releases; wrapper bez hasha j
 × okno / pełny ekran × wybór urządzenia.
 
 Werdykty przypadków: `PASS`, `PASS_FELL_BACK_TO_FULLSCREEN`, `FAIL_PROCESS_EXITED`,
-`FAIL_BLANK_SCREEN`, `FAIL_RENDER_STOPPED`, `ERROR*`. Kryterium „wyrenderowano”:
-co najmniej 24 unikalne kolory w próbkowanym zrzucie i ≤ 97% czarnych pikseli,
-a proces nadal żyje po 30 s. Dodatkowo raportowane: `gpuProcessSeen` (czy `gta2.exe`
-pojawił się w `nvidia-smi`), sesja, kody wyjścia, błędy z dziennika Application.
+`FAIL_NO_VISIBLE_CHANGE`, `FAIL_BLANK_SCREEN`, `FAIL_RENDER_STOPPED`, `ERROR*`.
+Kryterium „wyrenderowano” (logika w `tests/gfx/windows/GfxAnalysis.psm1`, testy Pester):
+≥ 24 unikalne kolory w próbkowanym zrzucie, ≤ 97% czarnych pikseli **i** zmiana ≥ 25%
+pikseli względem zrzutu pulpitu sprzed startu gry (albo zmiana rozdzielczości), a proces
+nadal żyje po 30 s. Żywy proces nad niezmienionym pulpitem to `FAIL_NO_VISIBLE_CHANGE`.
+Dodatkowo raportowane: `gpuProcessSeen` (czy `gta2.exe` pojawił się w `nvidia-smi`),
+sesja, kody wyjścia, błędy z dziennika Application.
 
-Wynik ogólny: `COMPATIBLE` (co najmniej jeden przypadek PASS) / `INCOMPATIBLE` / `PROBE_ONLY`.
+Wynik ogólny: `COMPATIBLE` (≥ 1 przypadek `PASS*`) / `INCOMPATIBLE` / `INFRASTRUCTURE_ERROR`
+(wszystkie przypadki `ERROR*`) / `PROBE_ONLY`.
+
+Tryb operatora (bez GitHub OIDC): `scripts/aws/run-gfx-compat-local.sh <probe|compat>`
+uruchamia tę samą sesję z poświadczeniami AWS CLI operatora i zatrzymuje hosta w `trap`
+(patrz [../aws/integration.md](../aws/integration.md)).
 
 Promocja do automatyzacji: ustaw zmienne repozytorium `GFX_E2E_ENABLED=true` i
 `GFX_E2E_CASES=<id przypadków PASS>`; `gfx-e2e` ma harmonogram zakomentowany.

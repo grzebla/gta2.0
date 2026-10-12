@@ -1,4 +1,5 @@
-# Free static checks for the GPU-test infrastructure (no AWS access).
+# Free static checks and offline tests for the GPU-test infrastructure.
+# No AWS credentials: every AWS call in the tests goes to a fake `aws` binary.
 name: infra-lint
 
 on:
@@ -8,6 +9,7 @@ on:
       - "infra/**"
       - "scripts/**"
       - "tests/gfx/**"
+      - "tests/scripts/**"
   push:
     branches: [main]
     paths:
@@ -15,6 +17,7 @@ on:
       - "infra/**"
       - "scripts/**"
       - "tests/gfx/**"
+      - "tests/scripts/**"
 
 permissions:
   contents: read
@@ -40,7 +43,10 @@ jobs:
           "$(go env GOPATH)/bin/actionlint" -color
 
       - name: shellcheck
-        run: shellcheck scripts/ci/*.sh infra/aws/*.sh
+        run: shellcheck -x -P SCRIPTDIR scripts/ci/*.sh scripts/aws/*.sh infra/aws/*.sh tests/scripts/*.sh
+
+      - name: Bash tests (session + operator scripts, fake aws)
+        run: bash tests/scripts/ec2-gpu-session.test.sh
 
       - name: cfn-lint
         run: |
@@ -50,11 +56,20 @@ jobs:
       - name: JSON validity
         run: jq empty tests/gfx/compat-matrix.json
 
-      - name: PSScriptAnalyzer
+      - name: PSScriptAnalyzer + Pester
         shell: pwsh
         run: |
           Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+          Install-Module Pester -RequiredVersion 6.2.0 -Scope CurrentUser -Force -SkipPublisherCheck
           $issues = Invoke-ScriptAnalyzer -Path tests/gfx/windows -Recurse -Severity Error,Warning `
             -ExcludeRule PSAvoidUsingWriteHost,PSAvoidUsingConvertToSecureStringWithPlainText,PSUseShouldProcessForStateChangingFunctions
           $issues | Format-Table -AutoSize | Out-String -Width 200 | Write-Output
           if ($issues | Where-Object Severity -eq 'Error') { exit 1 }
+          Import-Module Pester -RequiredVersion 6.2.0
+          $config = New-PesterConfiguration
+          $config.Run.Path = 'tests/gfx/windows/tests'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = 'pester-results.xml'
+          Invoke-Pester -Configuration $config

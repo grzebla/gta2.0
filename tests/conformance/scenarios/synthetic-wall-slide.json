@@ -1,0 +1,16 @@
+{
+  // SYNTHETIC: start on the field next to a building of the SYNTHETIC test map
+  // (building cells x 102..108, y 102..108), turn ~18 degrees towards +y and drive into
+  // its west wall. The PROTOTYPE collision must stop x at the wall while y keeps
+  // sliding, then let x continue past the building corner. Not GTA 2 behaviour.
+  "schemaVersion": 1,
+  "id": "synthetic-wall-slide",
+  "provenance": "synthetic",
+  "simulation": { "tickRateHz": 30, "ticks": 240, "seed": 7 },
+  "world": { "spawn": { "x": 100.5, "y": 104.5 } },
+  "inputs": [
+    { "fromTick": 0, "toTick": 1, "buttons": ["right"] },
+    { "fromTick": 0, "toTick": 239, "buttons": ["forward"] }
+  ],
+  "capture": { "everyTicks": 4, "kinds": ["player"] }
+}

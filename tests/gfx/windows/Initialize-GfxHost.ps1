@@ -207,9 +207,9 @@ if (-not (Test-Path $driverMarker)) {
                     if ($p.ExitCode -notin 0, 1, 3010) { throw "installer exit code $($p.ExitCode)" }
                     $outcome.strategy = $strategy
                     $rebootRequired = $true
-                    if ($strategy -eq 'url') {
-                        # AWS docs for NVIDIA public drivers: disable the Basic Display
-                        # Adapter (never the Microsoft Remote Display Adapter).
+                    # AWS docs suggest disabling the Basic Display Adapter with public drivers, but on a
+                    # host without RDP/DCV it is the console session's only display. Opt-in only.
+                    if ($strategy -eq 'url' -and ($matrix.driver.PSObject.Properties.Name -contains 'disableBasicDisplay') -and $matrix.driver.disableBasicDisplay) {
                         Get-PnpDevice -FriendlyName 'Microsoft Basic Display Adapter' -ErrorAction SilentlyContinue |
                             Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue
                         $outcome.basicDisplayDisabled = $true

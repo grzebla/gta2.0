@@ -1,3 +1,26 @@
+# gta2-native — instrukcje projektu
+
+Natywna reimplementacja GTA 2 od podstaw: C++20, CMake + Ninja, SDL3, SDL_GPU
+(Metal / D3D12 / Vulkan). **Nie** używamy OpenGTA2, MonoGame ani .NET (decyzja 2026-10-12;
+archiwum: `docs/archive/`, gałąź `integrate/opengta2-upstream`, zamknięty PR #1).
+
+## Mapa projektu
+- Architektura i reguły zależności modułów: `docs/architecture.md` (pilnuje ich `scripts/ci/check-module-boundaries.sh`).
+- Budowanie: `docs/building.md` (presety `debug`, `release`, `asan`, `headless`); testy: `docs/testing.md`.
+- Mechaniki i plan: `docs/mechanics-matrix.md`, `docs/roadmap.md`; formaty: `docs/formats/`.
+- AWS / oryginalne GTA 2 na EC2: `docs/aws/integration.md`, `docs/ci/gpu-testing.md`, `docs/ci/gfx-compat-checklist.md`.
+- Ostatni raport: `docs/reports/` (najnowszy plik).
+
+## Zasady (obowiązkowe)
+- Kod GTA2_RE (CriminalRETeam/gta2_re, bez licencji) wolno tylko czytać jako opis zachowania. Nie kopiuj kodu, struktur ani fragmentów funkcji (`docs/reference/gta2re.md`).
+- Nigdy nie commituj plików gry ani nie wysyłaj ich w publiczne miejsca. Dane gry: `G2N_GAME_DIR`; na AWS tylko prywatny bucket artefaktów.
+- Dane syntetyczne muszą być oznaczone (`provenance: synthetic`, id `synthetic-*`, komentarz „SYNTHETIC”). Nie przedstawiaj ich jako zachowania GTA 2.
+- `engine/sim` jest deterministyczne: tylko liczby stałoprzecinkowe (`g2n::Fixed`, `g2n::Angle`), RNG wyłącznie `SplitMix64` z ziarnem scenariusza, żadnego SDL/OS/GPU. Zmiana zachowania symulacji = świadoma regeneracja `tests/conformance/golden/` + podbicie `version()` adaptera `engine`.
+- Każda zmiana: `clang-format` (`.clang-format`), zero ostrzeżeń (`-Werror`), testy CTest zielone, CI `native-ci` + `infra-lint` zielone.
+- Zależności tylko przez `cmake/Dependencies.cmake` (URL + SHA-256). Po zmianie GLSL: `scripts/shaders/compile-spirv.sh` (glslang 16.6.0).
+- AWS: wyłącznie eu-north-1; zero operacji tworzących koszty bez wyraźnej zgody użytkownika; nie aktywuj advanced features, nie zmieniaj planu ani SCP. Stan konta i limitu GPU: `docs/aws/integration.md`.
+- Bez force push; zmiany przez gałąź + PR.
+
 <!-- BEGIN AWS Agent Toolkit rules -->
 # AWS Guidance for the new AWS experience
 
