@@ -5,8 +5,10 @@
 #include <numeric>
 
 #if defined(_WIN32)
-#include <psapi.h>
+// clang-format off: <windows.h> must come before <psapi.h>
 #include <windows.h>
+#include <psapi.h>
+// clang-format on
 #elif defined(__APPLE__) || defined(__linux__)
 #include <sys/resource.h>
 #endif
