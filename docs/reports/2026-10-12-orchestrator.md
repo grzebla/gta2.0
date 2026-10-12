@@ -162,3 +162,12 @@ Błąd znaleziony przy testach i naprawiony: test `resume` na tymczasowym repo u
 LaunchAgent. Demon zobaczył `STOPPED` i zakończył się bez skutków (3 starty, zero wywołań
 agentów). Usługę może teraz włączyć tylko repo, którego dotyczy plist, a testy blokują
 `launchctl`.
+
+## 10. Dodatek: `restart`
+
+`gta20-orchestrator restart [--now]` stosuje zmiany konfiguracji (i zainstalowanego kodu).
+- Błędny JSON: polecenie odmawia i nie zatrzymuje demona.
+- Domyślnie restart czeka, aż skończy się bieżący krok. `--now` przerywa agenta z checkpointem.
+- Ścieżkę z launchd sprawdzono na żywo na etykiecie testowej z atrapami agentów: oczekiwanie
+  7 s na krok Claude (bez przerwania), `kickstart`, nowy proces, wyczyszczona flaga.
+- Testy: 47/47.

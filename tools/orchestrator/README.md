@@ -156,6 +156,7 @@ $B dry-run           # następny krok, polecenia i prompt — bez wywołań agen
 $B start --foreground --max-steps 4   # pierwszy krok na pierwszym planie
 $B status | logs [-f] | logs --events | tasks [T0001] | memory [PROJECT] | report
 $B pause | resume | stop [--now] [--unload]
+$B restart [--now] [--timeout S]      # zastosuj zmiany konfiguracji / zainstalowanego kodu
 $B unblock T0003 --note "..."         # decyzja właściciela dla BLOCKED/NEEDS_HUMAN
 $B answer "..."                       # odpowiedź na pytanie Astry (NEEDS_HUMAN)
 $B release status | review [--pr N] | run [--pr N]   # Gatekeeper ręcznie
@@ -218,6 +219,25 @@ Wartości domyślne są w `gta20_orchestrator/config.py`. Lokalne nadpisania tra
 `native-ci`. Bazą PR jest `feature/orchestrator`, a po jej scaleniu `main`. Minuty CI w
 prywatnym repo są limitowane (macOS liczy się ×10), stąd limit częstotliwości. Scala Gatekeeper.
 
+### Zmiana konfiguracji: `restart`
+
+Demon wczytuje `.orchestrator/config.json` tylko przy starcie. Polecenia ręczne (`status`,
+`release …`) czytają go przy każdym wywołaniu.
+
+`restart` działa tak:
+1. Wczytuje konfigurację. Gdy JSON jest błędny, kończy się kodem 2 i niczego nie zatrzymuje.
+2. Ustawia prośbę o restart. Demon kończy bieżący krok: wywołanie agenta nie jest przerywane.
+   Oczekiwanie na limit i pauza kończą się od razu.
+3. Demon wychodzi ze stanem `RESTARTING` i kodem 0.
+4. Polecenie uruchamia demona ponownie przez launchd (`kickstart`).
+
+Opcje:
+- `--now` przerywa agenta od razu (SIGINT → SIGTERM, checkpoint, wznowienie tej samej sesji);
+- `--timeout` (domyślnie 4 h): po przekroczeniu prośba jest wycofywana, a demon pracuje dalej.
+
+Gdy demon nie działa, polecenie tylko informuje albo uruchamia usługę, jeśli stan to `RUNNING`.
+Zmiana kodu Orchestratora: `service install`, a potem `restart`.
+
 ## Ścieżki chronione
 
 Agenci nie zmieniają:
@@ -234,7 +254,7 @@ niezależny test diffu. Zmiana zasad bezpieczeństwa należy do właściciela.
 python3 -m unittest discover -s tools/orchestrator/tests -v
 ```
 
-43 testy (w CI: zadanie `orchestrator-tests` w `native-ci`):
+47 testów (w CI: zadanie `orchestrator-tests` w `native-ci`):
 - parsowanie limitów Claude i Codex;
 - ścisłość schematów JSON;
 - reguły bezpieczeństwa, redakcja sekretów, blokada force push;
@@ -244,6 +264,8 @@ python3 -m unittest discover -s tools/orchestrator/tests -v
 - twarde zabicie (SIGKILL) w trakcie pracy agenta i wznowienie bez duplikowania commitów;
 - SIGTERM i wznowienie;
 - `daemon` przy `STOPPED` i pętla awarii;
+- `restart`: łagodny (krok kończy się normalnie), `--now` (checkpoint), przerwanie oczekiwania
+  na limit, odmowa przy błędnym configu;
 - Gatekeeper: merge PR agentów, czerwone CI → zadanie naprawcze, CI w toku → czekanie, obcy
   commit w PR agentów → brak merge, dane gry mimo decyzji MERGE → brak merge, stos (merge od dołu
   i przepięcie bazy), etykiety, drafty i autorzy, jedna ocena na head, dry run, dzienny limit,

@@ -18,7 +18,7 @@ from typing import Any, List, Optional
 from . import __version__, gitops, memory, prompts, report, service
 from . import db as D
 from .config import Config, find_repo_root
-from .loop import HALTED, PAUSED, RUNNING, STOPPED, Orchestrator, install_signal_handlers
+from .loop import HALTED, PAUSED, RESTARTING, RUNNING, STOPPED, Orchestrator, install_signal_handlers
 from .util import dumps, iso, loads, now
 
 
@@ -116,6 +116,8 @@ def run_loop(cfg: Config, *, max_steps: Optional[int], daemon: bool, fake: bool 
         return 0 if daemon else 1
     try:
         database = open_db(cfg)
+        with database.tx():
+            database.set_meta("restart_requested", "")  # a stale request must not stop the new process
         if daemon:
             starts = [t for t in loads(database.get_meta("start_times"), []) if now() - t < 3600] + [now()]
             with database.tx():
@@ -215,6 +217,53 @@ def cmd_stop(cfg: Config, args: argparse.Namespace) -> int:
         print("stopped (no daemon running)")
     if args.unload and service.manages(cfg.repo_root):
         print(service.disable())
+    return 0
+
+
+def cmd_restart(cfg: Config, args: argparse.Namespace) -> int:
+    """Re-read the configuration (and the installed code) by restarting the daemon. The config was
+    already validated when this command loaded it; an invalid file stops us before anything else."""
+    database = open_db(cfg)
+    managed = service.manages(cfg.repo_root)
+    pid = report.daemon_pid(cfg.state_dir)
+    if not pid:
+        if database.get_meta("loop_state") == HALTED:
+            print("daemon is not running: the loop is HALTED (%s). Use `resume`." % database.get_meta("loop_reason"))
+            return 1
+        if managed and database.get_meta("desired_state") == RUNNING:
+            for msg in service.enable():
+                print(msg)
+            print("daemon was not running; started it with the current configuration")
+        else:
+            print("daemon is not running; the new configuration applies at the next `start`")
+        return 0
+    with database.tx():
+        database.set_meta("restart_requested", "1")
+        database.event("control", agent="human", outcome="RESTART", detail="restart" + (" --now" if args.now else ""))
+    if args.now:
+        os.kill(pid, 15)
+        print("SIGTERM sent to %d: the running agent is interrupted and checkpointed" % pid)
+    else:
+        print("waiting for the daemon (pid %d) to finish its current step (agent: %s)..." % (
+            pid, database.get_meta("active_agent") or "-"))
+    deadline = time.time() + args.timeout
+    while report.daemon_pid(cfg.state_dir) == pid and time.time() < deadline:
+        time.sleep(2)
+    if report.daemon_pid(cfg.state_dir) == pid:
+        with database.tx():
+            database.set_meta("restart_requested", "")
+            database.event("control", agent="human", outcome="RESTART_CANCELLED", detail="timeout %ss" % args.timeout)
+        print("timed out after %ds; restart cancelled, the daemon keeps running (try `restart --now`)" % args.timeout)
+        return 1
+    with database.tx():
+        database.set_meta("restart_requested", "")
+        database.set_meta("start_times", "[]")
+    if managed:
+        for msg in service.enable():
+            print(msg)
+        print("restarted under launchd with the current configuration")
+    else:
+        print("the daemon stopped (it ran in the foreground); start it again with `start --foreground`")
     return 0
 
 
@@ -420,6 +469,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--now", action="store_true", help="interrupt the running agent immediately")
     s.add_argument("--unload", action="store_true", help="also unload the LaunchAgent")
     s.set_defaults(fn=cmd_stop)
+    s = sub.add_parser("restart", help="restart the daemon to apply config/code changes")
+    s.add_argument("--now", action="store_true", help="interrupt the running agent instead of waiting for the step")
+    s.add_argument("--timeout", type=int, default=4 * 3600, help="seconds to wait for the current step (default 4h)")
+    s.set_defaults(fn=cmd_restart)
     s = sub.add_parser("status")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_status)
@@ -464,7 +517,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "simulate":
         return args.fn(None, args)
     root = Path(os.path.expanduser(args.repo)).resolve() if args.repo else find_repo_root()
-    cfg = Config.load(root)
+    try:
+        cfg = Config.load(root)
+    except ValueError as exc:  # json.JSONDecodeError is a ValueError
+        print("invalid configuration %s: %s" % (root / ".orchestrator" / "config.json", exc), file=sys.stderr)
+        return 2
+    if not isinstance(cfg.data.get("limits"), dict) or not isinstance(cfg.data.get("release"), dict):
+        print("invalid configuration: 'limits' and 'release' must be objects", file=sys.stderr)
+        return 2
     return int(args.fn(cfg, args) or 0)
 
 

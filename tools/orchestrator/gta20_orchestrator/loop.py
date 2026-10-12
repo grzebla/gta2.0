@@ -32,6 +32,7 @@ STOPPED = "STOPPED"
 WAITING_FOR_QUOTA = "WAITING_FOR_QUOTA"
 WAITING = "WAITING"
 HALTED = "HALTED"
+RESTARTING = "RESTARTING"
 
 
 class Wait(Exception):
@@ -626,10 +627,13 @@ class Orchestrator:
             return base
 
     # ------------------------------------------------------------------ main loop
+    def restart_pending(self) -> bool:
+        return self.db.get_meta("restart_requested") == "1"
+
     def sleep_until(self, until: float) -> None:
         poll = float(self.limits["poll_s"])
         while not self.stop_requested and now() < until:
-            if self.db.get_meta("desired_state") in (PAUSED, STOPPED):
+            if self.db.get_meta("desired_state") in (PAUSED, STOPPED) or self.restart_pending():
                 return
             self.sleep_fn(min(poll, max(0.0, until - now())))
 
@@ -638,6 +642,8 @@ class Orchestrator:
         self.recover()
         steps = 0
         while not self.stop_requested:
+            if self.restart_pending():
+                break  # between steps: the current step has been checkpointed
             desired = self.db.get_meta("desired_state", RUNNING)
             if desired == STOPPED:
                 break
@@ -681,6 +687,10 @@ class Orchestrator:
                     return HALTED
                 self.sleep_fn(min(300.0, float(self.limits["poll_s"]) * 2))
             on_step()
+        if self.restart_pending():
+            self.set_loop_state(RESTARTING, "restart requested by the owner")
+            on_step()
+            return RESTARTING
         by_owner = self.stop_requested or self.db.get_meta("desired_state") == STOPPED
         self.set_loop_state(STOPPED, "stopped by the owner" if by_owner else "step limit reached")
         on_step()

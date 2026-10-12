@@ -174,7 +174,10 @@ class Config:
         data = copy.deepcopy(DEFAULTS)
         local = repo_root / data["state_dir"] / "config.json"
         if local.exists():
-            data = deep_merge(data, json.loads(local.read_text()))
+            loaded = json.loads(local.read_text())
+            if not isinstance(loaded, dict):
+                raise ValueError("top level must be a JSON object")
+            data = deep_merge(data, loaded)
         if overrides:
             data = deep_merge(data, overrides)
         return cls(repo_root=repo_root, data=data)

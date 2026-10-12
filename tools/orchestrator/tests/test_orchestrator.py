@@ -298,6 +298,31 @@ class SimulationTests(SimCase):
         self.assertEqual(self.env.db.task("T0001")["status"], "CHANGES_REQUESTED")
         self.assertEqual(t["status"], "IN_REVIEW")
 
+    def test_restart_refuses_invalid_config_and_handles_no_daemon(self) -> None:
+        repo = str(self.env.repo)
+        self.assertEqual(cli_main(["--repo", repo, "restart"]), 0)  # nothing running: just informs
+        cfg_path = self.env.cfg.state_dir / "config.json"
+        good = cfg_path.read_text()
+        cfg_path.write_text('{"release": {"max_merges_per_day": 10,}}')  # trailing comma
+        self.assertEqual(cli_main(["--repo", repo, "restart"]), 2)
+        cfg_path.write_text("[1, 2]")
+        self.assertEqual(cli_main(["--repo", repo, "status"]), 2)
+        cfg_path.write_text(good)
+
+    def test_restart_request_interrupts_quota_wait(self) -> None:
+        orch = self.env.orchestrator(FakeAstra(plans=[fake_plan("M1", ["a"])]),
+                                     FakeClaude(script=[{"do": "quota", "reset_in": 3600}]))
+        calls = {"n": 0}
+
+        def fake_sleep(_s: float) -> None:
+            calls["n"] += 1
+            if calls["n"] == 2:
+                with self.env.db.tx():
+                    self.env.db.set_meta("restart_requested", "1")
+        orch.sleep_fn = fake_sleep
+        self.assertEqual(orch.run(), "RESTARTING")
+        self.assertEqual(self.env.db.task("T0001")["status"], "IN_PROGRESS")  # checkpoint kept
+
     def test_cli_status_pause_resume_stop(self) -> None:
         repo = str(self.env.repo)
         self.assertEqual(cli_main(["--repo", repo, "pause"]), 0)
@@ -529,6 +554,44 @@ class RecoveryTests(SimCase):
         db = D.Database(self.env.cfg.state_dir)
         self.assertEqual(db.task("T0001")["status"], "DONE")
         db.close()
+
+    def _daemon_running(self) -> bool:
+        from gta20_orchestrator.report import daemon_pid
+        return daemon_pid(self.env.cfg.state_dir) > 0
+
+    def test_restart_waits_for_the_current_step(self) -> None:
+        plan = fake_plan("M1", ["walls"])
+        p = self._spawn({"astra_plans": [plan], "claude_script": [{"do": "hang", "seconds": 3}]})
+        self._wait(lambda: self._run_status("running"))
+        out = subprocess.run([sys.executable, "-m", "gta20_orchestrator", "--repo", str(self.env.repo), "restart",
+                              "--timeout", "60"], env=dict(os.environ, PYTHONPATH=str(PKG_ROOT)),
+                             capture_output=True, text=True, timeout=120)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertIn("start it again", out.stdout)  # foreground daemon: no launchd respawn in tests
+        self.assertEqual(p.wait(timeout=30), 0)
+        db = D.Database(self.env.cfg.state_dir)
+        claude_runs = [r["status"] for r in db.runs() if r["agent"] == "claude"]
+        self.assertEqual(claude_runs, ["succeeded"])  # the step finished, nothing was interrupted
+        self.assertEqual(db.get_meta("loop_state"), "RESTARTING")
+        self.assertEqual(db.get_meta("restart_requested"), "")
+        self.assertEqual(db.get_meta("desired_state"), "RUNNING")
+        db.close()
+        p = self._spawn({})  # the next start continues from the checkpoint
+        self.assertEqual(p.wait(timeout=120), 0)
+        db = D.Database(self.env.cfg.state_dir)
+        self.assertEqual(db.task("T0001")["status"], "DONE")
+        db.close()
+
+    def test_restart_now_interrupts_and_checkpoints(self) -> None:
+        plan = fake_plan("M1", ["walls"])
+        p = self._spawn({"astra_plans": [plan], "claude_script": [{"do": "hang", "seconds": 120}]})
+        self._wait(lambda: self._run_status("running"))
+        out = subprocess.run([sys.executable, "-m", "gta20_orchestrator", "--repo", str(self.env.repo), "restart",
+                              "--now"], env=dict(os.environ, PYTHONPATH=str(PKG_ROOT)),
+                             capture_output=True, text=True, timeout=120)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(p.wait(timeout=30), 0)
+        self.assertTrue(self._run_status("interrupted"))
 
     def _run_status(self, status: str) -> bool:
         db = D.Database(self.env.cfg.state_dir)
