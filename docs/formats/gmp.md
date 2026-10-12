@@ -31,6 +31,16 @@
 5. Kolejność rysowania i obrót/odbicie pokryw zostały zweryfikowane wizualnie na Downtown:
    linie pasów i łuki są ciągłe między kaflami, napisy nie są odbite.
 
+Zakres powyższej listy: asercjami testów są tylko kierunki ścian na `wil.gmp` (pkt 2; komórki
+wewnętrzne, „otwarty” sąsiad = bez pokrywy i bez ścian z bitem `wall`), kafle < 992 lub 1023 w
+trzech miastach i ≥ 95 % pokryw 1023 na skosach 49–52 (pkt 4; liczone po unikalnych rekordach
+bloków, nie po komórkach mapy). Test CMAP
+(pkt 3) sprawdza tylko `wil.gmp` i `mike1m.gmp`: oba chunki się dekodują, a DMAP ma więcej
+unikalnych bloków niż CMAP — komórek nie porównuje. Przyleganie kolumn (pkt 1), 98,8 %,
+„992–1022 tylko w `mike1*`” to pomiary jednorazowe, a pkt 5 to ocena zrzutów **naszego** silnika,
+nie porównanie z oryginałem. Znaczenie flag ścian, obrót/odbicie i wysokość bloków:
+[../specs/world-geometry.md](../specs/world-geometry.md).
+
 Oświetlenie pokrywy (bity 10–11): dokument mówi tylko „0 normalnie, 1–3 coraz ciemniej”.
 Renderer na razie go **nie stosuje** — zgadywane współczynniki wyraźnie zniekształcały dachy;
 wartości trzeba zmierzyć na oryginale.

@@ -106,7 +106,9 @@ private:
 
 /// Parses a GBMP file. Uses the preferred encoding if present, else DMAP, CMAP, UMAP in that
 /// order. Unknown chunks (e.g. EDIT, present in every original map) are ignored. Original PC maps
-/// contain both DMAP and CMAP describing the same city (verified by tests on real data).
+/// contain both DMAP and CMAP, but CMAP is a different (older) version of the city, so DMAP is the
+/// default. The real-data test only checks wil.gmp and mike1m.gmp: both chunks decode and DMAP has
+/// more unique blocks than CMAP; it does not compare cells (docs/formats/gmp.md).
 [[nodiscard]] Result<GmpMap> parse_gmp(std::span<const std::byte> bytes,
                                        MapEncoding preferred = MapEncoding::Compressed32);
 
