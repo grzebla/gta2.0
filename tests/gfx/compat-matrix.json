@@ -13,6 +13,7 @@
     "screenshotsAtSeconds": [12, 20, 30],
     "minUniqueColors": 24,
     "maxBlackRatio": 0.97,
+    "minChangedRatio": 0.25,
     "caseTimeoutSeconds": 90
   },
   "driver": {
@@ -20,7 +21,8 @@
     "strategies": ["url", "none"],
     "url": "https://us.download.nvidia.com/tesla/581.80/581.80-data-center-tesla-desktop-winserver-2022-2025-dch-international.exe",
     "sha256": "867d73ae28fe07e8a79a0dece4f6dcc74f6534caded9ece39226f7e05b27b8f1",
-    "signer": "NVIDIA Corporation"
+    "signer": "NVIDIA Corporation",
+    "disableBasicDisplay": false
   },
   "wrappers": {
     "native": { "files": [] },

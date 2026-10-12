@@ -1,0 +1,143 @@
+# Build + tests for OpenGTA2 on macOS ARM64, Windows x64 and Linux x64.
+# No AWS access, no secrets, no paid resources.
+name: dotnet-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dotnet-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_NOLOGO: "1"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+
+jobs:
+  cross-platform:
+    name: libraries + tests (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64, os: ubuntu-24.04 }
+          - { name: windows-x64, os: windows-2025 }
+          - { name: macos-arm64, os: macos-15 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Build (cross-platform projects)
+        run: dotnet build OpenGta2.CrossPlatform.slnf -c Release
+
+      # DataTests need an original GTA 2 installation (OPENGTA2_PATH) and never run in CI.
+      - name: Unit tests
+        run: >
+          dotnet test OpenGta2.CrossPlatform.slnf -c Release --no-build
+          --filter "Category!=DataTests"
+          --logger "trx" --results-directory test-results
+
+      - name: Conformance (synthetic scenarios vs committed golden traces)
+        run: |
+          mkdir -p conformance-out
+          cli() { dotnet src/OpenGta2.Conformance.Cli/bin/Release/net10.0/opengta2-conformance.dll "$@"; }
+          status=0
+          for scenario in tests/conformance/scenarios/*.json; do
+            name=$(basename "$scenario" .json)
+            cli run "$scenario" --adapter synthetic-kinematics --out "conformance-out/$name.trace.jsonl"
+            cli compare "tests/conformance/golden/$name.golden.jsonl" "conformance-out/$name.trace.jsonl" \
+              --scenario "$scenario" --json "conformance-out/$name.report.json" \
+              --markdown "conformance-out/$name.report.md" || status=1
+            cat "conformance-out/$name.report.md" >> "$GITHUB_STEP_SUMMARY"
+          done
+          exit $status
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: test-results-${{ matrix.name }}
+          path: |
+            test-results/
+            conformance-out/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # The upstream client is Windows-only (WindowsDX, WinForms, x86, P/Invoke to binkw32/dsound).
+  # This job reports whether it builds; it does not run the game.
+  client-windows:
+    name: client build (windows-x86, WindowsDX)
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Build OpenGta2.Client
+        shell: bash
+        run: dotnet build src/OpenGta2.Client/OpenGta2.Client.csproj -c Release -bl:client-build.binlog
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: client-windows-build
+          path: |
+            client-build.binlog
+            src/OpenGta2.Client/bin/Release/
+          retention-days: 7
+          if-no-files-found: warn
+
+  # Probe only (does not gate merges): can the client's content be built for DesktopGL?
+  # mgfxc needs Windows (Wine elsewhere), so this runs on Windows. Known risks from the audit:
+  # Texture2DArray in BlockFaceEffect.fx under OpenGL, and the Windows-only "Consolas" font.
+  desktopgl-content-probe:
+    name: DesktopGL content probe (windows)
+    runs-on: windows-2025
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
+        with:
+          global-json-file: global.json
+
+      - name: Build Assets.mgcb for DesktopGL
+        shell: bash
+        working-directory: src/OpenGta2.Client/Assets
+        env:
+          MSYS_NO_PATHCONV: "1" # keep mgcb's /option:value arguments away from Git Bash path conversion
+        run: |
+          dotnet tool install dotnet-mgcb --version 3.8.4.1 --tool-path "$RUNNER_TEMP/mgcb"
+          "$RUNNER_TEMP/mgcb/mgcb" /@:Assets.mgcb /platform:DesktopGL \
+            /outputDir:"$RUNNER_TEMP/mgcb-out/bin" /intermediateDir:"$RUNNER_TEMP/mgcb-out/obj" 2>&1 | tee "$RUNNER_TEMP/mgcb.log"
+          exit "${PIPESTATUS[0]}"
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          { echo "### DesktopGL content probe"; echo '```'; tail -n 40 "$RUNNER_TEMP/mgcb.log" || true; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
