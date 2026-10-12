@@ -1,0 +1,26 @@
+{
+  // SYNTHETIC: exercises the conformance framework with the invented "synthetic-kinematics"
+  // model. Nothing in this file describes GTA 2 or OpenGTA2 behaviour.
+  "schemaVersion": 1,
+  "id": "synthetic-drive-turn-brake",
+  "description": "Accelerate, turn left while driving, then brake. Framework smoke test.",
+  "provenance": "synthetic",
+  "simulation": { "tickRateHz": 30, "ticks": 180, "seed": 20261012 },
+  "inputs": [
+    { "fromTick": 0, "toTick": 89, "buttons": ["forward"] },
+    { "fromTick": 45, "toTick": 74, "buttons": ["left"] },
+    { "fromTick": 90, "toTick": 179, "buttons": ["backward"] }
+  ],
+  "capture": { "everyTicks": 1 },
+  "tolerances": {
+    "default": { "absolute": 0 },
+    "kinds": {
+      "synthetic-body": {
+        "x": { "absolute": 1e-9 },
+        "y": { "absolute": 1e-9 },
+        "headingDegrees": { "absolute": 1e-9, "wrapPeriod": 360 },
+        "speed": { "absolute": 1e-12 }
+      }
+    }
+  }
+}

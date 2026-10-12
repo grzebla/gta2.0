@@ -34,10 +34,14 @@ $gameDir = Join-Path $Root 'game'
 $cacheDir = Join-Path $Root 'cache'
 
 # ---------------------------------------------------------------- bootstrap (may request reboot)
+Import-Module (Join-Path $scriptDir 'GfxAnalysis.psm1') -Force
+
 $boot = & (Join-Path $scriptDir 'Initialize-GfxHost.ps1') -Bucket $Bucket -Region $Region `
     -MatrixPath $matrixPath -Root $Root -TestUser $TestUser | Select-Object -Last 1
 if ($boot.RebootRequired) {
-    Write-Host 'Bootstrap changed drivers/autologon - requesting reboot (SSM exit 3010).'
+    # SSM reboots on 3010 and re-runs this whole command; the counter stops an endless loop.
+    $attempt = Register-RebootAttempt -StateDir (Join-Path $Root 'state') -RunId $RunId -MaxReboots 3
+    Write-Host "Bootstrap changed drivers/autologon/WDDM - requesting reboot $attempt/3 (SSM exit 3010)."
     exit 3010
 }
 
@@ -129,21 +133,6 @@ function Merge-Setting($A, $B) {
     return [pscustomobject]$merged
 }
 
-function Get-CaseVerdict($Result, $Observe, $StartModeRequested, $StartModeAfter) {
-    if (-not $Result) { return 'ERROR_NO_RESULT' }
-    if ($Result.error) { return 'ERROR' }
-    $frames = @($Result.frames)
-    if ($frames.Count -eq 0) { return 'ERROR_NO_FRAMES' }
-    $last = $frames[-1]
-    if (-not $Result.alive) { return 'FAIL_PROCESS_EXITED' }
-    $rendered = @($frames | Where-Object {
-        $_.uniqueColors -ge $Observe.minUniqueColors -and $_.blackRatio -le $Observe.maxBlackRatio })
-    if ($rendered.Count -eq 0) { return 'FAIL_BLANK_SCREEN' }
-    if ($last.uniqueColors -lt $Observe.minUniqueColors) { return 'FAIL_RENDER_STOPPED' }
-    if ($StartModeRequested -eq 0 -and $StartModeAfter -eq 1) { return 'PASS_FELL_BACK_TO_FULLSCREEN' }
-    return 'PASS'
-}
-
 # ---------------------------------------------------------------- case loop
 $summary = [ordered]@{
     runId = $RunId; mode = $Mode; startedAt = (Get-Date).ToString('o')
@@ -219,7 +208,7 @@ if ($Mode -ne 'probe') {
 
             $res = if (Test-Path $resultFile) { Get-Content -Raw $resultFile | ConvertFrom-Json } else { $null }
             $startAfter = Get-ScreenSetting 'start_mode'
-            $entry.verdict = Get-CaseVerdict $res $matrix.observe $screen.start_mode $startAfter
+            $entry.verdict = Get-CaseVerdict -Result $res -Observe $matrix.observe -StartModeRequested $screen.start_mode -StartModeAfter $startAfter
             $entry.detail = [ordered]@{
                 startModeRequested = $screen.start_mode
                 startModeAfter     = $startAfter
@@ -254,8 +243,7 @@ if ($Mode -ne 'probe') {
 
 $passing = @($summary.cases | Where-Object { $_.verdict -like 'PASS*' })
 $summary.finishedAt = (Get-Date).ToString('o')
-$summary.overall = if ($Mode -eq 'probe') { 'PROBE_ONLY' }
-                   elseif ($passing.Count -gt 0) { 'COMPATIBLE' } else { 'INCOMPATIBLE' }
+$summary.overall = Get-OverallVerdict -Mode $Mode -Cases @($summary.cases)
 $summary.passingCases = @($passing.id)
 $summary | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 (Join-Path $resultsDir 'summary.json')
 
