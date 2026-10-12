@@ -1,0 +1,13 @@
+{
+  "solution": {
+    "path": "OpenGta2.sln",
+    "projects": [
+      "src\\OpenGta2.GameData\\OpenGta2.GameData.csproj",
+      "src\\OpenGta2.GameData.UnitTests\\OpenGta2.GameData.UnitTests.csproj",
+      "src\\OpenGta2.DebugConsole\\OpenGta2.DebugConsole.csproj",
+      "src\\OpenGta2.Conformance\\OpenGta2.Conformance.csproj",
+      "src\\OpenGta2.Conformance.Cli\\OpenGta2.Conformance.Cli.csproj",
+      "src\\OpenGta2.Conformance.UnitTests\\OpenGta2.Conformance.UnitTests.csproj"
+    ]
+  }
+}

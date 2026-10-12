@@ -24,7 +24,7 @@ public class Fixed16Tests
     [Fact]
     public void Conversion_should_be_odd_symmetric_for_every_raw_value()
     {
-        for (int raw = short.MinValue + 1; raw <= short.MaxValue; raw++)
+        for (var raw = short.MinValue + 1; raw <= short.MaxValue; raw++)
         {
             float positive = new Fixed16 { _data = (short)raw };
             float negative = new Fixed16 { _data = (short)-raw };

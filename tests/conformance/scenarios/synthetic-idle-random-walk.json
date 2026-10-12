@@ -1,0 +1,9 @@
+{
+  // SYNTHETIC: no input; only the seeded random walker moves. Verifies that seeded
+  // randomness is reproducible across machines. Not GTA 2 data.
+  "schemaVersion": 1,
+  "id": "synthetic-idle-random-walk",
+  "provenance": "synthetic",
+  "simulation": { "tickRateHz": 60, "ticks": 600, "seed": 1 },
+  "capture": { "everyTicks": 10 }
+}
