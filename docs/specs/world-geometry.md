@@ -15,7 +15,7 @@ Każde stwierdzenie o zachowaniu ma lokalizację źródła i jeden z czterech st
 |---|---|---|
 | **[F]** | specyfikacja formatu | Dokument DMA Design w transkrypcji z `docs/formats/*.md`. Mówi, co zapisano w pliku, nie jak oryginał to rysuje. |
 | **[A]** | istniejący dowód automatyczny | Asercja w teście CTest w repozytorium; zakres dokładnie taki, jak w ciele testu. |
-| **[O]** | pomiar na oryginalnej grze | Zrzut lub ślad `provenance: originalGta2` z uruchomionego oryginału. **Obecnie brak jakiegokolwiek** (sekcja 1). |
+| **[O]** | pomiar na oryginalnej grze | Zrzut lub ślad `provenance: originalGta2` z uruchomionego oryginału. **W przejrzanych materiałach nie znaleziono żadnego** (sekcja 1). |
 | **[H]** | hipoteza | Wszystko inne, także propozycje konwencji w tym dokumencie. |
 
 Dwa dodatkowe oznaczenia, które **nie** są dowodem zachowania oryginału:
@@ -32,16 +32,17 @@ Dwa dodatkowe oznaczenia, które **nie** są dowodem zachowania oryginału:
 |---|---|---|---|
 | Dokument „GTA2 map format” v8.2 | transkrypcja: `docs/formats/gmp.md:3-20` | [F] | układ bitów słów ścian i pokrywy, `slope_type`, chunki. Oryginalna strona (gtamp.com) **nie była dostępna w tej sesji** (brak dostępu sieciowego); znaczenie flag poza ich nazwami nie jest w repo przepisane. |
 | Dokument „GBH Style Format” v4.6 | `docs/formats/sty.md:3-20` | [F] | układ kafli 64×64, kolor 0 przezroczysty, kafle 992–1023 zarezerwowane. |
-| Dekodowanie bitów | `tests/unit/assets_tests.cpp:41-58` | [A] | `SideFace`/`LidFace::decode` wyciągają bity zgodnie z [F]. Test syntetyczny — nie mówi nic o znaczeniu flag. |
+| Dekodowanie bitów | `tests/unit/assets_tests.cpp:41-58` | [A] | Trzy wybrane wzorce syntetyczne: `SideFace::decode(0xFFFF)` (wszystkie bity ustawione → kafel 1023, wszystkie flagi, R270; `:43-49`), `LidFace::decode(5 \| 2<<10 \| 1<<14)` (sprawdzane tylko kafel 5, oświetlenie 2, R90 — `flat`/`flip` pokrywy nie są asertowane; `:50-53`) i `slope_type = (41<<2) \| 2` (podłoże Pavement, skos 41; `:54-57`). Przy wszystkich flagach ustawionych naraz zamiana dwóch bitów flag nie zostałaby wykryta. Nic o znaczeniu flag. |
 | Kontrakt T0001 | `engine/scene/include/gta20/scene/block_geometry.hpp:9-25`, `engine/scene/src/block_geometry.cpp:9-15` | [I] | położenie, normalne i kolejność narożników pięciu ścian bloku jednostkowego. |
 | Testy T0001 | `tests/unit/scene_tests.cpp:135-255` | [A] | kod spełnia kontrakt T0001 (płaszczyzny, nawinięcie, translacja, wspólne krawędzie). Oczekiwania są **syntetyczne** (`scene_tests.cpp:39-40`), wyprowadzone z kontraktu, nie z oryginału. |
-| Osie mapy | `tests/unit/gamedata_tests.cpp:141-174` | [A] | tylko `wil.gmp`, wszystkie poziomy z: ściana z bitem `wall` i kaflem ≠ 0 na `left`/`right`/`top`/`bottom` ma pustą komórkę w kierunku `−x`/`+x`/`−y`/`+y` w > 75 % przypadków, a przy zamienionych osiach w < 35 %. Liczby 84–86 % / ~20 % (`gmp.md:24-25`, komentarz `gamedata_tests.cpp:143`) to [D]. |
-| Kafle zarezerwowane | `tests/unit/gamedata_tests.cpp:96-111`, `:214-233` | [A] | w `wil`/`ste`/`bil` żadna ściana boczna nie ma kafla ≥ 992 (`:101`); każdy kafel ścian i pokryw jest < `tile_count` stylu (= 992) albo = 1023 (`:227`); ≥ 95 % pokryw 1023 ma skos 49–52 (`:110`). Mapy `mike1*` i pozostałe nie są tym objęte. |
-| 98,8 % / 992–1022 tylko w `mike1*` | `docs/formats/gmp.md:28-30` | [D] | brak testu, który to powtarza. |
+| Osie mapy | `tests/unit/gamedata_tests.cpp:141-174` | [A] | Tylko `wil.gmp`, tylko komórki wewnętrzne x, y ∈ 1..254 (`:157-158`), wszystkie z = 0..7 (`:156`). Liczone są słowa `left`/`right`/`top`/`bottom` z bitem `wall` i kaflem ≠ 0 (`:162`). Sąsiad na tym samym z w kierunku `−x`/`+x`/`−y`/`+y` jest „otwarty”, gdy `!solid(...)`, gdzie `solid` = pokrywa ≠ 0 **lub** dowolna ściana boczna z bitem `wall` (`:58-60`) — „otwarty” nie znaczy „pusty” (np. blok bez pokrywy z kaflami ścian bez bitu `wall` jest otwarty, a blok drogi z pokrywą nie). Asercje (`:170-172`): > 1000 takich ścian na stronę, otwarty sąsiad w kierunku dokumentu w > 75 %, w kierunku zamienionych osi (`left`→`y−1`, `right`→`y+1`, `top`→`x−1`, `bottom`→`x+1`, `:153`) w < 35 %. Liczby 84–86 % / ~20 % (`gmp.md:24-25`, komentarz `gamedata_tests.cpp:143`) to [D]. |
+| Kafle zarezerwowane | `tests/unit/gamedata_tests.cpp:96-111`, `:214-233` | [A] | Wszystko liczone po **unikalnych rekordach bloków** (`unique_blocks()`, `:98`, `:224`), nie po komórkach mapy — bez ważenia liczbą użyć. W `wil`/`ste`/`bil` żaden rekord nie ma ściany bocznej z kaflem ≥ 992 (`:101`); każdy kafel ścian i pokryw jest < `tile_count` stylu (= 992) albo = 1023 (`:227`); wśród rekordów z pokrywą 1023 co najmniej 95 % ma skos 49–52 (`:104-110`, osobno dla każdego miasta). Mapy `mike1*` i pozostałe nie są tym objęte. |
+| 98,8 % / 992–1022 tylko w `mike1*` | `docs/formats/gmp.md:28-30` | [D] | Brak testu, który to powtarza. `gmp.md` nie zapisuje mianownika; jedyną powtarzalną metodą w repo jest liczenie po unikalnych rekordach bloków (wiersz wyżej), więc 98,8 % należy czytać jako odsetek rekordów, nie komórek mapy. |
 | CMAP | `tests/unit/gamedata_tests.cpp:121-139` | [A] | tylko `wil.gmp` i `mike1m.gmp`: oba chunki się dekodują, a DMAP ma **więcej unikalnych bloków** niż CMAP. Test **nie** porównuje komórek; „inna, starsza wersja miasta” i „inne pokrywy” (`gmp.md:17`, `:27`) to [D]. |
 | Układ kolumn DMAP 100 % | `docs/formats/gmp.md:16`, `:23` | [D] | parser przechodzi na 17 mapach (`gamedata_tests.cpp:77-90`), ale przyleganie kolumn nie jest asercją. |
 | Orientacja pokryw, obrót, odbicie | `docs/formats/gmp.md:31-32`, `docs/reports/2026-10-12-original-assets.md` (sekcja 6–7) | [W] | zrzuty **naszego** silnika (lokalnie `~/Games/GTA2-work/review/*.png`, opisane w lokalnym `REPORT.md`): pasy ciągłe, napisy „SLOW” nieodbite. To nie są zrzuty oryginału ani porównanie automatyczne. |
-| Zrzuty/ślady oryginału | `docs/aws/integration.md:11-18` | — | **brak**: na AWS nic nie wdrożono, `gfx-compat`/`gfx-e2e` nie zostały uruchomione. Zero dowodów [O] dla geometrii. |
+| Zrzuty/ślady oryginału | repozytorium (`docs/`, `tests/`), `~/Games/GTA2-work/REPORT.md` i nazwy plików graficznych w `~/Games/GTA2-work/` (`review/`, `Disk1/`) | — | **W przejrzanych materiałach nie znaleziono żadnej referencji z oryginału.** Pliki w `review/` to według `REPORT.md` zrzuty naszego silnika i podglądy atlasu (`render-*`, `wil-*`, `tiles-*`); `Disk1/setup.bmp` to grafika instalatora. Nie przeglądano innych miejsc na dysku, więc to stwierdzenie nie wyklucza, że lokalne referencje istnieją gdzie indziej. |
+| Historyczna dokumentacja AWS | `docs/aws/integration.md:1-6`, `:32`; `docs/testing.md:69`; `docs/ci/gpu-testing.md:42` | — | Opisuje przechwytywanie na EC2 i prywatny bucket. **Dla tego procesu jest nieaktualna**: obecna polityka zabrania agentom poleceń AWS, więc referencje powstają lokalnie (sekcja 7). To, że na AWS nic nie wdrożono (`integration.md:11-18`), nie dowodzi braku referencji lokalnych. |
 | GTA2_RE | `docs/mechanics-matrix.md:17`, `:19` | — | tylko nazwy funkcji jako wskazówka, gdzie szukać (`DrawGradientSlope_4F6630`, `DrawDiagonalWall_4F02D0`, `Draw_4F6A20`, `Camera.cpp`). W tej sesji GTA2_RE nie był czytany (brak lokalnej kopii); nic tutaj nie pochodzi z jego kodu. |
 
 ## 2. Układ współrzędnych
@@ -52,9 +53,9 @@ Dwa dodatkowe oznaczenia, które **nie** są dowodem zachowania oryginału:
 | Indeks kolumny DMAP to `y·256 + x`; x rośnie wraz z kolumną mapy, y z wierszem. | `gmp.md:24`; pośrednio `gamedata_tests.cpp:141-174` | [F] + [A] (tylko kierunki ścian na `wil.gmp`) |
 | Ściany `left`/`right`/`top`/`bottom` graniczą z sąsiadem w kierunku `−x`/`+x`/`−y`/`+y`. | `gamedata_tests.cpp:141-174` | [A] (statystycznie, `wil.gmp`) |
 | `top`/`bottom` to **ściany pionowe** (granica z poprzednim/następnym wierszem), nie poziome powierzchnie. | `block_geometry.hpp:18-19` | [I]; wynika z [A] powyżej |
-| Na ekranie +y mapy idzie w dół, +x w prawo. | `camera2d.hpp:14-15`, `camera2d.cpp:6-9` | [I] dla naszego silnika; [W] że oryginał wygląda tak samo (pasy, napisy) |
+| Na ekranie +y mapy idzie w dół, +x w prawo. | `camera2d.hpp:14-15`, `camera2d.cpp:6-9` | [I] dla naszego silnika. Dla oryginału **[H]**: obserwacja [W] (ciągłe pasy, czytelne napisy, `gmp.md:31-32`) dotyczy tylko naszego renderu i nie wyklucza np. obrazu odbitego względem oryginału. |
 | z rośnie w górę; poziom z = 0 jest najniższy. | `block_geometry.hpp:11-13`; kolejność rysowania `draw_list.cpp:94` | [I]; dla oryginału [H] — kierunek osi z nie ma w repo ani dowodu [A], ani [O]. Kolejność „niższe najpierw” to [W]. |
-| Gracz porusza się w `z ∈ 1..6`. | `gmp.md:46-47` | [F] — nie mówi, na jakiej wysokości świata leży pokrywa poziomu z. |
+| Gracz porusza się w `z ∈ 1..6`. | `gmp.md:48-49` | [F] — nie mówi, na jakiej wysokości świata leży pokrywa poziomu z. |
 
 ## 3. Pięć ścian bloku
 
@@ -115,11 +116,11 @@ dowodu [O], oznaczona jako nierozstrzygnięta.
 | 5 | `flat` = 1 na pokrywie | nazwa bitu [F] (`gmp.md:13`) | ignorowana; pokrywa rysowana normalnie [I] (`draw_list.cpp:97-113`) | **NIEROZSTRZYGNIĘTE** | WG-FLAT |
 | 6 | Słowo = 0 (kafel 0, bez flag) | blok 0 jest pusty: [A] (`gamedata_tests.cpp:91`, z komentarzem „format document”) | pokrywa z kaflem 0 pominięta [I] (`draw_list.cpp:99-103`) | brak rysowania — [H] (sensowne, ale bez [O]) | WG-WALL-BITS (komórka kontrolna) |
 | 7 | Kafel 0, ale z flagami (`wall`/`flat`/obrót) | możliwe w formacie; występowanie niezmierzone | jak 6 [I] | **NIEROZSTRZYGNIĘTE** (np. niewidzialna ściana) | WG-WALL-BITS |
-| 8 | Kafel 1 … `tile_count`−1 (zwykły) | kafel istnieje w stylu: [A] dla `wil`/`ste`/`bil` (`gamedata_tests.cpp:214-233`) | pokrywa rysowana [I]; ściany nie | pokrywa: [W] (tylko nasz render); ściany: **NIEROZSTRZYGNIĘTE** | WG-ELEV, WG-WALL-SEL |
+| 8 | Kafel 1 … `tile_count`−1 (zwykły) | kafel istnieje w stylu: [A] dla `wil`/`ste`/`bil` (`gamedata_tests.cpp:214-233`) | pokrywa rysowana [I]; ściany nie. Obserwacja [W] naszego renderu: pasy ciągłe, napisy czytelne (`gmp.md:31-32`) | **NIEROZSTRZYGNIĘTE** (pokrywy i ściany) | WG-ELEV, WG-ROT-LID, WG-WALL-SEL |
 | 9 | Kafel 992–1022 | zarezerwowane [F] (`sty.md:20`); brak w miastach [A] (`gamedata_tests.cpp:101`, `:227`); tylko w `mike1*` [D] (`gmp.md:29-30`); cel „animacje silnika” — bez źródła w repo, [H] | pominięty (≥ `tile_count`) [I] (`draw_list.cpp:101`) | **NIEROZSTRZYGNIĘTE** (chunk `ANIM` niezaimplementowany, `gmp.md:20`) | WG-RESERVED |
 | 10 | Kafel 1023 (znacznik) | znacznik trójbocznych skosów: [A] ≥ 95 % na skosach 49–52 (`gamedata_tests.cpp:104-111`); 98,8 % [D]; na ścianach bocznych miast nie występuje [A] (`:101`) | pominięty [I] (`draw_list.cpp:99-101`); slot 1023 atlasu to biały kafel pomocniczy (`draw_list.hpp:30`) — **nie** tekstura 1023 | **NIEROZSTRZYGNIĘTE** (skosy poza zakresem) | WG-RESERVED (po skosach) |
 | 11 | Kafel ≥ `tile_count` stylu, < 992 | dla miast nie występuje [A] (`:227`); `fstyle.sty` ma 0 kafli [A] (`gamedata_tests.cpp:189`); parowanie map bonusowych ze stylem nieustalone | pominięty [I] | **NIEROZSTRZYGNIĘTE** | WG-RESERVED |
-| 12 | Ściana między dwoma pełnymi blokami (zasłonięta) | — | nie dotyczy (brak ścian) | **NIEROZSTRZYGNIĘTE**, czy oryginał ją pomija, czy rysuje i zasłania | WG-WALL-SEL |
+| 12 | Ściana między dwoma pełnymi blokami (zasłonięta) | — | nie dotyczy (brak ścian) | **NIEROZSTRZYGNIĘTE**. Na zrzucie widać tylko, że jej pikseli nie ma; czy oryginał ją pomija, czy rysuje i zasłania, jest **nieobserwowalne** bez osobnego śladu wywołań rysowania | WG-WALL-SEL (piksele); ślad wywołań — brak źródła |
 
 ## 5. Obrót i odbicie
 
@@ -194,47 +195,93 @@ pokrywy kodują tylko obecne zachowanie [I], a dla ścian propozycję [H], i tak
 
 ### 6.2 Pomiary na oryginale potrzebne do wyboru parametrów
 
-Bez zgadywania stałych. Każdy pomiar: oryginał (wersja 9.6 lub 10.5 — identyczne dane, `gmp.md:22`),
-stała rozdzielczość (zapisana), pieszy stojący (bez oddalenia kamery przy jeździe), znana pozycja.
+Bez zgadywania stałych. Warunki każdego pomiaru: oryginał (9.6 lub 10.5 — identyczne dane mapy i
+stylu, `gmp.md:22`), zapisana rozdzielczość, pieszy stojący w spoczynku, zapisana pozycja.
 
-1. **Skala na poziom**: rozmiar w pikselach boku pokrywy na co najmniej trzech różnych poziomach z
-   w tym samym kadrze. Stosunek skal wyznacza wysokość kamery w jednostkach poziomu (model
-   `s(z) = f / (H − z)` jest [H]; trzy poziomy go weryfikują, a nie zakładają).
-2. **Środek perspektywy**: przesunięcie na ekranie narożnika wysokiej pokrywy względem tego samego
-   (x, y) na poziomie gruntu, dla bloków w różnych ćwiartkach ekranu → czy środek rzutu to środek
-   ekranu, czy jest przesunięty.
-3. **Proporcja wysokości**: wysokość widocznej ściany w pikselach vs różnica położeń dolnej i górnej
-   krawędzi → czy wysokość poziomu = szerokość bloku.
-4. **Poziom gruntu i pokrywy**: na jakim z GMP stoi pieszy w znanym miejscu i czy jego sprite pokrywa
-   się z pokrywą poziomu z, czy z + 1 → przeliczenie „poziom GMP → wysokość świata”.
-5. **Wybór ścian**: które z czterech ścian bloku są widoczne w każdej ćwiartce ekranu i czy ściany
-   zasłonięte przez sąsiada są rysowane.
-6. **Zależność od ruchu kamery**: jak skala z pkt 1 zmienia się przy jeździe (wysokość kamery
-   zmienna) — tylko by wiedzieć, że pomiary 1–5 trzeba robić w spoczynku.
-7. **Pole widzenia**: ile bloków gruntu mieści się w poziomie i w pionie przy danej rozdzielczości
-   (i czy zależy od proporcji ekranu).
-8. **Bloki ponad kamerą**: czy wysokie budynki blisko środka są przycinane (płaszczyzna bliska).
+**Model roboczy [H]:** kamera patrzy pionowo w dół (rzut środkowy). Punkt w odległości poziomej
+`x` bloków od osi kamery, na pokrywie o indeksie poziomu `ℓ`, trafia w piksel
+
+    p − c = K · x / (r − ℓ),        K = f · w / h,   r = H / h
+
+gdzie `c` to punkt główny (piksele), `f` ogniskowa (piksele), `w` szerokość bloku i `h` wysokość
+poziomu w jednostkach świata, `H` wysokość kamery w tych samych jednostkach.
+
+**Co jest obserwowalne, a co nie.** Obraz zależy tylko od `K`, `r` i `c`. Wielkości `f`, `w`, `h` i
+`H` osobno **nie są identyfikowalne** ze zrzutów: zwiększenie `w` przy proporcjonalnie mniejszym
+`f`, albo przeskalowanie razem `h` i `H`, daje identyczne piksele. W szczególności **proporcja
+`h / w` (czy blok jest sześcianem) pozostaje nierozstrzygnięta** — zrzuty z góry jej nie mierzą, a
+przy tym modelu do odtworzenia obrazu nie jest potrzebna. Rozstrzygnęłaby ją tylko niezależna
+kalibracja: wielkość znana jednocześnie w jednostkach poziomych i pionowych świata (np. wewnętrzne
+współrzędne obiektu odczytane ze śladu oryginału). W przejrzanych materiałach takiego źródła nie
+ma, więc `h / w` zostaje otwarte. Podobnie przesunięcie indeksu poziomu (`ℓ` → `ℓ + 1`) jest
+nieodróżnialne od `r` → `r − 1`: zrzuty wyznaczają `r` względem przyjętego oznaczenia poziomów
+pokryw, a nie „bezwzględną” wysokość świata pokrywy poziomu GMP z.
+
+Pomiary niezależne (każdy wymaga zrzutu oryginału, [O]):
+
+1. **Skala pokryw na poziom**: długość boku w pikselach górnych pokryw na co najmniej **trzech**
+   różnych poziomach GMP, każda w pełni widoczna (bez zasłonięcia przez wyższego sąsiada).
+   `s(ℓ) = K / (r − ℓ)`: dwa poziomy wyznaczają `r` i `K`, trzeci sprawdza model.
+2. **Punkt główny `c`**: punkt zbieżności rzutów pionowych krawędzi budynków (narożników tych samych
+   (x, y) na różnych poziomach) w co najmniej trzech ćwiartkach ekranu. Brak wspólnego punktu albo
+   różne skale w osi x i y obalają model (kamera pochylona, piksele nie kwadratowe).
+3. **Izotropia**: skala z pkt 1 mierzona osobno wzdłuż x i y mapy.
+4. **Stabilność kamery**: powtórzenie pkt 1 po chwili postoju i po ponownym zatrzymaniu się — czy
+   `r` i `K` w spoczynku są stałe (wpływ jazdy na kamerę jest [H] i poza zakresem).
+5. **Wybór ścian**: które ściany mają **widoczne piksele** w zależności od ćwiartki względem `c`.
+   Czy ściana zasłonięta jest wysyłana do rysowania, jest ze zrzutu nieobserwowalne.
+6. **Bloki blisko kamery**: czy pokrywy przy dużym `ℓ` blisko `c` są przycinane.
+
+Sprawdzenia spójności (nie są niezależnymi pomiarami): wysokość ściany w pikselach i położenie jej
+dolnej/górnej krawędzi wynikają z rzutu pokryw poziomów, między którymi ściana leży — dają tylko
+test, że krawędzie ścian pokrywają się z krawędziami tych pokryw przy `K`, `r`, `c` z pkt 1–2.
+Tak samo zasięg widocznego gruntu wynika z `K`, `r` i rozdzielczości.
+
+Nieobserwowalne ze zrzutów i bez źródła: indeks poziomu GMP, na którym „stoi” pieszy (wymagałby
+śladu współrzędnych z oryginału), `h / w`, `f` i `H` osobno.
 
 ## 7. Przyszłe scenariusze porównawcze
 
-Wszystkie: strona silnika = mapa **syntetyczna** z `GmpWriter` (`gmp_writer.hpp:11-27`), oznaczona
-`provenance: synthetic`, id `synthetic-*`; strona referencyjna = zrzuty oryginału z EC2
-(`provenance: originalGta2`, `docs/testing.md:26`, `:69`), trzymane poza repo (prywatny bucket);
-do repo trafiają tylko współrzędne, numery kafli, parametry kamery i wyniki porównań. Tam, gdzie
-nie da się uruchomić oryginału na mapie syntetycznej, referencja to miejsce w oryginalnej mapie
-(`wil.gmp`) wskazane współrzędnymi. **Żaden scenariusz nie ma dziś dowodu [O]** (sekcja 1).
+**Referencje i ich przechowywanie.** Referencja = zrzut **oryginału uruchomionego lokalnie**
+(`provenance: originalGta2`, `docs/testing.md:26`). Zrzuty i surowe nagrania leżą **poza
+repozytorium**, w lokalnym katalogu roboczym (np. `~/Games/GTA2-work/reference/<scenariusz>/`),
+nigdy w repo, w artefaktach CI ani w chmurze. Do repo trafiają tylko: opis scenariusza, współrzędne
+mapy, numery kafli i słowa ścian, warunki kamery oraz wyciągnięte liczby (piksele etykietowanych
+punktów, `K`, `r`, `c`). Opis EC2 i prywatnego bucketu w `docs/aws/` i `docs/testing.md:69` jest
+dla tego procesu nieaktualny (sekcja 1). **Żaden scenariusz nie ma dziś dowodu [O].**
 
-| Nazwa | Ustawienie | Obserwowany wynik | Pochodzenie referencji | Dowód dziś |
+**Odtwarzalność — dwa tryby ustawienia, ta sama scena w obu środowiskach:**
+
+* **Tryb M (miejsce w oryginalnej mapie, domyślny):** obie strony renderują ten sam plik mapy i stylu
+  z `GTA20_GAME_DIR` (np. `wil.gmp` + `wil.sty`). Scena = współrzędne (x, y, z) bloków; kamera
+  oryginału jest nad stojącym pieszym, więc zapisuje się pozycję pieszego, a nasz silnik ustawia
+  środek kamery w tym samym punkcie mapy i tę samą rozdzielczość. Miejsca wybiera lokalne zapytanie
+  do danych mapy (zwraca tylko współrzędne i słowa ścian, nie piksele), np. „trzy wolnostojące
+  kolumny o różnych poziomach górnej pokrywy w promieniu kadru”. Zależność: sposób doprowadzenia
+  pieszego oryginału do zadanego miejsca i odczytania jego pozycji — nieustalony.
+* **Tryb S (ta sama mapa syntetyczna w obu):** mapa z `GmpWriter` (`gmp_writer.hpp:11-27`),
+  `provenance: synthetic`, id `synthetic-*`, wczytana **także przez oryginał**. Czy oryginał wczyta
+  własną mapę (np. przez plik `.mmp` trybu wieloosobowego), jest [H] i niesprawdzone; do tego czasu
+  tryb S jest tylko zapasowy.
+
+**Porównania między różnymi scenami** (np. gdy referencja i nasz render nie dają się ustawić
+identycznie): porównuje się wyłącznie wielkości niezależne od sceny — `r`, `K` podzielone przez
+wysokość okna w pikselach, `c` jako ułamek wymiarów okna, izotropię, regułę widoczności ścian jako
+funkcję znaku przesunięcia bloku względem `c` w osi x i y, oraz tabelę etykiet A–D dla każdej
+kombinacji obrót/odbicie. Odpowiedniość ustala się po tych kluczach (poziom pokrywy, ćwiartka,
+kombinacja), nie po pikselach. Porównanie surowych pikseli tylko w tej samej scenie i rozdzielczości.
+
+| Nazwa | Ustawienie (tryb) | Obserwowany wynik | Pochodzenie referencji | Dowód dziś |
 |---|---|---|---|---|
-| **WG-ELEV** — wysokość pokryw | kolumna bloków z pokrywami na z = 1, 2, 3, 5 przy płaskim gruncie; pieszy stoi obok; stała rozdzielczość | rozmiar i przesunięcie pokryw w pikselach względem środka ekranu; poziom, na którym stoi pieszy | `originalGta2` (zrzut EC2), miejsce w `wil.gmp` z budynkiem ≥ 3 poziomów | brak [O]; kontrakt T0001 [I]/[A] tylko matematyczny |
-| **WG-PROJ** — parametry rzutu | ten sam kadr co WG-ELEV, bloki w czterech ćwiartkach i w środku ekranu; pomiary 1–3, 7, 8 z sekcji 6.2 | skala na poziom, środek perspektywy, proporcja wysokości, pole widzenia | `originalGta2` | brak |
-| **WG-WALL-SEL** — wybór ścian | wolnostojący blok 1 × 1 × 3 z różnymi kaflami na `left`/`right`/`top`/`bottom`; kamera kolejno w czterech ćwiartkach; drugi wariant z sąsiadem zasłaniającym jedną ścianę | które kafle ścian są widoczne w każdej pozycji; czy zasłonięta ściana jest rysowana | `originalGta2` | brak |
-| **WG-WALL-BITS** — flagi kolizji a widoczność | rząd bloków: zwykły kafel z `wall` = 0, `wall` = 1, `bullet_wall` = 1, kafel 0 z `wall` = 1, słowo 0 | czy każda ściana jest widoczna (piksele) — osobno od tego, czy pieszy przechodzi | `originalGta2`; wcześniej [D]-pomiar występowania tych kombinacji w miastach | brak |
-| **WG-FLAT** — flagi `flat` | ściana boczna z `flat` = 1 na każdej z czterech stron i pokrywa z `flat` = 1; kafel z przezroczystymi pikselami | położenie, przezroczystość, widoczność z obu stron | znaczenie z dokumentu [F] (do przepisania do `gmp.md`) + `originalGta2` | brak; dokument niedostępny w tej sesji |
-| **WG-ROT-LID** — obrót pokrywy | cztery pokrywy z tym samym asymetrycznym kaflem (napis), kody R0–R270, bez odbicia | etykieta A–D w każdym narożniku na ekranie (tabela 5.1) | `originalGta2` | tylko [W] (nasz render Downtown) |
-| **WG-FLIP-ORDER** — kolejność odbicia | jak WG-ROT-LID, z odbiciem: flip + R0 … flip + R270 | jw.; rozróżnia „odbicie przed/po obrocie” i oś odbicia (sekcja 5.2) | `originalGta2` | brak |
-| **WG-ROT-WALL** — obrót/odbicie ścian | blok z asymetrycznym kaflem na każdej ścianie bocznej, 8 kombinacji na ścianę (32 bloki) | etykiety A–D w narożnikach widzianych z zewnątrz; czy `left`/`right` są lustrzane (sekcja 3) | `originalGta2` (wymaga najpierw WG-WALL-SEL i WG-PROJ) | brak |
-| **WG-RESERVED** — kafle spoza stylu | pokrywy i ściany z kaflem 992, 1022, 1023 (bez skosu) i ≥ `tile_count` | co rysuje oryginał (nic, animacja, błąd) | `originalGta2` na mapie `mike1*` (kafle 992–1022 według [D]) | brak |
+| **WG-ELEV** — wysokość pokryw | M (S zapasowo): co najmniej trzy **osobne** kolumny z górnymi pokrywami na różnych poziomach GMP plus pokrywa gruntu, z odstępami, tak by żadna górna pokrywa nie była zasłonięta przez wyższego sąsiada i każda mieściła się w kadrze; pieszy stoi w spoczynku | długość boku każdej górnej pokrywy w pikselach → `r`, `K` (sekcja 6.2, pkt 1) i sprawdzenie modelu trzecim poziomem | `originalGta2`, lokalny zrzut | brak [O]; kontrakt T0001 [I]/[A] tylko matematyczny |
+| **WG-PROJ** — parametry rzutu | M: kadr jak WG-ELEV, z pionowymi narożnikami budynków w co najmniej trzech ćwiartkach; dwa zrzuty w spoczynku | `c`, izotropia, stabilność (pkt 2–4, 6); sprawdzenia spójności krawędzi ścian | `originalGta2`, lokalny | brak |
+| **WG-WALL-SEL** — wybór ścian | M: bloki o różnych kaflach na `left`/`right`/`top`/`bottom`, położone w czterech ćwiartkach względem `c`; dodatkowo blok, którego jedną ścianę zasłania sąsiad | **tylko widoczne piksele**: które kafle ścian są widoczne w każdej ćwiartce. Czy zasłonięta ściana jest wysyłana do rysowania — nieobserwowalne bez osobnego śladu wywołań (brak źródła) | `originalGta2`, lokalny | brak |
+| **WG-WALL-BITS** — flagi kolizji a widoczność | M: miejsca (zapytanie do danych) ze ścianą boczną o zwykłym kaflu przy `wall` = 0, `wall` = 1, `bullet_wall` = 1, z kaflem 0 i flagami, oraz słowo 0, każda zwrócona ku otwartej komórce; S, jeśli któraś kombinacja nie występuje | widoczne piksele każdej z tych ścian; przechodzenie pieszego to osobny test kolizji | `originalGta2`, lokalny | brak; występowanie kombinacji w miastach niezmierzone |
+| **WG-FLAT** — flagi `flat` | M: ściany boczne i pokrywy z `flat` = 1 (zapytanie do danych), najlepiej z kaflem o przezroczystych pikselach; S, jeśli brak | położenie, przezroczystość, widoczność z obu stron | znaczenie z dokumentu [F] (do przepisania do `gmp.md`) + `originalGta2`, lokalny | brak; dokument niedostępny w tej sesji |
+| **WG-ROT-LID** — obrót pokrywy | M: pokrywy z asymetrycznym kaflem (np. napis) w kodach R0–R270 bez odbicia; ten sam blok renderowany przez oba środowiska | dla każdej pokrywy: który narożnik obrazka kafla (A–D) jest w którym narożniku na ekranie (tabela 5.1) | `originalGta2`, lokalny | tylko [W] (nasz render Downtown), brak [O] |
+| **WG-FLIP-ORDER** — kolejność odbicia | jak WG-ROT-LID, z odbiciem: flip + R0 … flip + R270 | jw.; rozróżnia „odbicie przed/po obrocie”, kierunek obrotu i oś odbicia (sekcja 5.2) | `originalGta2`, lokalny | brak |
+| **WG-ROT-WALL** — obrót/odbicie ścian | M (S zapasowo): ściany boczne z asymetrycznym kaflem, 8 kombinacji na każdą z czterech stron, widoczne według WG-WALL-SEL | etykiety A–D w narożnikach widocznej ściany; czy `left`/`right` są lustrzane (sekcja 3) | `originalGta2`, lokalny (po WG-WALL-SEL i WG-PROJ) | brak |
+| **WG-RESERVED** — kafle spoza stylu | M na mapie `mike1*` (rekordy z kaflami 992–1022 według [D]) oraz pokrywy 1023 bez skosu; S dla kafli ≥ `tile_count` | co widać w miejscu tych ścian/pokryw (nic, animacja, inny kafel) | `originalGta2`, lokalny | brak |
 
 ## 8. Rekomendacja na następne zadanie (1–2 h)
 
@@ -254,8 +301,14 @@ Dlaczego to: jest niezależne od nierozstrzygniętej projekcji i wysokości, prz
 1. Kierunek obrotu, oś i kolejność odbicia w oryginale (WG-ROT-LID, WG-FLIP-ORDER) — może zmienić
    oczekiwania dla pokrywy, a więc i obecny render.
 2. Orientacja u na ścianach bocznych (lustrzana czy wzdłuż +x/+y) — WG-ROT-WALL.
-3. Przeliczenie poziomu GMP na wysokość świata i parametry rzutu — WG-ELEV, WG-PROJ.
+3. Parametry rzutu `K`, `r`, `c` — WG-ELEV, WG-PROJ. Proporcja `h / w` i „bezwzględna” wysokość
+   pokrywy poziomu GMP z zostają otwarte (sekcja 6.2); renderer nie powinien od nich zależeć.
 4. Widoczność ścian a bity `wall`/`bullet_wall`/`flat`, kafel 0 z flagami — WG-WALL-BITS, WG-FLAT;
    najpierw przepisać do `gmp.md` znaczenie `flat` z dokumentu DMA (niedostępnego w tej sesji).
-5. Pierwsze zrzuty oryginału wymagają EC2 (`docs/aws/integration.md`) — decyzja i zgoda
-   właściciela na koszty; agent nie może tego uruchomić.
+5. Lokalne uruchomienie oryginału. `gta2.exe` to program Windows (PE;
+   `docs/reports/2026-10-12-original-assets.md`, sekcja 1) z własnymi DLL-ami renderera (sekcja 4
+   raportu), a ten komputer to macOS arm64. Potrzebne jest środowisko Windows, którym właściciel
+   już dysponuje (np. zainstalowana tu aplikacja UTM albo osobny komputer z Windows); czy renderer
+   oryginału w nim działa, nie sprawdzono. Do tego: sposób robienia zrzutów, doprowadzenie pieszego
+   do miejsc z trybu M i odczyt jego pozycji. Żadna płatna infrastruktura nie jest tu proponowana;
+   przechwytywanie robi właściciel albo zadanie, które dostanie takie środowisko.
