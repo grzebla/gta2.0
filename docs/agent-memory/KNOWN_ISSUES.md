@@ -1,3 +1,3 @@
 # Known Issues
 
-T0002 at 157810f requires three documentation corrections: preserve the unknown denominator of the historical 98.8% measurement, fix the projection scale-invariance example, and qualify camera alignment/cross-resolution comparison assumptions. The previous cloud-capture conflict and most evidence-scope defects are resolved. No original-game geometry comparison has been established.
+The three T0002 documentation findings are resolved. No original-game geometry comparison has been established. Projection, elevation, texture orientation, face-selection and flat/bullet-wall behavior remain unresolved. DMA source documents were unavailable to the developer; local original-game execution and capture positioning remain untested. The stale draw_list.cpp:111 citation and build-tree original-data capture destinations remain follow-up issues.
