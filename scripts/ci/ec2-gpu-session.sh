@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# OpenGTA2 - drive one GPU test session on the pre-provisioned EC2 G4dn host.
+# GTA20 - drive one GPU test session on the pre-provisioned EC2 G4dn host.
 #
 # Usage: ec2-gpu-session.sh <resolve|start|upload|run|collect|stop>
 #
@@ -22,7 +22,7 @@ GFX_MODE="${GFX_MODE:-compat}"
 GFX_CASES="${GFX_CASES:-all}"
 MAX_MINUTES="${MAX_MINUTES:-45}"
 RESULTS_DIR="${RESULTS_DIR:-gfx-results}"
-PROJECT_TAG="${PROJECT_TAG:-OpenGTA2}"
+PROJECT_TAG="${PROJECT_TAG:-GTA20}"
 
 [[ "$RUN_ID" =~ ^[A-Za-z0-9-]{1,64}$ ]] || die "invalid RUN_ID"
 [[ "$GFX_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || die "invalid GFX_BUCKET"
@@ -102,7 +102,7 @@ cmd_run() {
   local ps
   ps=$(cat <<EOF
 \$ErrorActionPreference = 'Stop'
-\$dir = 'C:\\OpenGTA2\\runs\\${RUN_ID}\\scripts'
+\$dir = 'C:\\GTA20\\runs\\${RUN_ID}\\scripts'
 New-Item -ItemType Directory -Force -Path \$dir | Out-Null
 foreach (\$m in @('AWS.Tools.S3','AWSPowerShell')) { if (Get-Module -ListAvailable -Name \$m) { Import-Module \$m; break } }
 Read-S3Object -BucketName '${GFX_BUCKET}' -KeyPrefix 'runs/${RUN_ID}/scripts' -Folder \$dir -Region '${AWS_REGION}' | Out-Null
@@ -116,7 +116,7 @@ EOF
   cmd_id=$(aws ssm send-command --region "$AWS_REGION" \
     --document-name AWS-RunPowerShellScript \
     --instance-ids "$id" \
-    --comment "OpenGTA2 gfx ${GFX_MODE} ${RUN_ID}" \
+    --comment "GTA20 gfx ${GFX_MODE} ${RUN_ID}" \
     --timeout-seconds 600 \
     --parameters "$params" \
     --output-s3-bucket-name "$GFX_BUCKET" \

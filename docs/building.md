@@ -8,14 +8,14 @@ konfiguracji (zależności pobierane i weryfikowane SHA-256 do `.deps/`).
 | `debug` | wszystko + testy | |
 | `release` | wszystko + testy | |
 | `asan` | wszystko + testy, ASan + UBSan | Clang/GCC (macOS, Linux) |
-| `headless` | bez SDL: core, assets, sim, scene, testing, g2n-headless, testy | nie wymaga ekranu ani GPU |
+| `headless` | bez SDL: core, assets, sim, scene, testing, gta20-headless, testy | nie wymaga ekranu ani GPU |
 
 ```bash
 cmake --preset release
 cmake --build --preset release
 ctest --preset release
-./build/release/bin/gta2n                     # okno; strzałki/WASD, kółko = zoom, Esc = wyjście
-./build/release/bin/gta2n --offscreen 960x540 --screenshot shot.bmp
+./build/release/bin/gta2                     # okno; strzałki/WASD, kółko = zoom, Esc = wyjście
+./build/release/bin/gta2 --offscreen 960x540 --screenshot shot.bmp
 ```
 
 ## macOS (Apple Silicon)
@@ -68,9 +68,9 @@ Zweryfikowane: wydanie 9.6 (Rockstar 2004, kompletne) i 10.5 (Freeloader, bez mu
 identyczne mapy i style. Aby użyć instalacji:
 
 ```bash
-export G2N_GAME_DIR=/ścieżka/do/GTA2
-./build/release/bin/gta2n --level data/wil.gmp     # wil/ste/bil; styl .sty dobierany automatycznie
-./build/release/bin/gta2n --level data/ste.gmp --camera 100,60 --zoom 12   # Tab = kamera swobodna
+export GTA20_GAME_DIR=/ścieżka/do/GTA2
+./build/release/bin/gta2 --level data/wil.gmp     # wil/ste/bil; styl .sty dobierany automatycznie
+./build/release/bin/gta2 --level data/ste.gmp --camera 100,60 --zoom 12   # Tab = kamera swobodna
 ctest --preset release                             # włącza testy [gamedata] i gamedata.render.*
-G2N_GAME_DIR_105=~/Games/GTA2-10.5 ctest ...        # dodatkowo porównanie danych 9.6 i 10.5
+GTA20_GAME_DIR_105=~/Games/GTA2-10.5 ctest ...        # dodatkowo porównanie danych 9.6 i 10.5
 ```

@@ -92,7 +92,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "### OpenGTA2 graphics session (${GFX_MODE})"
+            echo "### GTA20 graphics session (${GFX_MODE})"
             if [[ -f "$RESULTS_DIR/summary.json" ]]; then
               jq -r '"**Overall:** \(.overall)  \n**GPU:** \(.gpu // "none")  \n**Driver:** \(.driverStrategy)\n\n| case | verdict |\n|---|---|", (.cases[]? | "| \(.id) | \(.verdict) |")' "$RESULTS_DIR/summary.json"
             else

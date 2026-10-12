@@ -5,8 +5,8 @@ set -euo pipefail
 
 export AWS_REGION="${AWS_REGION:-eu-north-1}"
 export AWS_DEFAULT_REGION="$AWS_REGION"
-GFX_STACK="${GFX_STACK:-opengta2-gfx}"
-OIDC_STACK="${OIDC_STACK:-opengta2-github-oidc}"
+GFX_STACK="${GFX_STACK:-gta20-gfx}"
+OIDC_STACK="${OIDC_STACK:-gta20-github-oidc}"
 # shellcheck disable=SC2034 # used by the scripts that source this file
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 

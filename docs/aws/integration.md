@@ -22,7 +22,7 @@ pierwszym uruchomieniem: [../ci/gfx-compat-checklist.md](../ci/gfx-compat-checkl
 
 Symulacja IAM (`SimulatePrincipalPolicy` z kontekstem SCP) dla bieżącej roli potwierdza
 **39/39** akcji potrzebnych do wdrożenia stosu hosta i uruchomienia testu (CloudFormation,
-IAM role/profile w ścieżce `/opengta2/`, EC2 `RunInstances` g4dn, SSM `SendCommand`, S3,
+IAM role/profile w ścieżce `/gta20/`, EC2 `RunInstances` g4dn, SSM `SendCommand`, S3,
 Lambda, EventBridge, CloudWatch Logs). Pierwszy test przeprowadza operator z własnego
 komputera skryptami `scripts/aws/`:
 
@@ -33,7 +33,7 @@ scripts/aws/upload-game.sh ~/gta2-10.5.zip             # prywatny bucket (blokad
 scripts/aws/run-gfx-compat-local.sh probe              # 💰 stop hosta w trap (błąd, Ctrl-C, timeout)
 scripts/aws/run-gfx-compat-local.sh compat
 scripts/aws/cost-check.sh                              # inwentarz kosztowych zasobów (tylko odczyt)
-scripts/aws/teardown.sh [--purge-bucket]               # usunięcie stosów; wymaga wpisania "usun-opengta2"
+scripts/aws/teardown.sh [--purge-bucket]               # usunięcie stosów; wymaga wpisania "usun-gta20"
 ```
 
 GitHub Actions (`gfx-compat`, `gfx-e2e`) wymaga roli OIDC, więc dopiero po aktywacji
@@ -47,7 +47,7 @@ advanced features.
 | Czy Windows zapewnia aktywną sesję graficzną? | SSM działa w sesji 0 bez pulpitu. Bootstrap tworzy użytkownika `gta2runner` z autologowaniem na konsoli; gra startuje przez zadanie harmonogramu `LogonType Interactive` w jego sesji. Basic Display Adapter **nie jest wyłączany** (bez RDP/DCV to jedyny ekran sesji konsoli). | projekt; weryfikacja w `probe` (`interactiveSession`) |
 | Czy watchdog działa niezależnie od GitHub Actions? | Tak: zadanie systemowe (`shutdown /s` po `MaxRuntimeMinutes`, instalowane w UserData) i Lambda-reaper co 10 min (od `LaunchTime`, limit ograniczony do 15–180 min) nie zależą od GitHuba ani od siebie nawzajem. | analiza + testy offline |
 | Czy instancja zatrzyma się po awarii, timeoucie lub anulowaniu? | GitHub: szybki stop w zadaniu sesji + `ensure-stopped` (`if: always()`); lokalnie: `trap` w `run-gfx-compat-local.sh` (test Bash potwierdza stop po nieudanym teście). Niezależnie: watchdog i reaper. Najgorszy przypadek ~80 min (~1 USD). | testy offline (atrapa `aws`) |
-| Czy bootstrap poprawnie obsługuje restarty? | Kod 3010 → SSM restartuje i ponawia komendę. Kroki są idempotentne (markery w `C:\OpenGTA2\state`), a licznik restartów (maks. 3 na przebieg) przerywa pętlę błędem `REBOOT_LOOP`. | test Pester (`Register-RebootAttempt`) |
+| Czy bootstrap poprawnie obsługuje restarty? | Kod 3010 → SSM restartuje i ponawia komendę. Kroki są idempotentne (markery w `C:\GTA20\state`), a licznik restartów (maks. 3 na przebieg) przerywa pętlę błędem `REBOOT_LOOP`. | test Pester (`Register-RebootAttempt`) |
 | Czy `gfx-compat` odróżnia działający proces od renderowania? | Tak: przed startem gry zrzucany jest pulpit bazowy, a klatka liczy się jako wyrenderowana tylko przy ≥ 24 kolorach, ≤ 97% czerni **i** zmianie ≥ 25% pikseli względem bazy (albo zmianie rozdzielczości). Żywy proces nad niezmienionym pulpitem daje `FAIL_NO_VISIBLE_CHANGE`. | 17 testów Pester na syntetycznych buforach |
 
 ## Plan pozyskania danych referencyjnych

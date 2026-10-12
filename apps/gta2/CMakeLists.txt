@@ -1,0 +1,6 @@
+add_executable(gta2 main.cpp)
+target_link_libraries(gta2 PRIVATE gta20::core gta20::assets gta20::sim gta20::scene gta20::render gta20::platform)
+gta20_target_defaults(gta2)
+if(APPLE)
+    set_target_properties(gta2 PROPERTIES MACOSX_BUNDLE OFF)
+endif()

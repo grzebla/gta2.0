@@ -1,11 +1,11 @@
-#include "g2n/scene/draw_list.hpp"
+#include "gta20/scene/draw_list.hpp"
 
-#include "g2n/assets/sty_style.hpp"
+#include "gta20/assets/sty_style.hpp"
 
 #include <algorithm>
 #include <cmath>
 
-namespace g2n::scene {
+namespace gta20::scene {
 namespace {
 
 QuadInstance cell_quad(int x, int y, u8 r, u8 g, u8 b) {
@@ -170,4 +170,4 @@ void append_entities(DrawList& list, const std::vector<EntityView>& entities) {
     }
 }
 
-} // namespace g2n::scene
+} // namespace gta20::scene

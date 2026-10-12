@@ -1,6 +1,6 @@
-#include "g2n/core/handle_pool.hpp"
+#include "gta20/core/handle_pool.hpp"
 
-namespace g2n {
+namespace gta20 {
 
 EntityId HandlePool::allocate() {
     if (!free_.empty()) {
@@ -28,4 +28,4 @@ bool HandlePool::alive(EntityId id) const {
            (id.generation & 1U) != 0;
 }
 
-} // namespace g2n
+} // namespace gta20

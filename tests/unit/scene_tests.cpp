@@ -1,9 +1,9 @@
 #include <doctest/doctest.h>
 
-#include "g2n/assets/gmp_writer.hpp"
-#include "g2n/scene/draw_list.hpp"
+#include "gta20/assets/gmp_writer.hpp"
+#include "gta20/scene/draw_list.hpp"
 
-using namespace g2n;
+using namespace gta20;
 
 TEST_CASE("Scene: map quads are culled to the visible rectangle") {
     auto map = assets::parse_gmp(assets::build_synthetic_test_map());

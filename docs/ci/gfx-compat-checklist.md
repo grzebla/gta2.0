@@ -38,7 +38,7 @@ teraz na niezmiennych ID repozytorium, właściciela i aktora, gałęzi `main` o
 
 | Mechanizm | Wyzwalacz | Zależy od | Nie zależy od | Znane ograniczenia |
 |---|---|---|---|---|
-| A. Watchdog w systemie (`OpenGTA2-Watchdog`) | `shutdown /s` po `MaxRuntimeMinutes` od startu systemu | Windows uruchomiony, harmonogram zadań, IMDS (fallback 60 min) | GitHub, Lambda, EventBridge, API EC2, IAM | restart systemu (np. bootstrap 3010) liczy czas od nowa; zawieszony system go nie wykona |
+| A. Watchdog w systemie (`GTA20-Watchdog`) | `shutdown /s` po `MaxRuntimeMinutes` od startu systemu | Windows uruchomiony, harmonogram zadań, IMDS (fallback 60 min) | GitHub, Lambda, EventBridge, API EC2, IAM | restart systemu (np. bootstrap 3010) liczy czas od nowa; zawieszony system go nie wykona |
 | B. Lambda reaper (co 10 min) | `LaunchTime` > `MaxRuntimeMinutes` + 10 min (ograniczone do 15–180) | EventBridge, Lambda, API EC2, rola reapera | Windows, GitHub, OIDC | błędy Lambdy nie mają alarmu; reaguje do ~20 min po limicie |
 | C. `ensure-stopped` w GitHub Actions | koniec sesji (sukces, błąd, timeout, anulowanie) | GitHub Actions, OIDC, rola stop | Windows, Lambda | nie zadziała przy awarii GitHuba lub przy braku roli/dostawcy OIDC |
 | D. Szybki stop w zadaniu sesji | ostatni krok sesji (`if: always()`) | jak C | jak C | — |
@@ -90,10 +90,10 @@ akcje budżetowe nie zastąpią mechanizmów A–D. Te zatrzymują hosta w ciąg
 | 1 | Wniosek o limit GPU zatwierdzony (≥ 4 vCPU) | AWS | ✅ |
 | 2 | Advanced features aktywowane (warunek utworzenia dostawcy OIDC) | Ty, AWS Settings | 🧑 |
 | 3 | Budżet z alertami: `infra/aws/create-budget.sh <e-mail> 15` — najlepiej przed krokiem 2 | Ty lub ja po zgodzie | 🧑 |
-| 4 | Stos `opengta2-gfx` (instancja startuje od razu, watchdog wyłączy ją po 60 min) | Ty lub ja po zgodzie | 💰🧑 |
+| 4 | Stos `gta20-gfx` (instancja startuje od razu, watchdog wyłączy ją po 60 min) | Ty lub ja po zgodzie | 💰🧑 |
 | 5 | Zaraz po kroku 4: zatrzymać instancję albo od razu uruchomić `probe` | — | 💰 |
-| 6 | Stos `opengta2-github-oidc` | Ty lub ja po zgodzie (po kroku 2) | 🧑 |
-| 7 | Gra: zip własnej instalacji GTA 2 10.5 → `s3://opengta2-gfx-artifacts-433213574600/game/gta2-10.5.zip` (prywatny bucket z blokadą dostępu publicznego); SHA-256 → `game.sha256` w macierzy, commit na `main` | Ty | 🧑 |
+| 6 | Stos `gta20-github-oidc` | Ty lub ja po zgodzie (po kroku 2) | 🧑 |
+| 7 | Gra: zip własnej instalacji GTA 2 10.5 → `s3://gta20-gfx-artifacts-433213574600/game/gta2-10.5.zip` (prywatny bucket z blokadą dostępu publicznego); SHA-256 → `game.sha256` w macierzy, commit na `main` | Ty | 🧑 |
 | 8 | Zmienne repo `AWS_REGION`, `GFX_BUCKET`, `AWS_GFX_ROLE_ARN`, `AWS_GFX_STOP_ROLE_ARN` | ustawione | ✅ |
 | 9 | `infra-lint` zielony na `main` | GitHub | ✅ po pushu |
 | 10 | `gfx-compat`: `mode=probe`, `max_minutes=45`, `cost_confirmation=uruchom-ec2` | Ty | 💰🧑 |

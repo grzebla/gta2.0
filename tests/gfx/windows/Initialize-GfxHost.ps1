@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Idempotent bootstrap of the OpenGTA2 GPU test host. Runs as SYSTEM via SSM.
+  Idempotent bootstrap of the GTA20 GPU test host. Runs as SYSTEM via SSM.
 
 .DESCRIPTION
   - creates the low-privilege interactive test user and console autologon
@@ -19,7 +19,7 @@ param(
     [Parameter(Mandatory)] [string] $Bucket,
     [Parameter(Mandatory)] [string] $Region,
     [Parameter(Mandatory)] [string] $MatrixPath,
-    [string] $Root = 'C:\OpenGTA2',
+    [string] $Root = 'C:\GTA20',
     [string] $TestUser = 'gta2runner'
 )
 
@@ -61,8 +61,8 @@ function New-RandomPassword {
 }
 
 # ---------------------------------------------------------------- watchdog sanity
-if (-not (Get-ScheduledTask -TaskName 'OpenGTA2-Watchdog' -ErrorAction SilentlyContinue)) {
-    throw 'OpenGTA2-Watchdog task is missing. Refusing to continue without the runtime guard.'
+if (-not (Get-ScheduledTask -TaskName 'GTA20-Watchdog' -ErrorAction SilentlyContinue)) {
+    throw 'GTA20-Watchdog task is missing. Refusing to continue without the runtime guard.'
 }
 
 # ---------------------------------------------------------------- Windows Update: no surprise reboots
@@ -88,7 +88,7 @@ if (-not $user -or -not $autologonOk) {
     $secure = ConvertTo-SecureString $plain -AsPlainText -Force
     if (-not $user) {
         New-LocalUser -Name $TestUser -Password $secure -PasswordNeverExpires -AccountNeverExpires `
-            -Description 'OpenGTA2 graphics test (interactive console session)' | Out-Null
+            -Description 'GTA20 graphics test (interactive console session)' | Out-Null
         Add-LocalGroupMember -Group 'Users' -Member $TestUser -ErrorAction SilentlyContinue
         Write-Step "created local user $TestUser"
     } else {

@@ -1,7 +1,7 @@
 # Render-API-independent draw lists: testable without SDL or a GPU.
-add_library(g2n_scene
+add_library(gta20_scene
     src/draw_list.cpp)
-add_library(g2n::scene ALIAS g2n_scene)
-target_include_directories(g2n_scene PUBLIC include)
-target_link_libraries(g2n_scene PUBLIC g2n::core g2n::assets)
-g2n_target_defaults(g2n_scene)
+add_library(gta20::scene ALIAS gta20_scene)
+target_include_directories(gta20_scene PUBLIC include)
+target_link_libraries(gta20_scene PUBLIC gta20::core gta20::assets)
+gta20_target_defaults(gta20_scene)

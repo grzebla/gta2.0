@@ -1,8 +1,8 @@
-#include "g2n/assets/gmp_writer.hpp"
+#include "gta20/assets/gmp_writer.hpp"
 
 #include <algorithm>
 
-namespace g2n::assets {
+namespace gta20::assets {
 namespace {
 
 class ByteWriter {
@@ -139,4 +139,4 @@ std::vector<std::byte> build_synthetic_test_map() {
     return w.build_dmap();
 }
 
-} // namespace g2n::assets
+} // namespace gta20::assets

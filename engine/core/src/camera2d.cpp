@@ -1,6 +1,6 @@
-#include "g2n/core/camera2d.hpp"
+#include "gta20/core/camera2d.hpp"
 
-namespace g2n {
+namespace gta20 {
 
 std::array<float, 16> Camera2D::view_projection(Vec2f viewport_px) const {
     // clip.x =  (world.x - center.x) * ppu * 2 / width
@@ -31,4 +31,4 @@ Rect Camera2D::visible_world(Vec2f viewport_px) const {
     return {screen_to_world({0, 0}, viewport_px), screen_to_world(viewport_px, viewport_px)};
 }
 
-} // namespace g2n
+} // namespace gta20

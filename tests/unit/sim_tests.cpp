@@ -1,10 +1,10 @@
 #include <doctest/doctest.h>
 
-#include "g2n/assets/gmp_writer.hpp"
-#include "g2n/sim/world.hpp"
+#include "gta20/assets/gmp_writer.hpp"
+#include "gta20/sim/world.hpp"
 
-using namespace g2n;
-using namespace g2n::sim;
+using namespace gta20;
+using namespace gta20::sim;
 
 namespace {
 InputFrame hold(std::initializer_list<Button> buttons) {

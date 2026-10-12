@@ -7,7 +7,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 purge="${1:-}"
 bucket=$(stack_output "$GFX_STACK" ArtifactsBucketName || true)
 
-confirm "usun-opengta2" "Delete stacks $OIDC_STACK and $GFX_STACK in $AWS_REGION (instance, volume, roles, reaper).
+confirm "usun-gta20" "Delete stacks $OIDC_STACK and $GFX_STACK in $AWS_REGION (instance, volume, roles, reaper).
 $( [[ "$purge" == "--purge-bucket" ]] && echo "ALSO empty and delete bucket ${bucket:-?} (game zip, results)." )"
 
 for stack in "$OIDC_STACK" "$GFX_STACK"; do

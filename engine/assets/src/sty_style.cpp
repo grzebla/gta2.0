@@ -1,13 +1,13 @@
-#include "g2n/assets/sty_style.hpp"
+#include "gta20/assets/sty_style.hpp"
 
 #include <algorithm>
 #include <cstring>
 #include <string>
 
-#include "g2n/assets/chunk_file.hpp"
-#include "g2n/core/byte_reader.hpp"
+#include "gta20/assets/chunk_file.hpp"
+#include "gta20/core/byte_reader.hpp"
 
-namespace g2n::assets {
+namespace gta20::assets {
 namespace {
 
 std::vector<u8> copy_bytes(std::span<const std::byte> s) {
@@ -209,4 +209,4 @@ Result<StyStyle> parse_sty(std::span<const std::byte> bytes) {
     return style;
 }
 
-} // namespace g2n::assets
+} // namespace gta20::assets

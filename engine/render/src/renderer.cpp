@@ -1,24 +1,24 @@
-#include "g2n/render/renderer.hpp"
+#include "gta20/render/renderer.hpp"
 
 #include <SDL3/SDL.h>
 
 #include <array>
 #include <cstring>
 
-extern const unsigned char g2n_quad_vert_spv[];
-extern const std::size_t g2n_quad_vert_spv_size;
-extern const unsigned char g2n_quad_frag_spv[];
-extern const std::size_t g2n_quad_frag_spv_size;
-extern const unsigned char g2n_quad_msl[];
-extern const std::size_t g2n_quad_msl_size;
-#if defined(G2N_D3D_SHADER_FORMAT_DXIL) || defined(G2N_D3D_SHADER_FORMAT_DXBC)
-extern const unsigned char g2n_quad_vs_d3d[];
-extern const std::size_t g2n_quad_vs_d3d_size;
-extern const unsigned char g2n_quad_ps_d3d[];
-extern const std::size_t g2n_quad_ps_d3d_size;
+extern const unsigned char gta20_quad_vert_spv[];
+extern const std::size_t gta20_quad_vert_spv_size;
+extern const unsigned char gta20_quad_frag_spv[];
+extern const std::size_t gta20_quad_frag_spv_size;
+extern const unsigned char gta20_quad_msl[];
+extern const std::size_t gta20_quad_msl_size;
+#if defined(GTA20_D3D_SHADER_FORMAT_DXIL) || defined(GTA20_D3D_SHADER_FORMAT_DXBC)
+extern const unsigned char gta20_quad_vs_d3d[];
+extern const std::size_t gta20_quad_vs_d3d_size;
+extern const unsigned char gta20_quad_ps_d3d[];
+extern const std::size_t gta20_quad_ps_d3d_size;
 #endif
 
-namespace g2n::render {
+namespace gta20::render {
 namespace {
 
 std::string sdl_error(const char* what) {
@@ -26,9 +26,9 @@ std::string sdl_error(const char* what) {
 }
 
 constexpr SDL_GPUShaderFormat kD3DFormat =
-#if defined(G2N_D3D_SHADER_FORMAT_DXIL)
+#if defined(GTA20_D3D_SHADER_FORMAT_DXIL)
     SDL_GPU_SHADERFORMAT_DXIL;
-#elif defined(G2N_D3D_SHADER_FORMAT_DXBC)
+#elif defined(GTA20_D3D_SHADER_FORMAT_DXBC)
     SDL_GPU_SHADERFORMAT_DXBC;
 #else
     SDL_GPU_SHADERFORMAT_INVALID;
@@ -109,26 +109,26 @@ struct Renderer::Impl {
         fs.num_samplers = 1;
         if ((formats & SDL_GPU_SHADERFORMAT_MSL) != 0) {
             vs.format = fs.format = SDL_GPU_SHADERFORMAT_MSL;
-            vs.code = fs.code = g2n_quad_msl;
-            vs.code_size = fs.code_size = g2n_quad_msl_size;
+            vs.code = fs.code = gta20_quad_msl;
+            vs.code_size = fs.code_size = gta20_quad_msl_size;
             vs.entrypoint = "vs_main";
             fs.entrypoint = "fs_main";
-#if defined(G2N_D3D_SHADER_FORMAT_DXIL) || defined(G2N_D3D_SHADER_FORMAT_DXBC)
+#if defined(GTA20_D3D_SHADER_FORMAT_DXIL) || defined(GTA20_D3D_SHADER_FORMAT_DXBC)
         } else if ((formats & kD3DFormat) != 0) {
             vs.format = fs.format = kD3DFormat;
-            vs.code = g2n_quad_vs_d3d;
-            vs.code_size = g2n_quad_vs_d3d_size;
-            fs.code = g2n_quad_ps_d3d;
-            fs.code_size = g2n_quad_ps_d3d_size;
+            vs.code = gta20_quad_vs_d3d;
+            vs.code_size = gta20_quad_vs_d3d_size;
+            fs.code = gta20_quad_ps_d3d;
+            fs.code_size = gta20_quad_ps_d3d_size;
             vs.entrypoint = "VSMain";
             fs.entrypoint = "PSMain";
 #endif
         } else if ((formats & SDL_GPU_SHADERFORMAT_SPIRV) != 0) {
             vs.format = fs.format = SDL_GPU_SHADERFORMAT_SPIRV;
-            vs.code = g2n_quad_vert_spv;
-            vs.code_size = g2n_quad_vert_spv_size;
-            fs.code = g2n_quad_frag_spv;
-            fs.code_size = g2n_quad_frag_spv_size;
+            vs.code = gta20_quad_vert_spv;
+            vs.code_size = gta20_quad_vert_spv_size;
+            fs.code = gta20_quad_frag_spv;
+            fs.code_size = gta20_quad_frag_spv_size;
             vs.entrypoint = fs.entrypoint = "main";
         } else {
             return make_error("GPU backend accepts none of the embedded shader formats");
@@ -509,4 +509,4 @@ Result<Image> Renderer::render_offscreen(const scene::DrawList& list, const Came
     return image;
 }
 
-} // namespace g2n::render
+} // namespace gta20::render

@@ -1,4 +1,4 @@
-# Architektura silnika gta2-native
+# Architektura silnika GTA2.0
 
 Natywna, wieloplatformowa reimplementacja GTA 2 w C++20, oparta na SDL3 i SDL_GPU.
 Nie korzysta z OpenGTA2, MonoGame ani .NET. GTA2_RE służy wyłącznie jako materiał do
@@ -24,10 +24,10 @@ flowchart BT
   testing[testing<br/>scenariusze, replay, ślady, porównanie] --> sim
   render[render<br/>SDL_GPU] --> scene
   platform[platform<br/>SDL3: okno, wejście] --> core
-  app[apps/gta2n] --> render
+  app[apps/gta2] --> render
   app --> platform
   app --> sim
-  headless[apps/g2n-headless] --> testing
+  headless[apps/gta20-headless] --> testing
 ```
 
 | Moduł | Katalog | Zależy od | Nie może zależeć od |
@@ -39,8 +39,8 @@ flowchart BT
 | testing | `engine/testing` | core, assets, sim, nlohmann/json | SDL, GPU |
 | render | `engine/render` | core, scene, SDL3 | sim |
 | platform | `engine/platform` | core, SDL3 | sim, render |
-| gta2n | `apps/gta2n` | wszystkie powyższe | — |
-| g2n-headless | `apps/g2n-headless` | testing | SDL |
+| gta2 | `apps/gta2` | wszystkie powyższe | — |
+| gta20-headless | `apps/gta20-headless` | testing | SDL |
 
 Reguły pilnuje `scripts/ci/check-module-boundaries.sh` (w CI), a CMake linkuje SDL
 wyłącznie do `render`, `platform` i aplikacji. Preset `headless` buduje wszystko bez SDL.
@@ -95,7 +95,7 @@ bloków i skosy, oświetlenie, HUD. Batching według tekstury i warstwy (przezro
 ## Platforma i aplikacja
 
 `platform` opakowuje SDL3 w RAII (`SdlRuntime`, `Window`) i udostępnia migawkę wejścia.
-Aplikacja `gta2n`:
+Aplikacja `gta2`:
 
 * symuluje stałe 30 Hz (`FrameAccumulator`, maks. 5 kroków na klatkę),
 * renderuje z vsync, interpolując między dwoma ostatnimi stanami (`RenderState` to kopia
@@ -108,7 +108,7 @@ Aplikacja `gta2n`:
 
 Opis: [testing.md](testing.md). Rdzeń: scenariusz JSON → `InputTimeline` → adapter
 (`SimulationAdapter`) → `Trace` (JSONL) → `compare_traces` → raport z pierwszą rozbieżnością.
-Adapter `engine` uruchamia `g2n::sim::World`. Adapter dla oryginalnego GTA 2 będzie
+Adapter `engine` uruchamia `gta20::sim::World`. Adapter dla oryginalnego GTA 2 będzie
 zasilany danymi z hosta EC2 ([aws/integration.md](aws/integration.md)).
 
 ## Zależności zewnętrzne
@@ -119,5 +119,5 @@ zasilany danymi z hosta EC2 ([aws/integration.md](aws/integration.md)).
 | doctest | 2.5.3 | testy jednostkowe | URL + SHA-256 |
 | nlohmann/json | 3.12.0 | scenariusze i raporty (tylko moduł `testing`) | URL + SHA-256 |
 
-Zależności pobiera `FetchContent` do `.deps/` (keszowane w CI). `-DG2N_SDL_PROVIDER=system`
+Zależności pobiera `FetchContent` do `.deps/` (keszowane w CI). `-DGTA20_SDL_PROVIDER=system`
 pozwala użyć SDL3 z systemu (np. pakiety dystrybucji).

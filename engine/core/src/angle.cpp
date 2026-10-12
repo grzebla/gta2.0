@@ -1,8 +1,8 @@
-#include "g2n/core/angle.hpp"
+#include "gta20/core/angle.hpp"
 
 #include <array>
 
-namespace g2n {
+namespace gta20 {
 namespace {
 
 constexpr int kTableSize = 1024;
@@ -55,4 +55,4 @@ Fixed cos(Angle a) {
     return sin(a + Angle::from_units(16384));
 }
 
-} // namespace g2n
+} // namespace gta20

@@ -5,10 +5,10 @@
 | Jednostkowe (doctest) | `tests/unit/` | `ctest --preset <p>` | nic |
 | Determinizm scenariuszy | `tests/conformance/` | CTest `conformance.determinism.*` | nic |
 | Regresja scenariuszy | `tests/conformance/golden/` | CTest `conformance.regression.*` | nic |
-| Dane oryginalnej gry | testy oznaczone `[gamedata]` | `G2N_GAME_DIR=… ctest` | własna instalacja GTA 2 |
-| Benchmark CPU/pamięci | `g2n-headless bench` | CI (Release) → podsumowanie zadania | nic |
-| Czas klatki | `gta2n --frames N` | lokalnie | okno/GPU |
-| Render bez okna | `gta2n --offscreen WxH --screenshot f.bmp` | CI (lavapipe, próbne) / lokalnie | Vulkan/Metal/D3D12 |
+| Dane oryginalnej gry | testy oznaczone `[gamedata]` | `GTA20_GAME_DIR=… ctest` | własna instalacja GTA 2 |
+| Benchmark CPU/pamięci | `gta20-headless bench` | CI (Release) → podsumowanie zadania | nic |
+| Czas klatki | `gta2 --frames N` | lokalnie | okno/GPU |
+| Render bez okna | `gta2 --offscreen WxH --screenshot f.bmp` | CI (lavapipe, próbne) / lokalnie | Vulkan/Metal/D3D12 |
 | Infrastruktura gfx-compat | `tests/gfx/windows/tests` (Pester), `tests/scripts` (Bash) | `infra-lint` | nic (atrapa `aws`) |
 
 Sanitizery: preset `asan` (ASan + UBSan, `-fno-sanitize-recover`) w CI na Linux i macOS.
@@ -50,7 +50,7 @@ najkrótszą postacią odtwarzalną bit w bit (`std::to_chars`), wartości niesk
 
 ### Raport
 
-`g2n-headless compare` zwraca kod 0 (zgodne), 1 (rozbieżne) lub 2 (błąd wejścia) i wypisuje
+`gta20-headless compare` zwraca kod 0 (zgodne), 1 (rozbieżne) lub 2 (błąd wejścia) i wypisuje
 Markdown, opcjonalnie też JSON. Raport zawiera: pierwszą rozbieżność (nagłówek, potem
 najniższy tick / encja / właściwość), statystyki na (rodzaj, właściwość) — maks.
 odchylenie z tickiem, pierwszy tick poza tolerancją — oraz listę rozbieżności
@@ -59,7 +59,7 @@ odchylenie z tickiem, pierwszy tick poza tolerancją — oraz listę rozbieżno�
 
 ### Wzorce regresyjne
 
-`tests/conformance/golden/*.golden.jsonl` generuje `g2n-headless run`. Zmiana zachowania
+`tests/conformance/golden/*.golden.jsonl` generuje `gta20-headless run`. Zmiana zachowania
 symulacji wymaga świadomej regeneracji i podniesienia `version()` adaptera `engine`.
 Obecne wzorce pochodzą z **prototypowych** reguł ruchu na **syntetycznej** mapie —
 nie mówią nic o GTA 2.

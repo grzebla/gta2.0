@@ -1,4 +1,4 @@
-// Tests against ORIGINAL GTA 2 data. They need G2N_GAME_DIR (a legally owned installation) and
+// Tests against ORIGINAL GTA 2 data. They need GTA20_GAME_DIR (a legally owned installation) and
 // skip themselves otherwise - CI never has game data. Test names start with "[gamedata]".
 // Facts asserted here were measured on the PC 9.6 release (Rockstar 2004) and 10.5 (Freeloader);
 // their map and style files are byte-identical.
@@ -12,21 +12,21 @@
 #include <string>
 #include <string_view>
 
-#include "g2n/assets/file_io.hpp"
-#include "g2n/assets/game_install.hpp"
-#include "g2n/assets/gmp_map.hpp"
-#include "g2n/assets/sty_style.hpp"
-#include "g2n/scene/draw_list.hpp"
+#include "gta20/assets/file_io.hpp"
+#include "gta20/assets/game_install.hpp"
+#include "gta20/assets/gmp_map.hpp"
+#include "gta20/assets/sty_style.hpp"
+#include "gta20/scene/draw_list.hpp"
 
-using namespace g2n;
-using namespace g2n::assets;
+using namespace gta20;
+using namespace gta20::assets;
 
 namespace {
 
 std::optional<std::filesystem::path> game_dir() {
     auto dir = game_dir_from_environment();
     if (dir.empty()) {
-        MESSAGE("G2N_GAME_DIR not set - skipping original-data test");
+        MESSAGE("GTA20_GAME_DIR not set - skipping original-data test");
         return std::nullopt;
     }
     return dir;
@@ -267,11 +267,14 @@ TEST_CASE("[gamedata] corrupted and truncated original files are rejected withou
     CHECK_FALSE(parse_sty(bad_palx));
 }
 
-TEST_CASE("[gamedata] 9.6 and 10.5 share identical map and style data (needs G2N_GAME_DIR_105)") {
+TEST_CASE("[gamedata] 9.6 and 10.5 share identical map and style data (needs GTA20_GAME_DIR_105)") {
     const auto dir = game_dir();
-    const char* other = std::getenv("G2N_GAME_DIR_105");
+    const char* other = std::getenv("GTA20_GAME_DIR_105");
+    if (other == nullptr) {
+        other = std::getenv("G2N_GAME_DIR_105"); // pre-rename name
+    }
     if (!dir || other == nullptr) {
-        MESSAGE("G2N_GAME_DIR_105 not set - skipping version comparison");
+        MESSAGE("GTA20_GAME_DIR_105 not set - skipping version comparison");
         return;
     }
     for (const char* ext : {".gmp", ".sty"}) {

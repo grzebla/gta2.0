@@ -1,6 +1,6 @@
-#include "g2n/sim/world.hpp"
+#include "gta20/sim/world.hpp"
 
-namespace g2n::sim {
+namespace gta20::sim {
 
 World::World(const assets::GmpMap* map, const WorldSettings& settings)
     : map_(map), settings_(settings), rng_(settings.seed) {
@@ -101,4 +101,4 @@ void World::step(InputFrame input) {
     ++tick_;
 }
 
-} // namespace g2n::sim
+} // namespace gta20::sim

@@ -1,8 +1,8 @@
-#include "g2n/platform/platform.hpp"
+#include "gta20/platform/platform.hpp"
 
 #include <SDL3/SDL.h>
 
-namespace g2n::platform {
+namespace gta20::platform {
 namespace {
 std::string sdl_error(const char* what) {
     return std::string(what) + ": " + SDL_GetError();
@@ -100,4 +100,4 @@ Result<bool> save_rgba_bmp(const std::string& path, u32 width, u32 height, const
     return saved ? Result<bool>(true) : Result<bool>(make_error(sdl_error("SDL_SaveBMP")));
 }
 
-} // namespace g2n::platform
+} // namespace gta20::platform
