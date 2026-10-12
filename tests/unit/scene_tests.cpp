@@ -24,6 +24,6 @@ TEST_CASE("Scene: entities add a body and a heading marker") {
     scene::DrawList list;
     scene::append_entities(list, {{{10, 10}, 0.0f, 1.0f, 255, 0, 0}});
     REQUIRE(list.quads().size() == 2);
-    CHECK(list.quads()[1].center_x == doctest::Approx(10.5f));
-    CHECK(list.quads()[1].center_y == doctest::Approx(10.0f));
+    CHECK(list.quads()[1].center_x == doctest::Approx(10.5));
+    CHECK(list.quads()[1].center_y == doctest::Approx(10.0));
 }

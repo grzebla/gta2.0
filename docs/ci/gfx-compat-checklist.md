@@ -117,9 +117,10 @@ akcje budżetowe nie zastąpią mechanizmów A–D. Te zatrzymują hosta w ciąg
 
 | Werdykt | Znaczenie |
 |---|---|
-| `PASS` | proces żyje po 30 s, ≥ 1 zrzut z ≥ 24 unikalnymi kolorami i ≤ 97% czerni, ostatni zrzut nadal wyrenderowany, tryb zgodny z żądanym |
+| `PASS` | proces żyje po 30 s, ≥ 1 zrzut z ≥ 24 unikalnymi kolorami, ≤ 97% czerni i zmianą ≥ 25% pikseli względem pulpitu bazowego, ostatni zrzut nadal wyrenderowany, tryb zgodny z żądanym |
 | `PASS_FELL_BACK_TO_FULLSCREEN` | jak PASS, ale okno nie wyszło i gra przełączyła się na pełny ekran (`start_mode` 0 → 1) |
 | `FAIL_PROCESS_EXITED` | proces zakończył się przed końcem obserwacji |
+| `FAIL_NO_VISIBLE_CHANGE` | proces żyje, ale ekran nie różni się od pulpitu sprzed startu gry (nic nie narysowano na ekranie) |
 | `FAIL_BLANK_SCREEN` | żaden zrzut nie spełnia progów (czarny/pusty ekran) |
 | `FAIL_RENDER_STOPPED` | coś wyrenderowano, ale ostatni zrzut jest pusty (zawieszenie, utrata urządzenia) |
 | `ERROR*` | błąd infrastruktury testu (brak wrappera, brak `result.json`, timeout przypadku) |
@@ -130,6 +131,7 @@ akcje budżetowe nie zastąpią mechanizmów A–D. Te zatrzymują hosta w ciąg
 |---|---|---|
 | `COMPATIBLE` | ≥ 1 przypadek `PASS*` | promocja: `GFX_E2E_CASES=<id PASS>`, `GFX_E2E_ENABLED=true` |
 | `INCOMPATIBLE` | 0 przypadków `PASS*`, probe OK | G4dn z tą konfiguracją nie renderuje GTA 2 — analiza zrzutów i dxdiag przed dalszymi kosztami |
+| `INFRASTRUCTURE_ERROR` | wszystkie przypadki `ERROR*` | błąd środowiska testu — nie jest wynikiem kompatybilności |
 | brak `summary.json` | błąd infrastruktury | nie traktować jako wyniku kompatybilności |
 
 Dodatkowa informacja (nie wpływa na werdykt): `gpuProcessSeen=true` potwierdza, że
