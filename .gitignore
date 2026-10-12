@@ -57,3 +57,6 @@ compile_commands.json
 /data/
 GTA2/
 GTA2-work/
+
+# Orchestrator local state (SQLite, logs, run transcripts) - never committed
+/.orchestrator/
