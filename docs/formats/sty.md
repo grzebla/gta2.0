@@ -17,7 +17,7 @@ Weryfikacja na oryginalnych plikach PC 9.6 i 10.5 (identyczne bajtowo), 2026-10-
 | Kolor 0 | zawsze przezroczysty | 4,9 % pikseli kafli | alfa 0 |
 | SPRX | `u32 ptr, u8 w, u8 h, u16 pad` | 2089 sprite'ów (miasta), 1766 (`fstyle`) | walidacja mieszczenia się w SPRG |
 | SPRB | 6 × `u16` liczników | `77, 474, 552, 90, 173, 723` | suma = liczba wpisów SPRX (walidowane) |
-| Kafle 992–1023 | zarezerwowane | mapy używają 1023 jako znacznika skosu (patrz gmp.md) | nie rysowane |
+| Kafle 992–1023 | zarezerwowane | mapy używają 1023 jako znacznika skosu (patrz gmp.md) | nie rysowane; zachowanie oryginału nierozstrzygnięte ([../specs/world-geometry.md](../specs/world-geometry.md), sekcja 4) |
 
 Nie zaimplementowano jeszcze: delty (DELS/DELX), definicje pojazdów (CARI), obiekty (OBJI),
 czcionki (FONB), remapy palet (car/ped remap), `SPEC`.
