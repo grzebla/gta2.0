@@ -11,6 +11,7 @@ archiwum: `docs/archive/`, gałąź `integrate/opengta2-upstream`, zamknięty PR
 - Dane gry: lokalnie `~/Games/GTA2` (9.6, kompletne) i `~/Games/GTA2-10.5` (binarka referencyjna); przygotowanie: `tools/gta2-install/README.md`; testy z danymi: `GTA20_GAME_DIR=~/Games/GTA2`.
 - AWS / oryginalne GTA 2 na EC2: `docs/aws/integration.md`, `docs/ci/gpu-testing.md`, `docs/ci/gfx-compat-checklist.md`.
 - Ostatni raport: `docs/reports/` (najnowszy plik).
+- Rozwój autonomiczny: `tools/orchestrator/README.md` (Astra planuje i recenzuje, Claude implementuje). Pamięć projektu: `docs/agent-memory/` (zapisuje ją tylko Orchestrator).
 
 ## Zasady (obowiązkowe)
 - Kod GTA2_RE (CriminalRETeam/gta2_re, bez licencji) wolno tylko czytać jako opis zachowania. Nie kopiuj kodu, struktur ani fragmentów funkcji (`docs/reference/gta2re.md`).

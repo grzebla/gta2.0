@@ -1,0 +1,192 @@
+# GTA2.0 Orchestrator
+
+Lokalny, niezależny proces, który prowadzi rozwój GTA2.0 przez dwa agenty:
+
+| Rola | Agent | Uprawnienia |
+|---|---|---|
+| **Astra** — Tech Lead, planista, recenzent | `gpt-6-astra` przez `codex exec` | sandbox **read-only**, bez zatwierdzeń, ignoruje `~/.codex/config.toml` (tam jest `danger-full-access`) |
+| **Claude** — developer | Claude Code `claude -p` | `dontAsk` + jawne reguły allow/deny, sandbox Basha (Seatbelt: zapis tylko w worktree, sieć tylko z allowlisty), bez MCP i ustawień użytkownika; **nigdy** `--dangerously-skip-permissions` |
+| **Orchestrator** | Python 3.9+, wyłącznie biblioteka standardowa | jedyny, kto scala do gałęzi integracyjnej i wysyła ją na GitHub (bez force push) |
+
+## Pętla
+
+```mermaid
+flowchart LR
+  P[Astra: plan / przegląd architektury] --> S[start zadania: gałąź agent/tNNNN]
+  S --> I[Claude: implementacja + testy + commity]
+  I --> V[Orchestrator: niezależna weryfikacja]
+  V -- FAIL --> I
+  V -- PASS --> R[Astra: recenzja niezmiennego commitu]
+  R -- APPROVED --> M[merge do agents/integration + pamięć + push]
+  R -- CHANGES_REQUESTED --> I
+  R -- BLOCKED / NEEDS_HUMAN --> P
+  M --> P
+```
+
+- Każdy krok to co najwyżej jedno wywołanie agenta, zakończone transakcją w SQLite. Następny
+  krok rusza dopiero po zapisie stanu.
+- Statusy zadań: `READY → IN_PROGRESS → VERIFYING → IN_REVIEW → DONE`, plus
+  `CHANGES_REQUESTED`, `BLOCKED`, `NEEDS_HUMAN`, `CANCELLED`.
+- Stan pętli: `RUNNING`, `PAUSED`, `WAITING_FOR_QUOTA`, `WAITING`, `HALTED`, `STOPPED`.
+- **Weryfikacja** nie ufa raportowi Claude. Sprawdza:
+  - czysty worktree i nowe commity;
+  - brak zmian w ścieżkach chronionych, plików gry i binarek;
+  - brak plików > 5 MB i sekretów w dodanych liniach;
+  - czy diff różni się od poprzedniej próby;
+  - build i testy (`cmake --preset debug`, build, `ctest`) z `GTA20_GAME_DIR`.
+- Astra nie może zatwierdzić commitu, który nie przeszedł weryfikacji — Orchestrator zamienia
+  taką decyzję na `CHANGES_REQUESTED`.
+- Recenzja odbywa się w osobnym worktree `review`, w trybie detached na niezmiennym commicie.
+  Claude pracuje w worktree `dev`, a gałąź integracyjna jest w worktree `integration`. Wszystkie
+  trzy leżą poza głównym checkoutem (`../gta2.0-agents/`). Agenci nigdy nie działają jednocześnie.
+- Powiązania zadanie → gałąź → commit → weryfikacja → decyzja są w tabelach `tasks`,
+  `verifications` i `decisions`.
+
+### Ochrona przed zapętleniem
+
+| Limit (`limits` w konfiguracji) | Domyślnie | Skutek |
+|---|---|---|
+| `max_attempts_per_task` (odrzucenia przez weryfikację lub Astrę) | 3 | `BLOCKED` |
+| `max_agent_failures_per_task` (awaria/timeout Claude) | 3 | `BLOCKED` |
+| `max_no_progress` (identyczny diff lub brak commitów) | 2 | `BLOCKED`; identyczny diff nie trafia ponownie do Astry |
+| `max_consecutive_failures` (dowolne kroki) | 4 | `HALTED` |
+| `max_ci_failures` (kolejne nieudane CI gałęzi integracyjnej) | 3 | `HALTED` |
+| `max_runs_per_day` | 40 | czekanie do północy |
+| timeouty: Claude 90 min, Astra 30 min, weryfikacja 40 min | | przerwanie SIGINT → SIGTERM → SIGKILL grupy procesów |
+| `arch_review_every` | 5 zadań | szerszy przegląd architektury przez Astrę |
+
+Gdy zadanie jest `BLOCKED`, pętla przechodzi do innych niezależnych zadań. Jeśli nie zostaje
+nic do zrobienia, przechodzi w `HALTED` i zapisuje raport.
+
+## Pamięć
+
+- `.orchestrator/state.sqlite` (WAL, `synchronous=FULL`, uprawnienia 0600) przechowuje zadania,
+  przebiegi agentów (z `session_id` i modelem), decyzje, weryfikacje, limity i meta.
+- Tabela `events` jest **append-only** (triggery blokują `UPDATE`/`DELETE`). Każde zdarzenie
+  trafia też do `.orchestrator/events.jsonl` (fsync) i przechodzi redakcję sekretów.
+- `.orchestrator/runs/<czas>-<zadanie>-<agent>-<rodzaj>/` zawiera prompt, polecenie, pełny
+  strumień JSON i logi weryfikacji. Leży lokalnie i nie jest commitowane.
+- `docs/agent-memory/*.md` na gałęzi integracyjnej:
+  - PROJECT, ARCHITECTURE, ROADMAP, KNOWN_ISSUES i TEST_STATUS zastępuje Astra (limit 20 KB);
+  - DECISIONS i PROGRESS dopisuje Orchestrator.
+  - Astra dostaje aktualne pliki i tylko końcówkę dzienników, nigdy całą historię.
+
+## Limity subskrypcji
+
+- **Claude.** `stream-json` emituje `rate_limit_event` z oknami `five_hour` i `seven_day`,
+  `status` oraz `resetsAt`.
+  - Odrzucenie (`rejected`, tekst „hit your … limit” albo HTTP 429) ustawia stan
+    `WAITING_FOR_QUOTA` do `resetsAt` + 2 min. Zadanie zostaje w swoim stanie.
+  - Po odnowieniu limitu Orchestrator wysyła tanią próbę (`haiku`, bez narzędzi). Potem wznawia
+    **tę samą sesję** (`--resume <session-id>`) i podaje aktualny stan gałęzi, więc zatwierdzona
+    praca nie jest powtarzana.
+  - Limit tygodniowy rozpoznaje osobno, po typie okna.
+- **Astra/Codex.** Błąd limitu rozpoznaje w JSONL, a czas odnowienia odczytuje z `rate_limits`
+  w zapisie sesji (`~/.codex/sessions/.../rollout-*.jsonl`).
+- **Bez czasu odnowienia** stosuje backoff: 15 min → 30 → 60 → 120 → 240, maksymalnie 12 prób,
+  potem `HALTED`.
+- Nie ma przełączania kont, kluczy API ani płatnego API. Agenci dostają środowisko z allowlisty:
+  `ANTHROPIC_*`, `OPENAI_*`, `AWS_*` i `GH_*` nie są przekazywane.
+
+## Weryfikacja modelu
+
+- **Astra:** model jest sprawdzany w zapisie sesji Codex (`turn_context.model == gpt-6-astra`).
+  Brak zapisu albo inny model daje `ModelMismatch`, a decyzja nie jest przyjmowana. Serwer
+  odrzuca nieobsługiwane nazwy modeli (sprawdzone), więc nie ma cichej podmiany.
+- **Claude:** model jest sprawdzany w zdarzeniu `init`, a `apiKeySource` musi wynosić `none`
+  (subskrypcja).
+
+## Polecenia
+
+```bash
+B=tools/orchestrator/bin/gta20-orchestrator      # z checkoutu (po instalacji: gta20-orchestrator)
+$B doctor            # narzędzia, logowanie, repo, dane gry, zasilanie (tylko odczyt)
+$B doctor --live     # + minimalne prawdziwe wywołania Astry i Claude + test uprawnień/sandboxa
+$B dry-run           # następny krok, polecenia i prompt — bez wywołań agentów
+$B start --foreground --max-steps 4   # pierwszy krok na pierwszym planie
+$B status | logs [-f] | logs --events | tasks [T0001] | memory [PROJECT] | report
+$B pause | resume | stop [--now] [--unload]
+$B unblock T0003 --note "..."         # decyzja właściciela dla BLOCKED/NEEDS_HUMAN
+$B answer "..."                       # odpowiedź na pytanie Astry (NEEDS_HUMAN)
+$B simulate [all|happy|quota_known_reset|...]   # pętla na atrapach w tymczasowym repo
+$B service install | status | uninstall
+```
+
+Raport bez czytania logów: `.orchestrator/report.md` i `.orchestrator/report.html` (odświeżane
+po każdym kroku).
+
+## Praca w tle (launchd)
+
+1. `$B service install` kopiuje kod do `~/.local/share/gta20-orchestrator/<wersja>-<sha>`
+   (agent pracujący w repo nie zmieni kodu nadzorcy), tworzy `~/.local/bin/gta20-orchestrator`
+   oraz `~/Library/LaunchAgents/com.gta20.orchestrator.plist`. **Niczego nie uruchamia.**
+2. **Jedno polecenie uruchamiające pracę wielodniową:** `gta20-orchestrator start`
+   (`launchctl bootstrap gui/$UID …`).
+
+Właściwości usługi:
+- start przy logowaniu (`RunAtLoad`);
+- restart po awarii (`KeepAlive.SuccessfulExit=false`, `ThrottleInterval=300`);
+- czysty `stop` (kod 0) zostaje zatrzymany;
+- ochrona przed pętlą awarii: więcej niż 5 startów na godzinę daje `HALTED`;
+- `ExitTimeOut=120` na łagodne zamknięcie;
+- jedna instancja dzięki `flock`;
+- porzucone przebiegi wykrywane po restarcie.
+
+LaunchAgent działa tylko, gdy użytkownik jest zalogowany, a Mac nie śpi. Orchestrator nie
+zmienia ustawień zasilania. `doctor` tylko je raportuje. Uśpienie wygląda jak przerwa: po
+wybudzeniu przebieg z przekroczonym czasem jest przerywany i wznawiany.
+
+### Migracja na maszynę 24/7
+
+Potrzebne są: macOS albo Linux z `git`, `gh`, `claude`, `codex`, `cmake`, `ninja`, Python 3.9+
+i lokalnymi danymi gry.
+
+1. Sklonuj repozytorium.
+2. Przenieś `.orchestrator/` (stan i historia; najpierw `stop`).
+3. Zaloguj `claude`, `codex` i `gh` na tej maszynie.
+4. Uruchom `doctor --live`, potem `service install` (Linux: odpowiednik jednostki systemd
+   `--user`) i `start`.
+
+Płatny hosting nie jest wdrażany.
+
+## Konfiguracja
+
+Wartości domyślne są w `gta20_orchestrator/config.py`. Lokalne nadpisania trafiają do
+`.orchestrator/config.json` (nieśledzone):
+
+```json
+{ "claude": {"model": "opus", "timeout_s": 5400},
+  "verify": {"env": {"GTA20_GAME_DIR": "~/Games/GTA2"}},
+  "push_integration": true, "min_push_interval_s": 21600 }
+```
+
+`push_integration` wysyła gałąź `agents/integration` i otwiera draft PR do `feature/orchestrator`,
+co uruchamia `native-ci`. Minuty CI w prywatnym repo są limitowane (macOS liczy się ×10), stąd
+limit częstotliwości. Scalanie PR należy wyłącznie do właściciela.
+
+## Ścieżki chronione
+
+Agenci nie zmieniają:
+- `tools/orchestrator/`, `.orchestrator/`, `.claude/`, `docs/agent-memory/`;
+- `infra/`, `scripts/aws/`, workflowów `gfx-*` i `infra-lint`;
+- `CLAUDE.md`, `.gitignore`.
+
+Pilnują tego dwie warstwy: reguły `deny` Claude (sprawdzone na żywo przez `doctor --live`) oraz
+niezależny test diffu. Zmiana zasad bezpieczeństwa należy do właściciela.
+
+## Testy
+
+```bash
+python3 -m unittest discover -s tools/orchestrator/tests -v
+```
+
+30 testów (w CI: zadanie `orchestrator-tests` w `native-ci`):
+- parsowanie limitów Claude i Codex;
+- ścisłość schematów JSON;
+- reguły bezpieczeństwa, redakcja sekretów, blokada force push;
+- append-only i transakcje SQLite;
+- blokada pojedynczej instancji;
+- 8 scenariuszy symulacji;
+- twarde zabicie (SIGKILL) w trakcie pracy agenta i wznowienie bez duplikowania commitów;
+- SIGTERM i wznowienie;
+- `daemon` przy `STOPPED` i pętla awarii.
