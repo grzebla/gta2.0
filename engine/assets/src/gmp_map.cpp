@@ -143,7 +143,7 @@ int GmpMap::top_level(int x, int y) const {
     return -1;
 }
 
-Result<GmpMap> parse_gmp(std::span<const std::byte> bytes) {
+Result<GmpMap> parse_gmp(std::span<const std::byte> bytes, MapEncoding preferred) {
     auto container = parse_chunk_file(bytes);
     if (!container) {
         return container.error();
@@ -158,10 +158,12 @@ Result<GmpMap> parse_gmp(std::span<const std::byte> bytes) {
 
     GmpMap map;
     Result<bool> decoded = make_error("no map data chunk (DMAP, CMAP or UMAP)");
-    if (const auto dmap = file.find("DMAP")) {
+    const bool want_cmap = preferred == MapEncoding::Compressed16 && file.find("CMAP").has_value();
+    const bool want_umap = preferred == MapEncoding::Uncompressed && file.find("UMAP").has_value();
+    if (const auto dmap = file.find("DMAP"); dmap && !want_cmap && !want_umap) {
         map.encoding_ = MapEncoding::Compressed32;
         decoded = decode_compressed(dmap->data, true, map.blocks_, map.grid_);
-    } else if (const auto cmap = file.find("CMAP")) {
+    } else if (const auto cmap = file.find("CMAP"); cmap && !want_umap) {
         map.encoding_ = MapEncoding::Compressed16;
         decoded = decode_compressed(cmap->data, false, map.blocks_, map.grid_);
     } else if (const auto umap = file.find("UMAP")) {

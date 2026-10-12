@@ -49,7 +49,8 @@ struct InputSnapshot {
     bool quit = false;
     bool up = false, down = false, left = false, right = false;
     bool attack = false, jump = false, enter_exit = false;
-    float zoom_steps = 0; // mouse wheel / +/- keys this frame
+    bool toggle_camera = false; // Tab held
+    float zoom_steps = 0;       // mouse wheel / +/- keys this frame
 };
 
 /// Drains the SDL event queue and samples the keyboard.

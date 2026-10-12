@@ -8,6 +8,7 @@ archiwum: `docs/archive/`, gałąź `integrate/opengta2-upstream`, zamknięty PR
 - Architektura i reguły zależności modułów: `docs/architecture.md` (pilnuje ich `scripts/ci/check-module-boundaries.sh`).
 - Budowanie: `docs/building.md` (presety `debug`, `release`, `asan`, `headless`); testy: `docs/testing.md`.
 - Mechaniki i plan: `docs/mechanics-matrix.md`, `docs/roadmap.md`; formaty: `docs/formats/`.
+- Dane gry: lokalnie `~/Games/GTA2` (9.6, kompletne) i `~/Games/GTA2-10.5` (binarka referencyjna); przygotowanie: `tools/gta2-install/README.md`; testy z danymi: `G2N_GAME_DIR=~/Games/GTA2`.
 - AWS / oryginalne GTA 2 na EC2: `docs/aws/integration.md`, `docs/ci/gpu-testing.md`, `docs/ci/gfx-compat-checklist.md`.
 - Ostatni raport: `docs/reports/` (najnowszy plik).
 

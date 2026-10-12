@@ -4,7 +4,8 @@ add_executable(g2n_unit_tests
     assets_tests.cpp
     sim_tests.cpp
     scene_tests.cpp
-    testing_tests.cpp)
+    testing_tests.cpp
+    gamedata_tests.cpp)
 target_link_libraries(g2n_unit_tests PRIVATE g2n::core g2n::assets g2n::sim g2n::scene g2n::testing doctest::doctest)
 target_compile_definitions(g2n_unit_tests PRIVATE G2N_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 g2n_target_defaults(g2n_unit_tests)

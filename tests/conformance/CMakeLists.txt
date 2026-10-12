@@ -14,3 +14,14 @@ foreach(scenario ${G2N_SCENARIOS})
                 -DGOLDEN=${CMAKE_CURRENT_SOURCE_DIR}/golden/${name}.golden.jsonl
                 -P ${PROJECT_SOURCE_DIR}/cmake/RunConformance.cmake)
 endforeach()
+
+# Real-data render check (needs G2N_GAME_DIR and a GPU device; otherwise reported as skipped).
+if(TARGET gta2n)
+    foreach(level wil ste bil)
+        add_test(NAME gamedata.render.${level}
+            COMMAND ${CMAKE_COMMAND} -DGTA2N=$<TARGET_FILE:gta2n> -DLEVEL=data/${level}.gmp
+                    -DOUT=${CMAKE_CURRENT_BINARY_DIR}/render-${level}.bmp
+                    -P ${PROJECT_SOURCE_DIR}/cmake/RunRenderCheck.cmake)
+        set_tests_properties(gamedata.render.${level} PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP:")
+    endforeach()
+endif()
