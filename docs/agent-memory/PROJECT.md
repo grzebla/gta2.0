@@ -1,3 +1,3 @@
 # Project
 
-T0002 / M1-002 is approved at 78fa72c897d7090f3eba284baba32f92fb61d4c5. The unsloped geometry specification and CMAP comment correction are complete. Runtime rendering remains flat lids; M1 remains incomplete.
+T0003 approved at a16ba67fbe6fe7e8ae40cece8f7c0d8afde3f7c6. Original-data district render captures now use validated external directories. T0002 remains complete; runtime rendering remains flat lids and M1 remains incomplete.
