@@ -1,13 +1,193 @@
 #!/usr/bin/env bash
 # Offline tests for scripts/ci/ec2-gpu-session.sh. A fake `aws` binary records every call;
 # nothing reaches AWS. Run: bash tests/scripts/ec2-gpu-session.test.sh
+#
+# Every invocation copies the scripts under test, unchanged, into a fresh temporary workspace
+# (same relative layout as the checkout) and runs them from there. Results, state files and logs
+# stay inside that workspace, and cleanup only ever removes the workspace it allocated; the
+# checkout is only read.
+#
+# AWS-free check of that isolation (no aws, no mock, no operator scripts; synthetic fixtures):
+#   bash tests/scripts/ec2-gpu-session.test.sh --workspace-self-test
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-SCRIPT="$ROOT/scripts/ci/ec2-gpu-session.sh"
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
-mkdir -p "$WORK/bin"
+# Captured before TMPDIR is redirected into the workspace for the scripts under test.
+TEST_TMP_BASE="${TMPDIR:-/tmp}"
+TEST_TMP_BASE="${TEST_TMP_BASE%/}"
+WORKSPACE_PREFIX="gta20-ec2-gpu-test."
+# The only checkout files the suite needs; relative paths are kept so the scripts resolve
+# REPO_ROOT (and therefore gfx-results/) to the workspace copy.
+FIXTURE_INPUTS=(
+  scripts/ci/ec2-gpu-session.sh
+  scripts/aws/common.sh
+  scripts/aws/run-gfx-compat-local.sh
+  scripts/aws/deploy-gfx-stack.sh
+)
+
+workspace_create() { # source root -> prints the new workspace path
+  local src="$1" ws rel
+  ws="$(mktemp -d "$TEST_TMP_BASE/${WORKSPACE_PREFIX}XXXXXX")" || return 1
+  printf '%s\n' "$ws" > "$ws/.workspace-owner"
+  mkdir -p "$ws/bin" "$ws/tmp" "$ws/repo"
+  for rel in "${FIXTURE_INPUTS[@]}"; do
+    if [[ ! -f "$src/$rel" ]] || ! mkdir -p "$ws/repo/$(dirname "$rel")" || ! cp -p "$src/$rel" "$ws/repo/$rel"; then
+      echo "error: cannot copy $rel into the test workspace" >&2
+      workspace_cleanup "$ws"
+      return 1
+    fi
+  done
+  printf '%s\n' "$ws"
+}
+workspace_cleanup() { # workspace; refuses anything this script did not allocate
+  local ws="$1"
+  [[ -n "$ws" ]] || return 0
+  case "$ws" in
+    "$TEST_TMP_BASE/$WORKSPACE_PREFIX"??????) ;;
+    *) echo "error: refusing to remove $ws (not a test workspace)" >&2; return 1 ;;
+  esac
+  [[ -d "$ws" ]] || return 0
+  if [[ "$(cat "$ws/.workspace-owner" 2>/dev/null)" != "$ws" ]]; then
+    echo "error: refusing to remove $ws (ownership marker missing)" >&2
+    return 1
+  fi
+  rm -rf -- "$ws"
+}
+workspace_enter() { # source root; sets WORK and removes it when the shell exits
+  WORK="$(workspace_create "$1")" || return 1
+  trap 'workspace_cleanup "$WORK"' EXIT
+}
+
+pass=0; fail=0
+check() { # name, expected exit code, command...
+  local name="$1" expected="$2"; shift 2
+  : > "$WORK/aws.log"; rm -f "$WORK"/gfx-session-*.env "$WORK"/tmp/gfx-session-*.env
+  local out code
+  out=$("$@" 2>&1); code=$?
+  if [[ "$code" == "$expected" ]]; then pass=$((pass + 1)); echo "ok   - $name"
+  else fail=$((fail + 1)); echo "FAIL - $name (exit $code, expected $expected)"; printf '       %s\n' "$out"; fi
+}
+assert() { # name, condition command...
+  local name="$1"; shift
+  if "$@"; then pass=$((pass + 1)); echo "ok   - $name"
+  else fail=$((fail + 1)); echo "FAIL - $name"; fi
+}
+both() { "$1" "$2" && "$3" "$4"; }
+log_has() { grep -q -- "$1" "$WORK/aws.log"; }
+log_lacks() { ! grep -q -- "$1" "$WORK/aws.log"; }
+summary() { echo "---"; echo "passed: $pass, failed: $fail"; [[ "$fail" -eq 0 ]]; }
+
+# --- workspace self-test (AWS-free) --------------------------------------------------------
+SELFTEST_DIR=""; WS1=""; WS2=""
+selftest_cleanup() {
+  workspace_cleanup "$WS1"; workspace_cleanup "$WS2"
+  [[ -n "$SELFTEST_DIR" ]] && rm -rf -- "$SELFTEST_DIR"
+}
+simulate_outputs() { # workspace; writes what a suite run leaves behind, without running it
+  local ws="$1"
+  mkdir -p "$ws/repo/gfx-results/local-existing" "$ws/repo/gfx-results/local-20991231-235959"
+  printf 'SYNTHETIC workspace output\n' > "$ws/repo/gfx-results/local-existing/sentinel"
+  printf '{"overall":"SYNTHETIC"}\n' > "$ws/repo/gfx-results/local-20991231-235959/summary.json"
+  printf 'GFX_INSTANCE_ID=i-0123456789abcdef0\n' > "$ws/tmp/gfx-session-local-20991231-235959.env"
+  printf 'aws SYNTHETIC\n' > "$ws/aws.log"
+}
+inputs_match() { # workspace, source root
+  local rel
+  for rel in "${FIXTURE_INPUTS[@]}"; do cmp -s "$2/$rel" "$1/repo/$rel" || return 1; done
+}
+only_inputs() { # workspace
+  [[ "$(cd "$1/repo" && find . -type f | sed 's|^\./||' | sort)" == "$(printf '%s\n' "${FIXTURE_INPUTS[@]}" | sort)" ]]
+}
+outside() { # path, tree
+  [[ "$1" != "$2" && "$1" != "$2"/* ]]
+}
+sentinel_intact() { cmp -s "$SELFTEST_DIR/sentinel.ref" "$SELFTEST_DIR/source/gfx-results/local-existing/sentinel"; }
+source_results_unchanged() {
+  [[ "$(cd "$SELFTEST_DIR/source/gfx-results" && find . | sort)" == "$(printf '%s\n' . ./local-existing ./local-existing/sentinel)" ]]
+}
+is_dir() { [[ -d "$1" ]]; }
+removed() { [[ -n "$1" && ! -e "$1" ]]; }
+equals() { [[ "$1" == "$2" ]]; }
+differs() { [[ "$1" != "$2" ]]; }
+not() { ! "$@"; }
+
+workspace_self_test() {
+  SELFTEST_DIR="$(mktemp -d "$TEST_TMP_BASE/gta20-ec2-gpu-selftest.XXXXXX")" || return 1
+  trap selftest_cleanup EXIT
+  local src="$SELFTEST_DIR/source" rel code failed_ws unmarked
+  # Tripwire: any aws call during the self-test is recorded and fails it.
+  mkdir -p "$SELFTEST_DIR/bin"
+  printf '#!/usr/bin/env bash\necho "$*" >> "%s/aws-invoked"\nexit 97\n' "$SELFTEST_DIR" > "$SELFTEST_DIR/bin/aws"
+  chmod +x "$SELFTEST_DIR/bin/aws"
+  export PATH="$SELFTEST_DIR/bin:$PATH"
+
+  # SYNTHETIC source checkout: placeholder inputs (never executed) plus pre-existing results.
+  for rel in "${FIXTURE_INPUTS[@]}"; do
+    mkdir -p "$src/$(dirname "$rel")"
+    printf '#!/usr/bin/env bash\n# SYNTHETIC self-test fixture for %s; never executed.\nexit 99\n' "$rel" > "$src/$rel"
+  done
+  mkdir -p "$src/gfx-results/local-existing"
+  printf 'SYNTHETIC sentinel %s\n\001\377\000 binary tail\n' "$RANDOM$RANDOM" > "$src/gfx-results/local-existing/sentinel"
+  cp -p "$src/gfx-results/local-existing/sentinel" "$SELFTEST_DIR/sentinel.ref"
+
+  WS1="$(workspace_create "$src")"; WS2="$(workspace_create "$src")"
+  assert "first workspace allocated" is_dir "$WS1"
+  assert "second workspace allocated" is_dir "$WS2"
+  assert "invocation workspaces are distinct" differs "$WS1" "$WS2"
+  assert "workspace lies outside the source fixture" outside "$WS1" "$src"
+  assert "workspace lies outside the checkout" outside "$WS1" "$ROOT"
+  assert "workspace inputs are byte-identical copies" inputs_match "$WS1" "$src"
+  assert "workspace holds only the required inputs (no gfx-results)" only_inputs "$WS1"
+  assert "cleanup refuses the source fixture" not workspace_cleanup "$src"
+  assert "cleanup refuses another temp directory" not workspace_cleanup "$SELFTEST_DIR"
+  unmarked="$(mktemp -d "$TEST_TMP_BASE/${WORKSPACE_PREFIX}XXXXXX")"
+  assert "cleanup refuses a workspace-named directory without its owner marker" not workspace_cleanup "$unmarked"
+  assert "unmarked directory left in place" is_dir "$unmarked"
+  rmdir -- "$unmarked"
+  assert "source fixture untouched by refused cleanups" sentinel_intact
+
+  simulate_outputs "$WS1"; simulate_outputs "$WS2"
+  workspace_cleanup "$WS1"; code=$?
+  assert "normal cleanup succeeds" equals "$code" 0
+  assert "normal cleanup removes its workspace" removed "$WS1"
+  assert "normal cleanup preserves the other workspace" inputs_match "$WS2" "$src"
+  assert "other workspace keeps its outputs" is_dir "$WS2/repo/gfx-results/local-20991231-235959"
+  assert "sentinel survives normal cleanup byte-for-byte" sentinel_intact
+  assert "source gfx-results unchanged after normal cleanup" source_results_unchanged
+
+  # Simulated failure: same setup + exit trap as the suite, then the invocation dies.
+  (
+    workspace_enter "$src" || exit 90
+    printf '%s\n' "$WORK" > "$SELFTEST_DIR/failed-workspace"
+    simulate_outputs "$WORK"
+    exit 3
+  )
+  code=$?
+  failed_ws="$(cat "$SELFTEST_DIR/failed-workspace" 2>/dev/null)"
+  assert "simulated failure keeps its exit status" equals "$code" 3
+  assert "failed invocation allocated its own workspace" differs "${failed_ws:-$WS2}" "$WS2"
+  assert "failure cleanup removes the failed workspace" removed "$failed_ws"
+  assert "failure cleanup preserves the other workspace" inputs_match "$WS2" "$src"
+  assert "sentinel survives the simulated failure byte-for-byte" sentinel_intact
+  assert "source gfx-results unchanged after the simulated failure" source_results_unchanged
+
+  workspace_cleanup "$WS2"
+  assert "second workspace removed by its own cleanup" removed "$WS2"
+  assert "sentinel survives all cleanups byte-for-byte" sentinel_intact
+  assert "aws was never invoked" removed "$SELFTEST_DIR/aws-invoked"
+  summary
+}
+
+case "${1:-}" in
+  "") ;;
+  --workspace-self-test) workspace_self_test; exit $? ;;
+  *) echo "usage: $0 [--workspace-self-test]" >&2; exit 2 ;;
+esac
+
+# --- offline suite ---------------------------------------------------------------------------
+workspace_enter "$ROOT" || exit 1
+cd "$WORK" || exit 1
+SCRIPT="$WORK/repo/scripts/ci/ec2-gpu-session.sh"
 
 cat > "$WORK/bin/aws" <<'FAKE'
 #!/usr/bin/env bash
@@ -28,25 +208,8 @@ exit 0
 FAKE
 chmod +x "$WORK/bin/aws"
 
-pass=0; fail=0
-check() { # name, expected exit code, command...
-  local name="$1" expected="$2"; shift 2
-  : > "$WORK/aws.log"; rm -f "$WORK"/gfx-session-*.env
-  local out code
-  out=$("$@" 2>&1); code=$?
-  if [[ "$code" == "$expected" ]]; then pass=$((pass + 1)); echo "ok   - $name"
-  else fail=$((fail + 1)); echo "FAIL - $name (exit $code, expected $expected)"; printf '       %s\n' "$out"; fi
-}
-assert() { # name, condition command...
-  local name="$1"; shift
-  if "$@"; then pass=$((pass + 1)); echo "ok   - $name"
-  else fail=$((fail + 1)); echo "FAIL - $name"; fi
-}
-both() { "$1" "$2" && "$3" "$4"; }
-log_has() { grep -q -- "$1" "$WORK/aws.log"; }
-log_lacks() { ! grep -q -- "$1" "$WORK/aws.log"; }
-
-export PATH="$WORK/bin:$PATH" FAKE_LOG="$WORK/aws.log" RUNNER_TEMP="$WORK" \
+# TMPDIR: run-gfx-compat-local.sh keeps its session state there.
+export PATH="$WORK/bin:$PATH" FAKE_LOG="$WORK/aws.log" RUNNER_TEMP="$WORK" TMPDIR="$WORK/tmp" \
        AWS_REGION=eu-north-1 GFX_BUCKET=gta20-gfx-artifacts-433213574600 RUN_ID=123-1
 unset GITHUB_ENV
 
@@ -83,8 +246,9 @@ check "rejects unknown subcommand" 1 run terminate
 assert "never terminates or launches instances" both log_lacks "terminate-instances" log_lacks "run-instances"
 
 # Operator scripts (scripts/aws): confirmation gates, quota gate, stop-on-exit trap.
-LOCAL="$ROOT/scripts/aws/run-gfx-compat-local.sh"
-DEPLOY="$ROOT/scripts/aws/deploy-gfx-stack.sh"
+# Workspace copies: their gfx-results/local-* output lands in $WORK/repo and goes with $WORK.
+LOCAL="$WORK/repo/scripts/aws/run-gfx-compat-local.sh"
+DEPLOY="$WORK/repo/scripts/aws/deploy-gfx-stack.sh"
 check "local run without confirmation changes nothing" 1 env CONFIRM=no bash "$LOCAL" probe
 assert "no start/stop/send without confirmation" both log_lacks "start-instances" log_lacks "send-command"
 check "local run stops the host even when the test fails" 1 env CONFIRM=uruchom-ec2 FAKE_STATE=running FAKE_CMD_STATUS=Failed bash "$LOCAL" probe
@@ -95,8 +259,5 @@ check "deploy without confirmation changes nothing" 1 env CONFIRM=no FAKE_QUOTA=
 assert "no CloudFormation deploy without confirmation" log_lacks "cloudformation deploy"
 check "deploy runs after quota + confirmation" 0 env CONFIRM=uruchom-ec2 FAKE_QUOTA=4.0 bash "$DEPLOY"
 assert "deploy used the gfx template in eu-north-1" both log_has "cloudformation deploy --stack-name gta20-gfx" log_has "SubnetId=subnet-01ca4e08a6f9fa5b3"
-rm -rf "$ROOT/gfx-results"/local-* 2>/dev/null
 
-echo "---"
-echo "passed: $pass, failed: $fail"
-[[ "$fail" -eq 0 ]]
+summary
