@@ -56,7 +56,9 @@ public class ScriptParser
         return new StringTable(strings);
     }
 
-    [StructLayout(LayoutKind.Explicit)]
+    // Size = 9 matches the on-disk entry header (and the `read += 9 + ...` bookkeeping above).
+    // Without it the explicit layout is padded to 12 bytes and every entry after the first is misread.
+    [StructLayout(LayoutKind.Explicit, Pack = 1, Size = 9)]
     private readonly struct StringHeader
     {
         [FieldOffset(0)] public readonly uint Id;
