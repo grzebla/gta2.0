@@ -71,10 +71,21 @@ DEFAULTS: Dict[str, Any] = {
     },
     "verify": {
         "timeout_s": 2400,
+        # Same gates as native-ci, run outside any sandbox. Entries are argv lists or
+        # {"name", "cmd", "env", "unset"}; "unset" removes variables (asset-free runs).
         "commands": [
-            ["cmake", "--preset", "debug"],
-            ["cmake", "--build", "--preset", "debug"],
-            ["ctest", "--preset", "debug", "--output-on-failure"],
+            {"name": "clang-format 23.1.3 (as CI)", "cmd": [
+                "sh", "-c", "git ls-files 'engine/*.cpp' 'engine/*.hpp' 'apps/*.cpp' 'tests/unit/*.cpp' "
+                "| xargs clang-format --dry-run --Werror"]},
+            {"name": "module boundaries", "cmd": ["bash", "scripts/ci/check-module-boundaries.sh"]},
+            {"name": "headless configure (no game data)", "cmd": ["cmake", "--preset", "headless"],
+             "unset": ["GTA20_GAME_DIR", "G2N_GAME_DIR", "GTA20_GAME_DIR_105"]},
+            {"name": "headless build", "cmd": ["cmake", "--build", "--preset", "headless"]},
+            {"name": "headless tests (no game data)", "cmd": ["ctest", "--preset", "headless", "--output-on-failure"],
+             "unset": ["GTA20_GAME_DIR", "G2N_GAME_DIR", "GTA20_GAME_DIR_105"]},
+            {"name": "debug configure", "cmd": ["cmake", "--preset", "debug"]},
+            {"name": "debug build", "cmd": ["cmake", "--build", "--preset", "debug"]},
+            {"name": "debug tests (with original data)", "cmd": ["ctest", "--preset", "debug", "--output-on-failure"]},
         ],
         "env": {"GTA20_GAME_DIR": "~/Games/GTA2"},
         "max_file_bytes": 5 * 1024 * 1024,

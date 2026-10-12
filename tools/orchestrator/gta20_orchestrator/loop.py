@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from . import github, gitops, memory, prompts, schemas
+from . import github, gitops, memory, prompts, schemas, toolchain
 from . import db as D
 from .adapters.base import (AgentError, AgentFailed, AgentInterrupted, AgentResult, AgentTimeout, ModelMismatch,
                             QuotaExceeded)
@@ -62,6 +62,7 @@ class Orchestrator:
         self.wt_review = cfg.worktree("review")
         self.wt_int = cfg.worktree("integration")
         self.runs_dir = cfg.state_dir / "runs"
+        self.tools_dir: Optional[Path] = None
 
     # ------------------------------------------------------------------ control helpers
     def request_stop(self, *_: Any) -> None:
@@ -93,6 +94,10 @@ class Orchestrator:
         gitops.ensure_worktree(self.repo, self.wt_review, detach=integ)
         gitops.ensure_worktree(self.repo, self.wt_dev, detach=integ)
         self.runs_dir.mkdir(parents=True, exist_ok=True)
+        if self.cfg["verify"].get("pinned_tools", True):
+            self.tools_dir = toolchain.ensure(self.cfg.state_dir)
+            with self.db.tx():
+                self.db.set_meta("pinned_tools", dumps(toolchain.versions(self.tools_dir)))
 
     def recover(self) -> List[int]:
         """Runs left 'running' by a previous process (crash, kill, reboot) are abandoned; their
@@ -391,6 +396,12 @@ class Orchestrator:
                           outcome=D.IN_PROGRESS, detail={"branch": branch, "integration": integ})
         return self.db.task(task["id"])
 
+    def claude_env(self) -> Dict[str, str]:
+        env = dict(self.cfg.verify_env())
+        if self.tools_dir:
+            env["GTA20_TOOLS_PATH"] = str(self.tools_dir)
+        return env
+
     # ------------------------------------------------------------------ implement
     def implement(self, task: Any) -> str:
         tid = task["id"]
@@ -420,7 +431,7 @@ class Orchestrator:
         try:
             res = self.call(self.claude, kind="implement", task_id=tid, prompt=prompt, cwd=self.wt_dev,
                             schema=schemas.CLAUDE_REPORT, session_id=session, resume=resume,
-                            extra={"settings": settings, "add_dirs": [], "env_extra": self.cfg.verify_env()})
+                            extra={"settings": settings, "add_dirs": [], "env_extra": self.claude_env()})
         except AgentInterrupted:
             return "implement %s interrupted" % tid
         except (AgentFailed, AgentTimeout, ModelMismatch) as exc:
@@ -456,7 +467,7 @@ class Orchestrator:
         log_dir = self.runs_dir / ("%s-%s-verify" % (time.strftime("%Y%m%d-%H%M%S"), tid))
         result = verify_task(self.cfg, wt=self.wt_dev, base=task["base_commit"], head=head,
                              previous_hash=task["last_diff_hash"], log_dir=log_dir,
-                             run_commands_too=not blocked_report)
+                             run_commands_too=not blocked_report, tools_dir=self.tools_dir)
         summary = summarize(result)
         (log_dir / "summary.md").write_text(summary)
         no_progress = int(task["no_progress"]) + 1 if (result["repeated"] or not result["commits"]) else 0

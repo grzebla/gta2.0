@@ -27,17 +27,28 @@ def protected_hits(files: List[str], protected: List[str]) -> List[str]:
     return hits
 
 
-def run_commands(commands: List[List[str]], *, cwd: Path, env: Dict[str, str], log_dir: Path,
+def normalize(entry: Any) -> Dict[str, Any]:
+    if isinstance(entry, dict):
+        return {"name": entry.get("name") or " ".join(entry["cmd"]), "cmd": list(entry["cmd"]),
+                "env": dict(entry.get("env") or {}), "unset": list(entry.get("unset") or [])}
+    return {"name": " ".join(entry), "cmd": list(entry), "env": {}, "unset": []}
+
+
+def run_commands(commands: List[Any], *, cwd: Path, env: Dict[str, str], log_dir: Path,
                  timeout_s: float) -> List[Dict[str, Any]]:
     results = []
     deadline = time.time() + timeout_s
-    for i, cmd in enumerate(commands):
+    for i, entry in enumerate(commands):
+        spec = normalize(entry)
+        cmd = spec["cmd"]
+        run_env = {k: v for k, v in env.items() if k not in spec["unset"]}
+        run_env.update(spec["env"])
         log = log_dir / ("verify-%02d.log" % i)
         remaining = max(30.0, deadline - time.time())
         started = time.time()
         try:
             with open(log, "wb") as fh:
-                proc = subprocess.run(cmd, cwd=str(cwd), env=env, stdout=fh, stderr=subprocess.STDOUT,
+                proc = subprocess.run(cmd, cwd=str(cwd), env=run_env, stdout=fh, stderr=subprocess.STDOUT,
                                       timeout=remaining, start_new_session=True)
             rc: Optional[int] = proc.returncode
             timed_out = False
@@ -45,7 +56,7 @@ def run_commands(commands: List[List[str]], *, cwd: Path, env: Dict[str, str], l
             rc, timed_out = None, True
         text = log.read_text(errors="replace")
         results.append({
-            "command": " ".join(cmd), "returncode": rc, "timed_out": timed_out,
+            "command": spec["name"], "argv": " ".join(cmd), "returncode": rc, "timed_out": timed_out,
             "seconds": round(time.time() - started, 1), "log": str(log),
             "tail": truncate(text[-6000:], 4000) if (rc != 0) else text[-600:],
         })
@@ -55,7 +66,7 @@ def run_commands(commands: List[List[str]], *, cwd: Path, env: Dict[str, str], l
 
 
 def verify_task(cfg: Any, *, wt: Path, base: str, head: str, previous_hash: Optional[str],
-                log_dir: Path, run_commands_too: bool = True) -> Dict[str, Any]:
+                log_dir: Path, run_commands_too: bool = True, tools_dir: Optional[Path] = None) -> Dict[str, Any]:
     log_dir.mkdir(parents=True, exist_ok=True)
     checks: List[Dict[str, Any]] = []
     dirty = gitops.status_short(wt)
@@ -84,6 +95,8 @@ def verify_task(cfg: Any, *, wt: Path, base: str, head: str, previous_hash: Opti
     if run_commands_too and structural_ok:
         env = agent_env(cfg.verify_env())
         env["GTA20_ORCHESTRATOR_VERIFY"] = "1"
+        if tools_dir:
+            env["PATH"] = str(tools_dir) + ":" + env["PATH"]
         commands = run_commands(cfg["verify"]["commands"], cwd=wt, env=env, log_dir=log_dir,
                                 timeout_s=float(cfg["verify"]["timeout_s"]))
         for c in commands:

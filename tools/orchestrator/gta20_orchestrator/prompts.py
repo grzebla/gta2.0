@@ -208,9 +208,13 @@ WORKING RULES:
 - Stay on this branch. Commit with messages starting with "[{task['id']}] ". Leave the worktree
   clean (everything committed). Do not push.
 - Original game data: {game_dir_hint}. Never commit it; screenshots stay outside the repo.
-- Follow CLAUDE.md and the code style (clang-format; warnings are errors). Run the project's
-  build and tests (cmake --preset debug && cmake --build --preset debug && ctest --preset debug)
-  before finishing; the orchestrator re-runs them independently.
+- Follow CLAUDE.md and the code style (warnings are errors). The pinned clang-format 23.1.3 is
+  on PATH: run `clang-format -i` on the files you change. Before finishing run, like CI:
+  `bash scripts/ci/check-module-boundaries.sh`; the asset-free suite
+  `env -u GTA20_GAME_DIR cmake --preset headless && cmake --build --preset headless &&
+  env -u GTA20_GAME_DIR ctest --preset headless`; and the data suite `cmake --preset debug &&
+  cmake --build --preset debug && ctest --preset debug`. The orchestrator re-runs all of these
+  (plus the clang-format check over all sources) independently, outside your sandbox.
 - Small, focused changes. If something is impossible or needs a decision, stop and report it
   in `unresolved` / `questions_for_astra` with status "blocked" or "partial".
 - Your final answer is the JSON report (schema provided): exact commands run and their results,

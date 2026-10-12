@@ -44,7 +44,7 @@ class SimEnv:
         base = {
             "worktrees_dir": str(self.tmp / "wt"),
             "push_integration": True, "min_push_interval_s": 0, "open_draft_pr": False,
-            "verify": {"commands": [["sh", "-c", "test -f README.md"]], "timeout_s": 60, "env": {}},
+            "verify": {"commands": [["sh", "-c", "test -f README.md"]], "timeout_s": 60, "env": {}, "pinned_tools": False},
             "limits": {"poll_s": 0.01, "quota_reset_margin_s": 0, "quota_backoff_s": [0.05, 0.05, 0.1],
                        "quota_max_probes": 5, "arch_review_every": 0, "max_runs_per_day": 1000},
         }
