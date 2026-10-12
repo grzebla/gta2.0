@@ -76,8 +76,8 @@ Brakuje parserów `.sty`, `.scr`, `.gxt`, `.sdt`.
 
 ## 6. Gotowość AWS
 
-Bez zmian w zasobach AWS (tylko odczyty). Plan PAID; limit GPU 0 vCPU, wniosek
-`CASE_OPENED`. Pierwszy test **da się wykonać bez advanced features i OIDC** skryptami
+Bez zmian w zasobach AWS (tylko odczyty). Plan PAID; limit GPU **4 vCPU** (wniosek zamknięty
+2026-10-12 19:43 UTC jako zrealizowany). Pierwszy test **da się wykonać bez advanced features i OIDC** skryptami
 operatora (symulacja IAM: 39/39 potrzebnych akcji dozwolonych). Odpowiedzi na pytania
 weryfikacyjne (WDDM na T4, sesja interaktywna, watchdog, zatrzymanie, restarty, proces vs
 render): [../aws/integration.md](../aws/integration.md). Najważniejsze ryzyko: sterowniki

@@ -8,7 +8,7 @@ Legenda: ✅ zweryfikowane · ⏳ czeka na zewnętrzną decyzję · 🧑 wymaga 
 |---|---|---|
 | Plan projektu | PAID, aktywny, 120 USD kredytów | ✅ |
 | Region | eu-north-1; G4dn (`xlarge`, `2xlarge`) w strefach a, b, c | ✅ |
-| Limit „Running On-Demand G and VT instances” | 0 vCPU; wniosek o 4 vCPU `CASE_OPENED` (zgłoszenie `179182732600608`) | ⏳ |
+| Limit „Running On-Demand G and VT instances” | 4 vCPU (zgłoszenie `179182732600608` zamknięte 2026-10-12 19:43 UTC) | ✅ |
 | SCP: `iam:CreateOpenIDConnectProvider` | **explicitDeny** (symulacja IAM) — wymaga advanced features | 🧑 |
 | SCP: `ec2:RunInstances` g4dn, `cloudformation:CreateStack`, `lambda:CreateFunction`, `events:PutRule`, `s3:CreateBucket`, `ssm:SendCommand`, `iam:CreateRole`/`PassRole`, `budgets:*` | allowed | ✅ |
 | SCP: Spot, CloudFormation w us-east-1, `s3:GetObject` z bucketów sterowników AWS w us-east-1 | explicitDeny — projekt tego nie używa | ✅ |
@@ -87,7 +87,7 @@ akcje budżetowe nie zastąpią mechanizmów A–D. Te zatrzymują hosta w ciąg
 
 | # | Krok | Kto | |
 |---|---|---|---|
-| 1 | Wniosek o limit GPU zatwierdzony (≥ 4 vCPU) | AWS | ⏳ |
+| 1 | Wniosek o limit GPU zatwierdzony (≥ 4 vCPU) | AWS | ✅ |
 | 2 | Advanced features aktywowane (warunek utworzenia dostawcy OIDC) | Ty, AWS Settings | 🧑 |
 | 3 | Budżet z alertami: `infra/aws/create-budget.sh <e-mail> 15` — najlepiej przed krokiem 2 | Ty lub ja po zgodzie | 🧑 |
 | 4 | Stos `opengta2-gfx` (instancja startuje od razu, watchdog wyłączy ją po 60 min) | Ty lub ja po zgodzie | 💰🧑 |

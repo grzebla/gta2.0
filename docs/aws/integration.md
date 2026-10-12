@@ -13,7 +13,7 @@ pierwszym uruchomieniem: [../ci/gfx-compat-checklist.md](../ci/gfx-compat-checkl
 | Pozycja | Stan |
 |---|---|
 | Plan projektu | PAID (120 USD kredytów) |
-| Limit „Running On-Demand G and VT instances” (eu-north-1) | 0 vCPU; wniosek o 4 vCPU: `CASE_OPENED`, zgłoszenie `179182732600608` |
+| Limit „Running On-Demand G and VT instances” (eu-north-1) | **4 vCPU** (zgłoszenie `179182732600608` zamknięte 2026-10-12 19:43 UTC, wartość potwierdzona `GetServiceQuota`) |
 | SCP | blokuje `iam:*Provider*` (GitHub OIDC), Spot, CloudFormation w us-east-1, pobieranie sterowników z bucketów AWS w us-east-1 |
 | Wdrożone zasoby | brak (żadnych stosów, instancji ani bucketów) |
 | Advanced features | nieaktywne (decyzja właściciela; aktywacja nieodwracalna i usuwa limit wydatków) |

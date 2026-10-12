@@ -85,7 +85,7 @@ Szczegóły: [`docs/ci/gpu-testing.md`](../ci/gpu-testing.md). W skrócie:
 | Region | eu-north-1 (`~/.aws/config`) — potwierdź w AWS Settings > View all projects > Overview > Additional Info > Region |
 | Plan | ~~FREE~~ → **PAID** (przejście wykonane w AWS Settings, potwierdzone `GetAccountPlanState` 2026-10-12) |
 | G4dn w eu-north-1 | `g4dn.xlarge`/`2xlarge` w strefach a, b, c (T4 16 GiB) |
-| Limit „On-Demand G and VT” | **0 vCPU** — wniosek o 4 vCPU złożony 2026-10-12 17:45 UTC, ID `525751b73cff42dc9ecced945cb3ac3eUu9pcyFI`, status PENDING |
+| Limit „On-Demand G and VT” | **4 vCPU** (od 2026-10-12 19:43 UTC) — wniosek ID `525751b73cff42dc9ecced945cb3ac3eUu9pcyFI`, zgłoszenie `179182732600608`, status `CASE_CLOSED`, wartość potwierdzona przez `GetServiceQuota` |
 | Limit „On-Demand Standard” | 5 vCPU |
 | VPC | tylko domyślne `vpc-012515c9ad46fee92` |
 | AMI Windows Server 2022 | `ami-02115c83a28601673` (parametr publiczny SSM) |
@@ -168,7 +168,7 @@ uruchomienia `gfx-compat` w trybie `probe`.
   repozytorium, właściciela i aktora, gałęzi `main` i pliku `gfx-session.yml`; każde ręczne
   uruchomienie wymaga `cost_confirmation=uruchom-ec2`.
 * **AWS:** plan PAID (120 USD kredytów). SCP nadal blokuje `iam:CreateOpenIDConnectProvider`
-  (symulacja IAM). Limit GPU 0, wniosek `CASE_OPENED`.
+  (symulacja IAM). Limit GPU 0, wniosek `CASE_OPENED` (aktualizacja 19:43 UTC: limit 4 vCPU, zgłoszenie zamknięte).
 * **Sterownik:** buckety sterowników AWS (us-east-1) są zablokowane przez SCP; przypięto
   oficjalny NVIDIA 581.80 (R580) dla Windows Server 2022/2025 z SHA-256 i weryfikacją
   podpisu Authenticode; bootstrap przełącza T4 z TCC na WDDM, jeśli trzeba.
