@@ -1,0 +1,197 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  OpenGTA2 - GitHub Actions OIDC trust and least-privilege CI role for the GPU
+  graphics tests. The role can only start/stop the existing tagged test host,
+  send SSM commands to it and use the runs/ prefix of the artifacts bucket.
+  It cannot launch, modify or terminate instances.
+  Trust is pinned to immutable GitHub IDs (repository, owner, actor), the main
+  branch and the reusable workflow file - GitHub environments with required
+  reviewers are not available for this private repository's plan.
+  PREREQUISITE: the project SCP denies iam:*Provider* until advanced features
+  are activated in AWS Settings.
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    Default: grzebla
+    AllowedPattern: "^[A-Za-z0-9-]{1,39}$"
+  GitHubRepo:
+    Type: String
+    Default: OpenGTA2
+    AllowedPattern: "^[A-Za-z0-9._-]{1,100}$"
+  GitHubRepositoryId:
+    Type: String
+    Default: "1415959822"
+    AllowedPattern: "^[0-9]{1,20}$"
+    Description: Immutable repository ID (gh api repos/OWNER/REPO --jq .id). Survives renames, blocks name squatting.
+  GitHubOwnerId:
+    Type: String
+    Default: "12907536"
+    AllowedPattern: "^[0-9]{1,20}$"
+  GitHubActorId:
+    Type: String
+    Default: "12907536"
+    AllowedPattern: "^[0-9]{1,20}$"
+    Description: Only runs started by this GitHub user can assume the session role (the paid part).
+  SessionWorkflowPath:
+    Type: String
+    Default: .github/workflows/gfx-session.yml
+    AllowedPattern: "^\\.github/workflows/[A-Za-z0-9._-]+\\.ya?ml$"
+  ExistingOidcProviderArn:
+    Type: String
+    Default: ""
+    Description: Set if token.actions.githubusercontent.com already exists in the account.
+  ArtifactsBucketName:
+    Type: String
+    Description: Output ArtifactsBucketName of the gfx-test stack.
+  ProjectTag:
+    Type: String
+    Default: OpenGTA2
+
+Conditions:
+  CreateProvider: !Equals [!Ref ExistingOidcProviderArn, ""]
+
+Resources:
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      Tags:
+        - { Key: Project, Value: !Ref ProjectTag }
+
+  GfxCiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: opengta2-gfx-ci
+      Path: /opengta2/
+      MaxSessionDuration: 3600
+      Description: Assumed by the gfx-session workflow on main, started by the repository owner.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If [CreateProvider, !Ref GitHubOidcProvider, !Ref ExistingOidcProviderArn]
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": sts.amazonaws.com
+                "token.actions.githubusercontent.com:sub": !Sub "repo:${GitHubOwner}/${GitHubRepo}:ref:refs/heads/main"
+                "token.actions.githubusercontent.com:repository_id": !Ref GitHubRepositoryId
+                "token.actions.githubusercontent.com:repository_owner_id": !Ref GitHubOwnerId
+                "token.actions.githubusercontent.com:actor_id": !Ref GitHubActorId
+                "token.actions.githubusercontent.com:job_workflow_ref": !Sub "${GitHubOwner}/${GitHubRepo}/${SessionWorkflowPath}@refs/heads/main"
+      Policies:
+        - PolicyName: gfx-ci
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DescribeOnly
+                Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
+                  - ssm:DescribeInstanceInformation
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                  - ssm:ListCommands
+                Resource: "*"
+              - Sid: StartStopTaggedHostOnly
+                Effect: Allow
+                Action: [ec2:StartInstances, ec2:StopInstances]
+                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                Condition:
+                  StringEquals:
+                    "aws:ResourceTag/Project": !Ref ProjectTag
+                    "aws:ResourceTag/Purpose": gfx-test
+              - Sid: RunPowerShellDocument
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub "arn:${AWS::Partition}:ssm:${AWS::Region}::document/AWS-RunPowerShellScript"
+              - Sid: SendCommandToTaggedHostOnly
+                Effect: Allow
+                Action: ssm:SendCommand
+                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                Condition:
+                  StringEquals:
+                    "ssm:resourceTag/Project": !Ref ProjectTag
+                    "ssm:resourceTag/Purpose": gfx-test
+              - Sid: CancelOwnCommands
+                Effect: Allow
+                Action: ssm:CancelCommand
+                Resource: "*"
+              - Sid: RunArtifacts
+                Effect: Allow
+                Action: [s3:PutObject, s3:GetObject]
+                Resource:
+                  - !Sub "arn:${AWS::Partition}:s3:::${ArtifactsBucketName}/runs/*"
+                  - !Sub "arn:${AWS::Partition}:s3:::${ArtifactsBucketName}/ssm-output/*"
+              - Sid: ListRunPrefixes
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub "arn:${AWS::Partition}:s3:::${ArtifactsBucketName}"
+                Condition:
+                  StringLike: { "s3:prefix": ["runs/*", "ssm-output/*"] }
+              # Defense in depth: even if someone attaches a broader policy later,
+              # the CI identity must never create or resize compute.
+              - Sid: NeverCreateOrResizeCompute
+                Effect: Deny
+                Action:
+                  - ec2:RunInstances
+                  - ec2:ModifyInstanceAttribute
+                  - ec2:CreateTags
+                  - ec2:DeleteTags
+                  - ec2:TerminateInstances
+                  - iam:*
+                Resource: "*"
+      Tags:
+        - { Key: Project, Value: !Ref ProjectTag }
+
+  GfxStopRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: opengta2-gfx-ci-stop
+      Path: /opengta2/
+      MaxSessionDuration: 3600
+      Description: Cleanup-only role - can describe and stop the tagged GPU test host, nothing else.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If [CreateProvider, !Ref GitHubOidcProvider, !Ref ExistingOidcProviderArn]
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": sts.amazonaws.com
+                "token.actions.githubusercontent.com:sub": !Sub "repo:${GitHubOwner}/${GitHubRepo}:ref:refs/heads/main"
+                "token.actions.githubusercontent.com:repository_id": !Ref GitHubRepositoryId
+                "token.actions.githubusercontent.com:repository_owner_id": !Ref GitHubOwnerId
+                "token.actions.githubusercontent.com:job_workflow_ref": !Sub "${GitHubOwner}/${GitHubRepo}/${SessionWorkflowPath}@refs/heads/main"
+      Policies:
+        - PolicyName: gfx-ci-stop
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [ec2:DescribeInstances, ssm:CancelCommand]
+                Resource: "*"
+              - Effect: Allow
+                Action: ec2:StopInstances
+                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                Condition:
+                  StringEquals:
+                    "aws:ResourceTag/Project": !Ref ProjectTag
+                    "aws:ResourceTag/Purpose": gfx-test
+      Tags:
+        - { Key: Project, Value: !Ref ProjectTag }
+
+Outputs:
+  GfxStopRoleArn:
+    Value: !GetAtt GfxStopRole.Arn
+    Description: GitHub repository variable AWS_GFX_STOP_ROLE_ARN.
+  GfxCiRoleArn:
+    Value: !GetAtt GfxCiRole.Arn
+    Description: GitHub repository variable AWS_GFX_ROLE_ARN.

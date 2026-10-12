@@ -1,0 +1,46 @@
+# Step 1 (before any full automation): does original GTA2 render on EC2 G4dn?
+#   mode=probe  -> bootstrap + GPU/driver/session report only (~10-15 min, ~0.2 USD)
+#   mode=compat -> DirectDraw/Direct3D matrix from tests/gfx/compat-matrix.json
+# Paid resource: only the repository owner on main can assume the AWS role, and
+# every run requires typing the cost confirmation below.
+name: gfx-compat
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: probe = environment report only, compat = full DirectDraw matrix
+        type: choice
+        options: [probe, compat]
+        default: probe
+      cases:
+        description: Comma-separated case ids from compat-matrix.json, or "all"
+        type: string
+        default: all
+      max_minutes:
+        description: Hard budget for this session (host is stopped afterwards)
+        type: choice
+        options: ["30", "45", "60"]
+        default: "45"
+      cost_confirmation:
+        description: 'Paid EC2 G4dn session (~0.74 USD/h). Type "uruchom-ec2" to confirm.'
+        type: string
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: ec2-gpu-host
+  cancel-in-progress: false
+
+jobs:
+  gfx:
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/gfx-session.yml
+    with:
+      mode: ${{ inputs.mode }}
+      cases: ${{ inputs.cases }}
+      max_minutes: ${{ inputs.max_minutes }}
+      cost_confirmation: ${{ inputs.cost_confirmation }}

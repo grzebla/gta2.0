@@ -1,0 +1,139 @@
+# Reusable: one cost-bounded session on the EC2 G4dn graphics host.
+# Cost guards (in order of independence from this workflow):
+#   1. AWS: OS watchdog on the instance (MaxRuntimeMinutes tag) + reaper Lambda every 10 min
+#   2. IAM: CI role can only start/stop the existing tagged host - never launch or resize;
+#      its OIDC trust accepts only this file on main, started by the repository owner
+#   3. Workflow: typed cost confirmation, single-flight concurrency, timeouts, always-run stop job
+# GitHub environments with required reviewers are not available for this private
+# repository's plan, so approval = the owner dispatching the run and typing the confirmation.
+name: gfx-session
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        type: string
+        required: true
+      cases:
+        type: string
+        default: all
+      max_minutes:
+        type: string
+        default: "45"
+      cost_confirmation:
+        description: Must equal "uruchom-ec2" - explicit acknowledgement of a paid EC2 session.
+        type: string
+        required: true
+
+permissions: {}
+
+# NOTE: no concurrency here on purpose. Callers set `concurrency: ec2-gpu-host`
+# at workflow level so the session AND its stop job are serialized together
+# (the same group here as well would deadlock the caller).
+
+jobs:
+  session:
+    name: GPU session (${{ inputs.mode }})
+    runs-on: ubuntu-24.04
+    if: github.ref == 'refs/heads/main'
+    timeout-minutes: 65
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      GFX_BUCKET: ${{ vars.GFX_BUCKET }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      GFX_MODE: ${{ inputs.mode }}
+      GFX_CASES: ${{ inputs.cases }}
+      MAX_MINUTES: ${{ inputs.max_minutes }}
+      RESULTS_DIR: gfx-results
+      COST_CONFIRMATION: ${{ inputs.cost_confirmation }}
+    steps:
+      - name: Require explicit cost confirmation
+        run: |
+          if [[ "$COST_CONFIRMATION" != "uruchom-ec2" ]]; then
+            echo "::error::Paid EC2 session not confirmed (cost_confirmation must be 'uruchom-ec2')."
+            exit 1
+          fi
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_GFX_ROLE_ARN }}
+          role-session-name: gfx-${{ github.run_id }}
+          role-duration-seconds: 3600
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Resolve test host
+        run: bash scripts/ci/ec2-gpu-session.sh resolve
+
+      - name: Start host and wait for SSM
+        run: bash scripts/ci/ec2-gpu-session.sh start
+
+      - name: Upload test scripts
+        run: bash scripts/ci/ec2-gpu-session.sh upload
+
+      - name: Run tests on host
+        run: bash scripts/ci/ec2-gpu-session.sh run
+
+      - name: Collect results
+        if: always()
+        run: bash scripts/ci/ec2-gpu-session.sh collect
+
+      - name: Stop host (fast path)
+        if: always()
+        run: bash scripts/ci/ec2-gpu-session.sh stop
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "### OpenGTA2 graphics session (${GFX_MODE})"
+            if [[ -f "$RESULTS_DIR/summary.json" ]]; then
+              jq -r '"**Overall:** \(.overall)  \n**GPU:** \(.gpu // "none")  \n**Driver:** \(.driverStrategy)\n\n| case | verdict |\n|---|---|", (.cases[]? | "| \(.id) | \(.verdict) |")' "$RESULTS_DIR/summary.json"
+            else
+              echo "No summary.json - see job log and ssm-output."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: gfx-${{ inputs.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: gfx-results/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # Runs even if the session job failed, timed out or was cancelled.
+  # Uses a stop-only role, so cleanup never needs anything but EC2 stop.
+  ensure-stopped:
+    name: Ensure host stopped
+    needs: session
+    if: always() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      GFX_BUCKET: ${{ vars.GFX_BUCKET }}
+      RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.AWS_GFX_STOP_ROLE_ARN }}
+          role-session-name: gfx-stop-${{ github.run_id }}
+          role-duration-seconds: 900
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Stop host
+        run: bash scripts/ci/ec2-gpu-session.sh stop

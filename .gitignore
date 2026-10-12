@@ -1,0 +1,23 @@
+# Original game files are copyrighted - never commit them. Upload to the private S3 bucket instead.
+/game/
+*.zip
+*.7z
+
+# Test artifacts
+gfx-results/
+
+# Local env / secrets (managed by varlock)
+.env
+.env.*
+!.env.schema
+
+# OS / IDE
+.DS_Store
+.vs/
+.idea/
+bin/
+obj/
+
+# Claude Code runtime state
+.claude/scheduled_tasks.lock
+.claude/settings.local.json

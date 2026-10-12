@@ -1,0 +1,60 @@
+# Free static checks for the GPU-test infrastructure (no AWS access).
+name: infra-lint
+
+on:
+  pull_request:
+    paths:
+      - ".github/**"
+      - "infra/**"
+      - "scripts/**"
+      - "tests/gfx/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/**"
+      - "infra/**"
+      - "scripts/**"
+      - "tests/gfx/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: actionlint
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          "$(go env GOPATH)/bin/actionlint" -color
+
+      - name: shellcheck
+        run: shellcheck scripts/ci/*.sh infra/aws/*.sh
+
+      - name: cfn-lint
+        run: |
+          python3 -m pip install --user --quiet cfn-lint==1.57.2
+          python3 -m cfnlint --regions eu-north-1 -- infra/aws/*.yaml
+
+      - name: JSON validity
+        run: jq empty tests/gfx/compat-matrix.json
+
+      - name: PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -RequiredVersion 1.25.0 -Scope CurrentUser -Force
+          $issues = Invoke-ScriptAnalyzer -Path tests/gfx/windows -Recurse -Severity Error,Warning `
+            -ExcludeRule PSAvoidUsingWriteHost,PSAvoidUsingConvertToSecureStringWithPlainText,PSUseShouldProcessForStateChangingFunctions
+          $issues | Format-Table -AutoSize | Out-String -Width 200 | Write-Output
+          if ($issues | Where-Object Severity -eq 'Error') { exit 1 }

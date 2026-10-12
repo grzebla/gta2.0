@@ -1,0 +1,36 @@
+# Step 2: automated graphics tests of the original GTA2 on EC2 G4dn.
+# Disabled until gfx-compat reports COMPATIBLE and you promote the passing
+# case(s): set repository variables GFX_E2E_ENABLED=true and
+# GFX_E2E_CASES=<comma-separated case ids>. Setting GFX_E2E_ENABLED is the
+# standing cost approval for this workflow (incl. the schedule, once enabled).
+name: gfx-e2e
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_minutes:
+        type: choice
+        options: ["30", "45", "60"]
+        default: "30"
+  # Enable only after compat passed and the monthly budget is confirmed:
+  # schedule:
+  #   - cron: "0 3 * * 1"   # Mondays 03:00 UTC
+
+permissions: {}
+
+concurrency:
+  group: ec2-gpu-host
+  cancel-in-progress: false
+
+jobs:
+  gfx:
+    if: vars.GFX_E2E_ENABLED == 'true' && vars.GFX_E2E_CASES != ''
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/gfx-session.yml
+    with:
+      mode: e2e
+      cases: ${{ vars.GFX_E2E_CASES }}
+      max_minutes: ${{ inputs.max_minutes || '30' }}
+      cost_confirmation: uruchom-ec2

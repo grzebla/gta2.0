@@ -1,0 +1,61 @@
+{
+  "$comment": "DirectDraw/Direct3D compatibility matrix for original GTA2 10.5 on EC2 G4dn. Registry semantics verified against CriminalRETeam/gta2_re Source/winmain.cpp: start_mode 0=windowed, 1=fullscreen (windowed silently falls back to fullscreen and rewrites start_mode=1); fullscreen is 640x480 by default at 16 bpp; render/video DLLs are hard-coded to d3ddll.dll + dmavideo.dll in 10.5.",
+  "schemaVersion": 1,
+  "game": {
+    "s3Key": "game/gta2-10.5.zip",
+    "sha256": "",
+    "exe": "gta2.exe",
+    "registryKey": "SOFTWARE\\DMA Design Ltd\\GTA2",
+    "registryView": "Registry32"
+  },
+  "observe": {
+    "warmupSeconds": 12,
+    "screenshotsAtSeconds": [12, 20, 30],
+    "minUniqueColors": 24,
+    "maxBlackRatio": 0.97,
+    "caseTimeoutSeconds": 90
+  },
+  "driver": {
+    "$comment": "Tried in order. grid-s3 = s3://ec2-windows-nvidia-drivers/latest (us-east-1) - DENIED by the project SCP (verified with iam:SimulatePrincipalPolicy 2026-10-12), kept only for completeness. url = official NVIDIA data center driver R580 (581.80) for Tesla T4 on Windows Server 2022/2025; sha256 computed from the first download (NVIDIA publishes no checksums), Authenticode signature is verified on the host before install.",
+    "strategies": ["url", "none"],
+    "url": "https://us.download.nvidia.com/tesla/581.80/581.80-data-center-tesla-desktop-winserver-2022-2025-dch-international.exe",
+    "sha256": "867d73ae28fe07e8a79a0dece4f6dcc74f6534caded9ece39226f7e05b27b8f1",
+    "signer": "NVIDIA Corporation"
+  },
+  "wrappers": {
+    "native": { "files": [] },
+    "ddrawcompat": {
+      "url": "https://github.com/narzoul/DDrawCompat/releases/download/v0.7.1/DDrawCompat-v0.7.1.zip",
+      "sha256": "0c33ecb1c01c1c779063b490a2e818f6d9227b3b4ee827c51790fb0fd59b17c5",
+      "files": [{ "from": "ddraw.dll", "to": "ddraw.dll" }]
+    },
+    "dgvoodoo2": {
+      "url": "https://github.com/dege-diosg/dgVoodoo2/releases/download/v2.87.5/dgVoodoo2_87_5.zip",
+      "sha256": "5ffde6927f7355ca3fdd5d785b581256a8e6539fa13e395a891ade6ba1040850",
+      "files": [
+        { "from": "MS/x86/DDraw.dll", "to": "DDraw.dll" },
+        { "from": "MS/x86/D3DImm.dll", "to": "D3DImm.dll" },
+        { "from": "dgVoodoo.conf", "to": "dgVoodoo.conf" }
+      ]
+    }
+  },
+  "baseScreen": {
+    "do_play_movie": 0,
+    "tripple_buffer": 0,
+    "full_width": 640,
+    "full_height": 480,
+    "window_width": 640,
+    "window_height": 480
+  },
+  "cases": [
+    { "id": "native-window",          "wrapper": "native",      "screen": { "start_mode": 0 } },
+    { "id": "native-fullscreen",      "wrapper": "native",      "screen": { "start_mode": 1 } },
+    { "id": "native-fullscreen-dev2", "wrapper": "native",      "screen": { "start_mode": 1, "renderdevice": 2, "videodevice": 2 },
+      "$comment": "Hypothesis: with Basic Display + T4 present, device index 2 may select the NVIDIA adapter." },
+    { "id": "native-window-1024",     "wrapper": "native",      "screen": { "start_mode": 0, "window_width": 1024, "window_height": 768 } },
+    { "id": "ddrawcompat-window",     "wrapper": "ddrawcompat", "screen": { "start_mode": 0 } },
+    { "id": "ddrawcompat-fullscreen", "wrapper": "ddrawcompat", "screen": { "start_mode": 1 } },
+    { "id": "dgvoodoo2-window",       "wrapper": "dgvoodoo2",   "screen": { "start_mode": 0 } },
+    { "id": "dgvoodoo2-fullscreen",   "wrapper": "dgvoodoo2",   "screen": { "start_mode": 1 } }
+  ]
+}

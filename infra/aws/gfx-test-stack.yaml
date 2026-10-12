@@ -1,0 +1,357 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  OpenGTA2 - GPU graphics test host (Windows Server 2022 on EC2 G4dn) driven by
+  GitHub Actions through AWS Systems Manager. No inbound network access.
+  COST WARNING: creating this stack launches the instance immediately
+  (~0.74 USD/h for g4dn.xlarge Windows in eu-north-1). The instance stops itself
+  after MaxRuntimeMinutes, and a reaper Lambda stops it if it runs too long.
+  The AWS Budget is created separately (infra/aws/create-budget.sh): CloudFormation
+  has no AWS::Budgets::Budget in eu-north-1.
+
+Parameters:
+  ProjectTag:
+    Type: String
+    Default: OpenGTA2
+    AllowedPattern: "^[A-Za-z0-9-]{1,32}$"
+  InstanceType:
+    Type: String
+    Default: g4dn.xlarge
+    AllowedValues: [g4dn.xlarge, g4dn.2xlarge]
+    Description: Only G4dn sizes are allowed on purpose (cost guard).
+  WindowsAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
+    Description: >-
+      Resolved on every stack update. A newer AMI replaces the instance, so pass
+      an explicit AMI ID through a custom SSM parameter if you want to pin it.
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet with internet egress (default VPC subnets auto-assign a public IPv4).
+  RootVolumeGiB:
+    Type: Number
+    Default: 60
+    MinValue: 50
+    MaxValue: 100
+  MaxRuntimeMinutes:
+    Type: Number
+    Default: 60
+    MinValue: 15
+    MaxValue: 180
+    Description: Hard limit for a single power-on. Enforced by the OS watchdog and the reaper Lambda.
+  ReaperGraceMinutes:
+    Type: Number
+    Default: 10
+    MinValue: 5
+    MaxValue: 60
+  ArtifactRetentionDays:
+    Type: Number
+    Default: 14
+    MinValue: 1
+    MaxValue: 90
+
+
+Resources:
+  # ---------------------------------------------------------------- storage
+  ArtifactsBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-artifacts-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-runs
+            Status: Enabled
+            Prefix: runs/
+            ExpirationInDays: !Ref ArtifactRetentionDays
+          - Id: expire-ssm-output
+            Status: Enabled
+            Prefix: ssm-output/
+            ExpirationInDays: !Ref ArtifactRetentionDays
+          - Id: abort-multipart
+            Status: Enabled
+            AbortIncompleteMultipartUpload:
+              DaysAfterInitiation: 1
+      Tags:
+        - { Key: Project, Value: !Ref ProjectTag }
+
+  ArtifactsBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactsBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt ArtifactsBucket.Arn
+              - !Sub "${ArtifactsBucket.Arn}/*"
+            Condition:
+              Bool: { "aws:SecureTransport": "false" }
+
+  # ---------------------------------------------------------------- network
+  HostSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: OpenGTA2 GPU test host - no inbound, HTTPS/HTTP egress only
+      VpcId: !Ref VpcId
+      SecurityGroupEgress:
+        - { IpProtocol: tcp, FromPort: 443, ToPort: 443, CidrIp: 0.0.0.0/0, Description: "SSM, S3, driver downloads" }
+        - { IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0, Description: "Windows Update CRL/OCSP" }
+      Tags:
+        - { Key: Project, Value: !Ref ProjectTag }
+
+  # ---------------------------------------------------------------- instance identity
+  HostRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /opengta2/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { "aws:SourceAccount": !Ref AWS::AccountId }
+      ManagedPolicyArns:
+        - !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+      Policies:
+        - PolicyName: artifacts-access
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadInputs
+                Effect: Allow
+                Action: s3:GetObject
+                Resource:
+                  - !Sub "${ArtifactsBucket.Arn}/runs/*"
+                  - !Sub "${ArtifactsBucket.Arn}/game/*"
+                  - !Sub "${ArtifactsBucket.Arn}/tools/*"
+              - Sid: WriteResults
+                Effect: Allow
+                Action: s3:PutObject
+                Resource:
+                  - !Sub "${ArtifactsBucket.Arn}/runs/*/results/*"
+                  - !Sub "${ArtifactsBucket.Arn}/ssm-output/*"
+              - Sid: ListOwnPrefixes
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt ArtifactsBucket.Arn
+                Condition:
+                  StringLike: { "s3:prefix": ["runs/*", "game/*", "tools/*"] }
+              # The NVIDIA GRID driver bucket lives in us-east-1. The project SCP
+              # (RegionFloor/UsEast1Partitional) most likely denies this call;
+              # the bootstrap script falls back to a pinned driver URL.
+              - Sid: NvidiaGridDriverBucket
+                Effect: Allow
+                Action: [s3:GetObject, s3:ListBucket]
+                Resource:
+                  - arn:aws:s3:::ec2-windows-nvidia-drivers
+                  - arn:aws:s3:::ec2-windows-nvidia-drivers/*
+      Tags:
+        - { Key: Project, Value: !Ref ProjectTag }
+
+  HostInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: /opengta2/
+      Roles: [!Ref HostRole]
+
+  # ---------------------------------------------------------------- GPU host
+  GfxHost:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref WindowsAmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref HostInstanceProfile
+      InstanceInitiatedShutdownBehavior: stop
+      Monitoring: false
+      EbsOptimized: true
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+        HttpPutResponseHopLimit: 1
+        InstanceMetadataTags: enabled
+      NetworkInterfaces:
+        - DeviceIndex: "0"
+          SubnetId: !Ref SubnetId
+          AssociatePublicIpAddress: true
+          GroupSet: [!Ref HostSecurityGroup]
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref RootVolumeGiB
+            Encrypted: true
+            DeleteOnTermination: true
+      # First-boot only: install the power-on watchdog before anything else, so
+      # a freshly created instance never runs longer than MaxRuntimeMinutes.
+      UserData:
+        Fn::Base64: |
+          <powershell>
+          $ErrorActionPreference = 'Stop'
+          $root = 'C:\OpenGTA2'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $watchdog = @'
+          $ErrorActionPreference = 'Continue'
+          $minutes = 60
+          try {
+            $t = Invoke-RestMethod -Method Put -Uri 'http://169.254.169.254/latest/api/token' -Headers @{ 'X-aws-ec2-metadata-token-ttl-seconds' = '300' }
+            $v = Invoke-RestMethod -Uri 'http://169.254.169.254/latest/meta-data/tags/instance/MaxRuntimeMinutes' -Headers @{ 'X-aws-ec2-metadata-token' = $t }
+            if ([int]$v -ge 15 -and [int]$v -le 180) { $minutes = [int]$v }
+          } catch { }
+          Add-Content -Path 'C:\OpenGTA2\watchdog.log' -Value ("{0:o} boot; shutdown in {1} min" -f (Get-Date), $minutes)
+          & shutdown.exe /s /f /t ($minutes * 60) /c "OpenGTA2 watchdog: MaxRuntimeMinutes reached" /d p:0:0
+          '@
+          Set-Content -Path "$root\watchdog.ps1" -Value $watchdog -Encoding UTF8
+          $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File $root\watchdog.ps1"
+          $trigger = New-ScheduledTaskTrigger -AtStartup
+          $principal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+          Register-ScheduledTask -TaskName 'OpenGTA2-Watchdog' -Action $action -Trigger $trigger -Principal $principal -Force | Out-Null
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$root\watchdog.ps1"
+          </powershell>
+      Tags:
+        - { Key: Name, Value: !Sub "${AWS::StackName}-gfx-host" }
+        - { Key: Project, Value: !Ref ProjectTag }
+        - { Key: Purpose, Value: gfx-test }
+        - { Key: MaxRuntimeMinutes, Value: !Ref MaxRuntimeMinutes }
+
+  # ---------------------------------------------------------------- reaper (independent of GitHub)
+  ReaperLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-reaper"
+      RetentionInDays: 14
+
+  ReaperRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /opengta2/
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { "aws:SourceAccount": !Ref AWS::AccountId }
+      Policies:
+        - PolicyName: stop-overdue-gfx-hosts
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: ec2:DescribeInstances
+                Resource: "*"
+              - Effect: Allow
+                Action: ec2:StopInstances
+                Resource: !Sub "arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                Condition:
+                  StringEquals:
+                    "aws:ResourceTag/Project": !Ref ProjectTag
+                    "aws:ResourceTag/Purpose": gfx-test
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !GetAtt ReaperLogGroup.Arn
+      Tags:
+        - { Key: Project, Value: !Ref ProjectTag }
+
+  ReaperFunction:
+    Type: AWS::Lambda::Function
+    DependsOn: ReaperLogGroup
+    Properties:
+      FunctionName: !Sub "${AWS::StackName}-reaper"
+      Description: Stops OpenGTA2 GPU test hosts running longer than MaxRuntimeMinutes + grace.
+      Runtime: python3.13
+      Architectures: [arm64]
+      Handler: index.handler
+      MemorySize: 128
+      Timeout: 60
+      Role: !GetAtt ReaperRole.Arn
+      Environment:
+        Variables:
+          PROJECT_TAG: !Ref ProjectTag
+          DEFAULT_MAX_MINUTES: !Ref MaxRuntimeMinutes
+          GRACE_MINUTES: !Ref ReaperGraceMinutes
+      Code:
+        ZipFile: |
+          import datetime, json, os
+          import boto3
+
+          ec2 = boto3.client("ec2")
+
+          def handler(event, context):
+              now = datetime.datetime.now(datetime.timezone.utc)
+              grace = int(os.environ["GRACE_MINUTES"])
+              default_max = int(os.environ["DEFAULT_MAX_MINUTES"])
+              stopped = []
+              pages = ec2.get_paginator("describe_instances").paginate(Filters=[
+                  {"Name": "tag:Project", "Values": [os.environ["PROJECT_TAG"]]},
+                  {"Name": "tag:Purpose", "Values": ["gfx-test"]},
+                  {"Name": "instance-state-name", "Values": ["pending", "running"]},
+              ])
+              for page in pages:
+                  for res in page["Reservations"]:
+                      for inst in res["Instances"]:
+                          tags = {t["Key"]: t["Value"] for t in inst.get("Tags", [])}
+                          try:
+                              limit = int(tags.get("MaxRuntimeMinutes", default_max))
+                          except ValueError:
+                              limit = default_max
+                          # Same bounds as the OS watchdog: a hand-edited tag cannot disable the reaper.
+                          limit = min(max(limit, 15), 180)
+                          age = (now - inst["LaunchTime"]).total_seconds() / 60
+                          if age > limit + grace:
+                              ec2.stop_instances(InstanceIds=[inst["InstanceId"]])
+                              stopped.append({"id": inst["InstanceId"], "age_min": round(age)})
+              print(json.dumps({"stopped": stopped}))
+              return {"stopped": stopped}
+      Tags:
+        - { Key: Project, Value: !Ref ProjectTag }
+
+  ReaperSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Run the OpenGTA2 GPU host reaper every 10 minutes.
+      ScheduleExpression: rate(10 minutes)
+      State: ENABLED
+      Targets:
+        - Id: reaper
+          Arn: !GetAtt ReaperFunction.Arn
+
+  ReaperInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ReaperFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ReaperSchedule.Arn
+
+
+Outputs:
+  InstanceId:
+    Value: !Ref GfxHost
+  ArtifactsBucketName:
+    Value: !Ref ArtifactsBucket
+  HostRoleArn:
+    Value: !GetAtt HostRole.Arn
+  ReaperFunctionName:
+    Value: !Ref ReaperFunction
