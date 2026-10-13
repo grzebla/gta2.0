@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Any, List, Optional
 
-from . import __version__, gitops, memory, prompts, report, service
+from . import __version__, dashboard, gitops, memory, prompts, report, service
 from . import db as D
 from .config import Config, find_repo_root
 from .loop import HALTED, PAUSED, RESTARTING, RUNNING, STOPPED, Orchestrator, install_signal_handlers
@@ -101,11 +101,13 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
     if args.json:
         snap["daemon_pid"] = pid
         print(json.dumps(snap, indent=1, ensure_ascii=False))
-    else:
+    elif args.plain:
         print(report.format_status(snap, pid))
         print("  service:           %s" % (("loaded" if service.loaded() else "not loaded")
                                             if service.manages(cfg.repo_root) else "not installed for this repo"))
         print("  report:            %s" % (cfg.state_dir / "report.md"))
+    else:
+        print(dashboard.render(cfg, database, pid, colour=dashboard.use_colour(), show_all=args.all))
     return 0
 
 
@@ -545,6 +547,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_restart)
     s = sub.add_parser("status")
     s.add_argument("--json", action="store_true")
+    s.add_argument("--plain", action="store_true", help="the old line format, no table or colours")
+    s.add_argument("--all", action="store_true", help="list every finished task too")
     s.set_defaults(fn=cmd_status)
     s = sub.add_parser("logs")
     s.add_argument("-n", type=int, default=60)

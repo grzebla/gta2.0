@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import sqlite3
 import subprocess
@@ -359,6 +360,24 @@ class GitHubExcerptTests(unittest.TestCase):
         self.assertNotIn("progress output", out)
         self.assertNotIn("2026-10-13T", out)
         self.assertNotIn("lint", out)
+
+
+class DashboardTests(SimCase):
+    def test_table_stays_aligned_with_and_without_colour(self) -> None:
+        from gta20_orchestrator import dashboard
+        orch = self.env.orchestrator(FakeAstra(plans=[fake_plan("M1", ["walls", "roads", "lights"])]), FakeClaude())
+        orch.run(max_steps=3)
+        with self.env.db.tx():
+            self.env.db.update_task("T0002", status="BLOCKED", blocked_reason="needs | the owner")
+        for colour in (False, True):
+            text = dashboard.render(self.env.cfg, self.env.db, 0, colour=colour, width=90)
+            plain = [re.sub(r"\033\[[0-9;]*m", "", l) for l in text.splitlines()]
+            rows = [i for i, l in enumerate(plain) if l.strip()[:1] in ("┌", "│", "├", "└")]
+            self.assertGreaterEqual(len(rows), 7, text)
+            self.assertEqual({dashboard.visible_len(text.splitlines()[i]) for i in rows}, {len(plain[rows[0]])}, text)
+            self.assertIn("T0002", text)
+            self.assertIn("needs | the owner", text)
+            self.assertEqual("\033" in text, colour)
 
 
 class InterleavedTaskTests(SimCase):
