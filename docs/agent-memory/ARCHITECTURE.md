@@ -1,3 +1,3 @@
 # Architecture
 
-Retain T0013's approved scene-owned WorldMesh contract. T0015 adds checked GPU transfer sizes, local resource/command ownership guards, transactional atlas and instance-buffer replacement, and Renderer::inject_fault for focused failure tests. No general graphics abstraction or world-rendering integration was introduced.
+Retain the approved WorldMesh and T0015 renderer contracts. T0014 adds scene::build_unsloped_map_mesh with deterministic full-map traversal and fixed-size coverage statistics. Slopes are skipped whole; unsloped faces use exclusive flat/blank/reserved/out-of-style/emitted classification. Coverage is partial or provisional, never complete M1. No renderer integration was added.

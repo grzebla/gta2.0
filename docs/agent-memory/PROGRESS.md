@@ -61,3 +61,7 @@ Approved T0013 at 83fb43f. WorldMesh assembles explicitly selected textured bloc
 ## 2026-10-13T16:18:49Z — T0015 Check GPU transfer sizes and resource failures
 
 Approved T0015 at 3b2bfd7. Renderer transfer sizes are checked before allocation and narrowing; GPU failures return contextual errors with resource cleanup. Failed atlas replacement and instance-buffer growth preserve usable state. Boundary and injected-failure tests cover recovery and rendered-image equality. Required orchestrator verification passes, including clang-tidy and ASan/UBSan. Awaiting Gatekeeper integration; M1 remains incomplete.
+
+## 2026-10-13T16:59:36Z — T0014 Build an explicitly partial unsloped map mesh
+
+Approved T0014 at c37f03b. The CPU builder visits every map cell and assembles drawable unsloped faces with deterministic ordering and explicit partial-coverage statistics. Ten synthetic cases cover selection, coordinates, UVs and determinism; original-city checks confirm partial coverage. Required orchestrator verification passes. Awaiting Gatekeeper integration; M1 remains incomplete.

@@ -1,3 +1,3 @@
 # Project
 
-T0015 approved at 3b2bfd705b9f8c4860b935717fd3cbca7fffddca, awaiting Gatekeeper integration. T0013 and T0008 approvals remain unchanged. M1 remains incomplete.
+T0014 approved at c37f03b0fef8e58452d9e61f57fac2a96d4b2423, awaiting Gatekeeper integration. Existing T0008, T0013, T0015 and T0019 approvals remain unchanged. M1 remains incomplete.
