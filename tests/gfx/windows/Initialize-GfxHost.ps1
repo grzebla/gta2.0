@@ -164,7 +164,26 @@ if (-not (Test-Path $gameExe) -or ($expectedGameSha -and $installedSha -ne $expe
     @{ sha256 = $sha; installedAt = (Get-Date).ToString('o') } | ConvertTo-Json | Set-Content $gameMarker
     Write-Step "game installed (sha256 $sha)"
 }
+# gta2.exe writes player\plyslot*.dat and shows a blocking error when the folder is missing
+# (the installer creates it empty; extracted archives carry no empty folders).
+New-Item -ItemType Directory -Force -Path (Join-Path $gameDir 'player') | Out-Null
 & icacls.exe $gameDir /grant "${env:COMPUTERNAME}\${TestUser}:(OI)(CI)M" /T /Q | Out-Null
+
+# Unattended host: no blocking hard-error or WER dialogs. A failing game must exit (and be
+# reported), not leave a modal box that also pollutes later screenshots.
+Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Windows' -Name ErrorMode -Value 2 -Type DWord
+New-Item -Path 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' -Force | Out-Null
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' -Name DontShowUI -Value 1 -Type DWord
+
+# ---------------------------------------------------------------- DirectPlay (gta2.exe imports DPLAYX.dll)
+# Disabled by default on Windows Server 2022; without it the loader stops gta2.exe with
+# 0xc0000022 ("unable to start correctly") before any game code runs (seen 2026-10-13).
+$dplay = Get-WindowsOptionalFeature -Online -FeatureName DirectPlay
+if ($dplay.State -ne 'Enabled') {
+    $r = Enable-WindowsOptionalFeature -Online -FeatureName DirectPlay -All -NoRestart
+    Write-Step "DirectPlay enabled (restart needed: $($r.RestartNeeded))"
+    if ($r.RestartNeeded) { $rebootRequired = $true }
+}
 
 # ---------------------------------------------------------------- NVIDIA driver
 $driverMarker = Join-Path $stateDir 'driver.json'
@@ -232,13 +251,6 @@ if (-not (Test-Path $driverMarker)) {
                     if ($p.ExitCode -notin 0, 1, 3010) { throw "installer exit code $($p.ExitCode)" }
                     $outcome.strategy = $strategy
                     $rebootRequired = $true
-                    # AWS docs suggest disabling the Basic Display Adapter with public drivers, but on a
-                    # host without RDP/DCV it is the console session's only display. Opt-in only.
-                    if ($strategy -eq 'url' -and ($matrix.driver.PSObject.Properties.Name -contains 'disableBasicDisplay') -and $matrix.driver.disableBasicDisplay) {
-                        Get-PnpDevice -FriendlyName 'Microsoft Basic Display Adapter' -ErrorAction SilentlyContinue |
-                            Disable-PnpDevice -Confirm:$false -ErrorAction SilentlyContinue
-                        $outcome.basicDisplayDisabled = $true
-                    }
                 }
                 $outcome.attempts += @{ strategy = $strategy; ok = $true }
                 break
@@ -273,6 +285,18 @@ if ($smi -and -not (Test-Path $wddmMarker)) {
         }
     } else {
         Write-Step "GPU driver model: $model"
+    }
+}
+
+# ---------------------------------------------------------------- single display on the T4
+$wantSingle = ($matrix.driver.PSObject.Properties.Name -contains 'disableBasicDisplay') -and $matrix.driver.disableBasicDisplay
+$modelNow = if ($smi) { ((& $smi --query-gpu=driver_model.current --format=csv,noheader 2>$null) -join '').Trim() } else { '' }
+if ($wantSingle -and $modelNow -eq 'WDDM') {
+    $basic = @(Get-PnpDevice -Class Display -Status OK -ErrorAction SilentlyContinue |
+        Where-Object FriendlyName -eq 'Microsoft Basic Display Adapter')
+    if ($basic) {
+        $basic | Disable-PnpDevice -Confirm:$false
+        Write-Step "disabled $($basic.Count) Basic Display Adapter(s): the T4 is the only display"
     }
 }
 

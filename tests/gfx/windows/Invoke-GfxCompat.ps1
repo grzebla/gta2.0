@@ -121,6 +121,11 @@ function Set-ScreenSetting($Settings) {
     } finally { $key.Close(); $base.Close() }
 }
 
+function Reset-ScreenSetting {
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry32')
+    try { $base.DeleteSubKeyTree("$($matrix.game.registryKey)\Screen", $false) } finally { $base.Close() }
+}
+
 function Get-ScreenSetting([string] $Name) {
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry32')
     $key = $base.OpenSubKey("$($matrix.game.registryKey)\Screen")
@@ -160,6 +165,8 @@ if ($Mode -ne 'probe') {
     $runner = Join-Path $scriptDir 'Run-Gta2Case.ps1'
     foreach ($c in $selected) {
         $caseDir = Join-Path $resultsDir "cases\$($c.id)"
+        # A rerun with the same RunId must never read the previous run's result.json/frames.
+        Remove-Item -Recurse -Force -Path $caseDir -ErrorAction SilentlyContinue
         New-Item -ItemType Directory -Force -Path $caseDir | Out-Null
         $installed = @()
         $entry = [ordered]@{ id = $c.id; wrapper = $c.wrapper; verdict = $null; detail = $null }
@@ -180,6 +187,9 @@ if ($Mode -ne 'probe') {
                 }
             }
 
+            # Each case starts from the base settings only: values a previous case wrote
+            # (e.g. renderdevice=2) or the game itself rewrote must not leak into the next case.
+            Reset-ScreenSetting
             $screen = Merge-Setting $matrix.baseScreen $c.screen
             Set-ScreenSetting $screen
 
