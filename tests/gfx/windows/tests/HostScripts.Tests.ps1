@@ -65,3 +65,24 @@ Describe 'Capture mode (scripted input)' {
         ($script:invoke + $script:runner) | Should -Not -Match 'Invoke-Expression|\biex\b|ScriptBlock\]::Create'
     }
 }
+
+Describe 'Input diagnostics and provenance' {
+    BeforeAll {
+        $script:invoke = Get-Content -Raw -Path (Join-Path $script:hostDir 'Invoke-GfxCompat.ps1')
+        $script:runner = Get-Content -Raw -Path (Join-Path $script:hostDir 'Run-Gta2Case.ps1')
+    }
+    It 'never assigns an if-expression that can unroll an empty array to $null (D1)' {
+        ($script:invoke + $script:runner) | Should -Not -Match '=\s*if\s*\([^)]*\)\s*\{\s*@\('
+    }
+    It 'takes the injection method from the matrix, not from the scenario' {
+        $script:invoke | Should -Match '\$matrix\.input\.method'
+        $script:invoke | Should -Not -Match '\$scenario\.inputMethod'
+    }
+    It 'knows every documented method' {
+        foreach ($m in 'scancode', 'vk', 'postmessage', 'activate-scancode') { $script:runner | Should -Match "'$m'" }
+    }
+    It 'records focus, SendInput results and a screenshot after each key' {
+        foreach ($k in 'foregroundAtSend', 'sendInput', 'afterFile', 'inputDesktopAccessible', 'hung') { $script:runner | Should -Match $k }
+    }
+    It 'records the harness revision in the summary' { $script:invoke | Should -Match 'harnessRevision' }
+}

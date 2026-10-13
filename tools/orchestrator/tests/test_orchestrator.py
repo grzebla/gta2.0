@@ -629,6 +629,7 @@ class GfxTests(SimCase):
         text = review_prompts[-1].read_text()
         self.assertIn("EC2 TEST HOST RUNS", text)
         self.assertIn("capture-menu-walk=PASS", text)
+        self.assertIn("harness fakerev, input scancode", text)
 
     def test_invalid_requests_are_rejected_without_running(self) -> None:
         runner = FakeGfxRunner()
