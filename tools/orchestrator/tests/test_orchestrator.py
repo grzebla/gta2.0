@@ -369,7 +369,7 @@ class GatekeeperTests(SimCase):
     def _main_commit(self, path: str, content: str) -> None:
         """The owner lands a change on main (as a merged PR would)."""
         wt = self.env.tmp / ("main-%d" % len(list(self.env.tmp.glob("main-*"))))
-        subprocess.run(["git", "clone", "-q", str(self.env.origin), str(wt)], check=True)
+        subprocess.run(["git", "clone", "-q", "-b", "main", str(self.env.origin), str(wt)], check=True)
         for k, v in (("user.email", "o@example.invalid"), ("user.name", "owner")):
             subprocess.run(["git", "config", k, v], cwd=wt, check=True)
         (wt / path).parent.mkdir(parents=True, exist_ok=True)
