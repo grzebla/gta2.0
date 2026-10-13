@@ -171,10 +171,14 @@ class Orchestrator:
             with self.db.tx():
                 self.db.set_quota(name, "OK", None, 0, {"rate_limits": res.rate_limits, "checked_at": iso()})
 
+    def counting_since(self) -> float:
+        """Start of the window the daily caps count in: local midnight, or a later owner reset."""
+        midnight = _dt.datetime.combine(_dt.date.today(), _dt.time()).timestamp()
+        return max(midnight, float(self.db.get_meta("limits_reset_at", "0") or 0))
+
     def daily_cap(self) -> None:
-        midnight = _dt.datetime.combine(_dt.date.today(), _dt.time())
-        start = midnight.timestamp()
-        if self.db.runs_since(iso(start)) >= int(self.limits["max_runs_per_day"]):
+        start = _dt.datetime.combine(_dt.date.today(), _dt.time()).timestamp()
+        if self.db.runs_since(iso(self.counting_since())) >= int(self.limits["max_runs_per_day"]):
             until = start + 86400 + 60
             raise Wait(until, "daily agent-run cap (%d) reached" % self.limits["max_runs_per_day"])
 

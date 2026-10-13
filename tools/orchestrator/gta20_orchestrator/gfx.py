@@ -207,7 +207,7 @@ class GfxJobs:
         return float(row["m"]) / 60.0 * float(self.lim["usd_per_hour"])
 
     def runs_today(self) -> int:
-        start = _dt.datetime.combine(_dt.date.today(), _dt.time()).timestamp()
+        start = self.o.counting_since()
         return int(self.db.conn.execute("SELECT COUNT(*) AS n FROM gfx_jobs WHERE started_at>=?",
                                         (iso(start),)).fetchone()["n"])
 
