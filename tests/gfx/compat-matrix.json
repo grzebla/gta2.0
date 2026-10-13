@@ -1,9 +1,10 @@
 {
-  "$comment": "DirectDraw/Direct3D compatibility matrix for original GTA2 10.5 on EC2 G4dn. Registry semantics verified against CriminalRETeam/gta2_re Source/winmain.cpp: start_mode 0=windowed, 1=fullscreen (windowed silently falls back to fullscreen and rewrites start_mode=1); fullscreen is 640x480 by default at 16 bpp; render/video DLLs are hard-coded to d3ddll.dll + dmavideo.dll in 10.5.",
+  "$comment": "DirectDraw/Direct3D compatibility matrix for original GTA2 10.5 on EC2 G4dn. Registry semantics verified against CriminalRETeam/gta2_re Source/winmain.cpp: start_mode 0=windowed, 1=fullscreen (windowed silently falls back to fullscreen and rewrites start_mode=1); fullscreen is 640x480 by default at 16 bpp; render/video DLLs are hard-coded to d3ddll.dll + dmavideo.dll in 10.5. Verified 2026-10-13 on g4dn.xlarge with GRID 596.86 (WDDM): 9.6 renders the frontend with ddrawcompat-* (PASS); native fails with Videomode 16x16x16 is not available.",
   "schemaVersion": 1,
   "game": {
-    "s3Key": "game/gta2-10.5.zip",
-    "sha256": "",
+    "$comment": "GTA 2 9.6 (Rockstar Classics) - standalone gta2.exe. The 10.5 Freeloader binary (freeloader.dat as gta2.exe, sha256 2443197...ccb3 archive) fails to start on Windows Server 2022 with 0xc0000022 (seen 2026-10-13), it expects its Freeloader launcher.",
+    "s3Key": "game/gta2-9.6.zip",
+    "sha256": "eb36e582beda9bc84b2d90c162e168d68164a562a82f3567d1cb910065f60c10",
     "exe": "gta2.exe",
     "registryKey": "SOFTWARE\\DMA Design Ltd\\GTA2",
     "registryView": "Registry32"
@@ -17,12 +18,17 @@
     "caseTimeoutSeconds": 90
   },
   "driver": {
-    "$comment": "Tried in order. grid-s3 = s3://ec2-windows-nvidia-drivers/latest (us-east-1) - DENIED by the project SCP (verified with iam:SimulatePrincipalPolicy 2026-10-12), kept only for completeness. url = official NVIDIA data center driver R580 (581.80) for Tesla T4 on Windows Server 2022/2025; sha256 computed from the first download (NVIDIA publishes no checksums), Authenticode signature is verified on the host before install.",
-    "strategies": ["url", "none"],
+    "$comment": "Tried in order. grid-public = AWS GRID driver for G4dn (WDDM + Direct3D on the T4; licensed for AWS instances), anonymous HTTPS download of the public object in s3://ec2-windows-nvidia-drivers/latest (SCP-free: no signed API call), pinned key + SHA-256 + NVIDIA Authenticode. Verified 2026-10-13: 596.86 installs and the T4 runs in WDDM. url = NVIDIA data center driver 581.80 - installs but REFUSES WDDM (nvidia-smi -dm 0: Not Supported), so Direct3D falls back to the Basic Display Adapter; kept as fallback. grid-s3 = signed S3 access, denied by the project SCP.",
+    "strategies": ["grid-public", "url", "none"],
+    "grid": {
+      "url": "https://ec2-windows-nvidia-drivers.s3.amazonaws.com/latest/596.86__grid_win10_win11_server2022_server2025_dch_64bit_international_aws_swl.exe",
+      "sha256": "e847099942f9e17e859fc151e725aeab9d23639c54d976a651732691b5fca6a1",
+      "version": "596.86"
+    },
     "url": "https://us.download.nvidia.com/tesla/581.80/581.80-data-center-tesla-desktop-winserver-2022-2025-dch-international.exe",
     "sha256": "867d73ae28fe07e8a79a0dece4f6dcc74f6534caded9ece39226f7e05b27b8f1",
     "signer": "NVIDIA Corporation",
-    "disableBasicDisplay": false
+    "disableBasicDisplay": true
   },
   "wrappers": {
     "native": { "files": [] },

@@ -7,16 +7,18 @@
   Mode 'probe'  - bootstrap + environment report only (GPU, driver, sessions, dxdiag).
   Mode 'compat' - DirectDraw/Direct3D compatibility matrix for the original GTA2.
   Mode 'e2e'    - same runner restricted to the case(s) promoted after compat passed.
+  Mode 'capture' - one scenario from scenarios\<Cases>.json: configuration, scripted key
+                  input and screenshot times (reference captures of the original game).
 
-  Exit codes: 0 = finished (verdict in summary.json), 3010 = reboot requested
-  (SSM reboots and re-runs the command), anything else = infrastructure error.
+  Exit codes: 0 = finished (verdict in summary.json), 194 = reboot requested (the caller
+  reboots through the EC2 API and sends the command again), anything else = infrastructure error.
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $Bucket,
     [Parameter(Mandatory)] [string] $Region,
     [Parameter(Mandatory)] [ValidatePattern('^[A-Za-z0-9-]{1,64}$')] [string] $RunId,
-    [ValidateSet('probe', 'compat', 'e2e')] [string] $Mode = 'compat',
+    [ValidateSet('probe', 'compat', 'e2e', 'capture')] [string] $Mode = 'compat',
     [ValidatePattern('^(all|[a-z0-9-]+(,[a-z0-9-]+)*)$')] [string] $Cases = 'all',
     [string] $Root = 'C:\GTA20',
     [string] $TestUser = 'gta2runner'
@@ -39,10 +41,12 @@ Import-Module (Join-Path $scriptDir 'GfxAnalysis.psm1') -Force
 $boot = & (Join-Path $scriptDir 'Initialize-GfxHost.ps1') -Bucket $Bucket -Region $Region `
     -MatrixPath $matrixPath -Root $Root -TestUser $TestUser | Select-Object -Last 1
 if ($boot.RebootRequired) {
-    # SSM reboots on 3010 and re-runs this whole command; the counter stops an endless loop.
+    # Not SSM's exit 3010: on this host the agent-initiated reboot hangs (seen 2026-10-13, twice).
+    # Exit 194 tells the caller to reboot through the EC2 API and send the command again;
+    # the counter stops an endless loop.
     $attempt = Register-RebootAttempt -StateDir (Join-Path $Root 'state') -RunId $RunId -MaxReboots 3
-    Write-Host "Bootstrap changed drivers/autologon/WDDM - requesting reboot $attempt/3 (SSM exit 3010)."
-    exit 3010
+    Write-Host "REBOOT_REQUIRED: bootstrap changed drivers/autologon/WDDM - reboot $attempt/3 (exit 194)."
+    exit 194
 }
 
 function Get-InteractiveSession([string] $User) {
@@ -119,6 +123,11 @@ function Set-ScreenSetting($Settings) {
     } finally { $key.Close(); $base.Close() }
 }
 
+function Reset-ScreenSetting {
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry32')
+    try { $base.DeleteSubKeyTree("$($matrix.game.registryKey)\Screen", $false) } finally { $base.Close() }
+}
+
 function Get-ScreenSetting([string] $Name) {
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry32')
     $key = $base.OpenSubKey("$($matrix.game.registryKey)\Screen")
@@ -145,11 +154,31 @@ $summary = [ordered]@{
 if ($Mode -ne 'probe') {
     if (-not $session) { throw "NO_INTERACTIVE_SESSION: '$TestUser' is not logged on at the console (autologon failed)." }
 
+    $observe = $matrix.observe
+    $inputs = @()
     $selected = @($matrix.cases)
-    if ($Cases -ne 'all') {
+    if ($Mode -eq 'capture') {
+        # $Cases names one scenario file; its id pattern was validated by the parameter.
+        $scenarioPath = Join-Path $scriptDir "scenarios\$Cases.json"
+        if (-not (Test-Path $scenarioPath)) { throw "unknown scenario '$Cases'" }
+        $scenario = Get-Content -Raw -Path $scenarioPath | ConvertFrom-Json
+        $names = $scenario.PSObject.Properties.Name
+        $scenarioScreen = if ($names -contains 'screen') { $scenario.screen } else { [pscustomobject]@{} }
+        $selected = @([pscustomobject]@{ id = "capture-$($scenario.id)"; wrapper = $scenario.wrapper; screen = $scenarioScreen })
+        $observe = [pscustomobject]@{
+            warmupSeconds        = $matrix.observe.warmupSeconds
+            screenshotsAtSeconds = @($scenario.screenshotsAtSeconds)
+            minUniqueColors      = $matrix.observe.minUniqueColors
+            maxBlackRatio        = $matrix.observe.maxBlackRatio
+            minChangedRatio      = $matrix.observe.minChangedRatio
+            caseTimeoutSeconds   = [int] $scenario.durationSeconds + 30
+        }
+        $inputs = if ($names -contains 'inputs') { @($scenario.inputs) } else { @() }
+    } elseif ($Cases -ne 'all') {
         $wanted = $Cases.Split(',')
         $selected = @($selected | Where-Object { $wanted -contains $_.id })
-        $missing = @($wanted | Where-Object { $_ -notin @($selected.id) })
+        $selectedIds = @($selected | ForEach-Object { $_.id })
+        $missing = @($wanted | Where-Object { $_ -notin $selectedIds })
         if ($missing) { throw "unknown case id(s): $($missing -join ', ')" }
     }
 
@@ -157,6 +186,8 @@ if ($Mode -ne 'probe') {
     $runner = Join-Path $scriptDir 'Run-Gta2Case.ps1'
     foreach ($c in $selected) {
         $caseDir = Join-Path $resultsDir "cases\$($c.id)"
+        # A rerun with the same RunId must never read the previous run's result.json/frames.
+        Remove-Item -Recurse -Force -Path $caseDir -ErrorAction SilentlyContinue
         New-Item -ItemType Directory -Force -Path $caseDir | Out-Null
         $installed = @()
         $entry = [ordered]@{ id = $c.id; wrapper = $c.wrapper; verdict = $null; detail = $null }
@@ -177,25 +208,28 @@ if ($Mode -ne 'probe') {
                 }
             }
 
+            # Each case starts from the base settings only: values a previous case wrote
+            # (e.g. renderdevice=2) or the game itself rewrote must not leak into the next case.
+            Reset-ScreenSetting
             $screen = Merge-Setting $matrix.baseScreen $c.screen
             Set-ScreenSetting $screen
 
             $caseFile = Join-Path $caseDir 'case.json'
             [ordered]@{
                 id = $c.id; gameDir = $gameDir; exe = $matrix.game.exe
-                outDir = $caseDir; observe = $matrix.observe
+                outDir = $caseDir; observe = $observe; inputs = $inputs
             } | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 $caseFile
             & icacls.exe $caseDir /grant "${env:COMPUTERNAME}\${TestUser}:(OI)(CI)M" /T /Q | Out-Null
 
             $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
                 -Argument "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$runner`" -CaseFile `"$caseFile`""
             $principal = New-ScheduledTaskPrincipal -UserId "$env:COMPUTERNAME\$TestUser" -LogonType Interactive -RunLevel Limited
-            $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds ($matrix.observe.caseTimeoutSeconds + 30))
+            $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds ($observe.caseTimeoutSeconds + 30))
             Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
             Start-ScheduledTask -TaskName $taskName
 
             $resultFile = Join-Path $caseDir 'result.json'
-            $deadline = (Get-Date).AddSeconds($matrix.observe.caseTimeoutSeconds)
+            $deadline = (Get-Date).AddSeconds($observe.caseTimeoutSeconds)
             $gpuSeen = $false
             while (-not (Test-Path $resultFile) -and (Get-Date) -lt $deadline) {
                 if ($smi -and -not $gpuSeen) {
@@ -208,7 +242,7 @@ if ($Mode -ne 'probe') {
 
             $res = if (Test-Path $resultFile) { Get-Content -Raw $resultFile | ConvertFrom-Json } else { $null }
             $startAfter = Get-ScreenSetting 'start_mode'
-            $entry.verdict = Get-CaseVerdict -Result $res -Observe $matrix.observe -StartModeRequested $screen.start_mode -StartModeAfter $startAfter
+            $entry.verdict = Get-CaseVerdict -Result $res -Observe $observe -StartModeRequested $screen.start_mode -StartModeAfter $startAfter
             $entry.detail = [ordered]@{
                 startModeRequested = $screen.start_mode
                 startModeAfter     = $startAfter
@@ -244,7 +278,8 @@ if ($Mode -ne 'probe') {
 $passing = @($summary.cases | Where-Object { $_.verdict -like 'PASS*' })
 $summary.finishedAt = (Get-Date).ToString('o')
 $summary.overall = Get-OverallVerdict -Mode $Mode -Cases @($summary.cases)
-$summary.passingCases = @($passing.id)
+# StrictMode 3: no member enumeration on a possibly empty array.
+$summary.passingCases = @($passing | ForEach-Object { $_.id })
 $summary | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 (Join-Path $resultsDir 'summary.json')
 
 # ---------------------------------------------------------------- upload

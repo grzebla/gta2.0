@@ -18,7 +18,7 @@ from typing import Any, List, Optional
 from . import __version__, gitops, memory, prompts, report, service
 from . import db as D
 from .config import Config, find_repo_root
-from .loop import HALTED, PAUSED, RUNNING, STOPPED, Orchestrator, install_signal_handlers
+from .loop import HALTED, PAUSED, RESTARTING, RUNNING, STOPPED, Orchestrator, install_signal_handlers
 from .util import dumps, iso, loads, now
 
 
@@ -71,6 +71,14 @@ def make_agents(cfg: Config):
     return CodexAgent(cfg["astra"]), ClaudeAgent(cfg["claude"])
 
 
+def make_gatekeeper(cfg: Config):
+    from .adapters.codex import CodexAgent
+    from .github import GitHubPort
+    agent = CodexAgent(cfg["gatekeeper"])
+    agent.name = "gatekeeper"
+    return agent, GitHubPort(cfg["github_repo"])
+
+
 def open_db(cfg: Config) -> D.Database:
     database = D.Database(cfg.state_dir)
     gi = cfg.repo_root / ".gitignore"
@@ -95,7 +103,8 @@ def cmd_status(cfg: Config, args: argparse.Namespace) -> int:
         print(json.dumps(snap, indent=1, ensure_ascii=False))
     else:
         print(report.format_status(snap, pid))
-        print("  service:           %s" % ("loaded" if service.loaded() else "not loaded"))
+        print("  service:           %s" % (("loaded" if service.loaded() else "not loaded")
+                                            if service.manages(cfg.repo_root) else "not installed for this repo"))
         print("  report:            %s" % (cfg.state_dir / "report.md"))
     return 0
 
@@ -107,6 +116,8 @@ def run_loop(cfg: Config, *, max_steps: Optional[int], daemon: bool, fake: bool 
         return 0 if daemon else 1
     try:
         database = open_db(cfg)
+        with database.tx():
+            database.set_meta("restart_requested", "")  # a stale request must not stop the new process
         if daemon:
             starts = [t for t in loads(database.get_meta("start_times"), []) if now() - t < 3600] + [now()]
             with database.tx():
@@ -132,10 +143,16 @@ def run_loop(cfg: Config, *, max_steps: Optional[int], daemon: bool, fake: bool 
             spec = json.loads(Path(fake_spec).read_text()) if fake_spec else {}
             astra = FakeAstra(plans=spec.get("astra_plans"), reviews=spec.get("astra_reviews"))
             claude = FakeClaude(script=spec.get("claude_script"))
+            gk_agent, port = None, None  # the Gatekeeper never runs against fakes outside the sim
+            gfx_runner = None  # fakes never reach the EC2 host
             logging.warning("using FAKE agents (%s)", fake_spec or "default")
         else:
             astra, claude = make_agents(cfg)
-        orch = Orchestrator(cfg, database, astra, claude)
+            gk_agent, port = make_gatekeeper(cfg)
+            from .gfx import GfxRunner
+            gfx_runner = GfxRunner(cfg)
+        orch = Orchestrator(cfg, database, astra, claude, gatekeeper=gk_agent, github_port=port,
+                            gfx_runner=gfx_runner)
         install_signal_handlers(orch)
         result = orch.run(max_steps=max_steps, on_step=lambda: report.write(database, cfg.state_dir))
         report.write(database, cfg.state_dir)
@@ -156,8 +173,8 @@ def cmd_start(cfg: Config, args: argparse.Namespace) -> int:
     if args.foreground or args.max_steps is not None:
         setup_logging(cfg.state_dir, args.verbose)
         return run_loop(cfg, max_steps=args.max_steps, daemon=False)
-    if not service.PLIST.exists():
-        print("LaunchAgent not installed. Use `service install` first, or `start --foreground`.")
+    if not service.manages(cfg.repo_root):
+        print("No LaunchAgent installed for this repository. Use `service install` first, or `start --foreground`.")
         return 1
     for msg in service.enable():
         print(msg)
@@ -184,7 +201,7 @@ def cmd_resume(cfg: Config, args: argparse.Namespace) -> int:
             database.set_meta("loop_reason", "resumed by the owner")
         database.set_meta("start_times", "[]")
     set_desired(database, RUNNING, "resume")
-    if not report.daemon_pid(cfg.state_dir) and service.PLIST.exists():
+    if not report.daemon_pid(cfg.state_dir) and service.manages(cfg.repo_root):
         for msg in service.enable():
             print(msg)
     print("resumed")
@@ -202,8 +219,55 @@ def cmd_stop(cfg: Config, args: argparse.Namespace) -> int:
         print("stop requested: the daemon stops the current agent call and exits (state is checkpointed)")
     else:
         print("stopped (no daemon running)")
-    if args.unload:
+    if args.unload and service.manages(cfg.repo_root):
         print(service.disable())
+    return 0
+
+
+def cmd_restart(cfg: Config, args: argparse.Namespace) -> int:
+    """Re-read the configuration (and the installed code) by restarting the daemon. The config was
+    already validated when this command loaded it; an invalid file stops us before anything else."""
+    database = open_db(cfg)
+    managed = service.manages(cfg.repo_root)
+    pid = report.daemon_pid(cfg.state_dir)
+    if not pid:
+        if database.get_meta("loop_state") == HALTED:
+            print("daemon is not running: the loop is HALTED (%s). Use `resume`." % database.get_meta("loop_reason"))
+            return 1
+        if managed and database.get_meta("desired_state") == RUNNING:
+            for msg in service.enable():
+                print(msg)
+            print("daemon was not running; started it with the current configuration")
+        else:
+            print("daemon is not running; the new configuration applies at the next `start`")
+        return 0
+    with database.tx():
+        database.set_meta("restart_requested", "1")
+        database.event("control", agent="human", outcome="RESTART", detail="restart" + (" --now" if args.now else ""))
+    if args.now:
+        os.kill(pid, 15)
+        print("SIGTERM sent to %d: the running agent is interrupted and checkpointed" % pid)
+    else:
+        print("waiting for the daemon (pid %d) to finish its current step (agent: %s)..." % (
+            pid, database.get_meta("active_agent") or "-"))
+    deadline = time.time() + args.timeout
+    while report.daemon_pid(cfg.state_dir) == pid and time.time() < deadline:
+        time.sleep(2)
+    if report.daemon_pid(cfg.state_dir) == pid:
+        with database.tx():
+            database.set_meta("restart_requested", "")
+            database.event("control", agent="human", outcome="RESTART_CANCELLED", detail="timeout %ss" % args.timeout)
+        print("timed out after %ds; restart cancelled, the daemon keeps running (try `restart --now`)" % args.timeout)
+        return 1
+    with database.tx():
+        database.set_meta("restart_requested", "")
+        database.set_meta("start_times", "[]")
+    if managed:
+        for msg in service.enable():
+            print(msg)
+        print("restarted under launchd with the current configuration")
+    else:
+        print("the daemon stopped (it ran in the foreground); start it again with `start --foreground`")
     return 0
 
 
@@ -338,12 +402,91 @@ def cmd_service(cfg: Config, args: argparse.Namespace) -> int:
             set_desired(database, STOPPED, "service installed (not started)")
         for k, v in info.items():
             print("%-10s %s" % (k, v))
-        print("installed but NOT started. Start the autonomous loop with: gta20-orchestrator start")
+        print("installed, autonomous work NOT started. macOS may load the LaunchAgent right away (Background\n"
+              "Items); the daemon then exits at once because the desired state is STOPPED.\n"
+              "Start the autonomous loop with: gta20-orchestrator start")
     elif args.action == "uninstall":
         print(service.uninstall())
     else:
         print(service.describe())
     return 0
+
+
+def cmd_release(cfg: Config, args: argparse.Namespace) -> int:
+    """Gatekeeper by hand: `status` (gates only, no model), `review` (model review, never merges),
+    `run` (review and merge when everything passes)."""
+    from .release import Gatekeeper
+    database = open_db(cfg)
+    astra, claude = make_agents(cfg)
+    gk_agent, port = make_gatekeeper(cfg)
+    orch = Orchestrator(cfg, database, astra, claude, gatekeeper=gk_agent, github_port=port)
+    gk = Gatekeeper(orch, gk_agent, port)
+    # A manual run is independent of the daemon's desired state; Ctrl-C still stops it cleanly.
+    orch.agent_should_stop = lambda: orch.stop_requested
+    install_signal_handlers(orch)
+    if args.action == "status":
+        for line in gk.status_lines():
+            print(line)
+        return 0
+    lock = Lock(cfg.state_dir)
+    if not lock.acquire():
+        print("the orchestrator daemon is running; it runs the Gatekeeper itself (or stop it first)")
+        return 1
+    try:
+        setup_logging(cfg.state_dir, args.verbose)
+        orch.setup()
+        called, msg = gk.step(dry_run=args.action == "review", only_pr=args.pr)
+        print(msg or "nothing to review (see `release status`)")
+        report.write(database, cfg.state_dir)
+        return 0
+    finally:
+        lock.release()
+
+
+def cmd_gfx(cfg: Config, args: argparse.Namespace) -> int:
+    """EC2 test host jobs: `status` (queue, limits, spend), `request` (owner queues a run like an
+    agent would), `cancel`, `run` (execute the next queued job now, outside the daemon)."""
+    from .gfx import GfxRunner
+    database = open_db(cfg)
+    astra, claude = make_agents(cfg)
+    orch = Orchestrator(cfg, database, astra, claude, gfx_runner=GfxRunner(cfg))
+    jobs = orch.gfx
+    if jobs is None:
+        print("gfx jobs are disabled (gfx.enabled=false)")
+        return 1
+    if args.action == "status":
+        lim = cfg["gfx"]
+        print("limits: %s min/run, %s runs/day (today %d), %.2f/%.2f USD this month" % (
+            lim["max_minutes_per_run"], lim["max_runs_per_day"], jobs.runs_today(), jobs.month_spend_usd(),
+            float(lim["monthly_budget_usd"])))
+        print(jobs.context(limit=args.limit))
+        return 0
+    if args.action == "request":
+        if not args.mode:
+            print("usage: gfx request <probe|compat|capture> <target> [--reason ...]")
+            return 2
+        for line in jobs.enqueue([{"mode": args.mode, "target": args.target or "all",
+                                   "reason": args.reason or "owner request"}], None, "owner", cfg.repo_root):
+            print(line)
+        return 0
+    if args.action == "cancel":
+        if not args.id:
+            print("usage: gfx cancel --id N")
+            return 2
+        ok = jobs.cancel(args.id)
+        print("gfx job %d %s" % (args.id, "cancelled" if ok else "is not queued"))
+        return 0 if ok else 1
+    lock = Lock(cfg.state_dir)
+    if not lock.acquire():
+        print("the orchestrator daemon is running; it executes queued jobs itself (or stop it first)")
+        return 1
+    try:
+        setup_logging(cfg.state_dir, args.verbose)
+        print(jobs.run_next() or "nothing runnable now (see `gfx status`)")
+        report.write(database, cfg.state_dir)
+        return 0
+    finally:
+        lock.release()
 
 
 def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
@@ -376,6 +519,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--now", action="store_true", help="interrupt the running agent immediately")
     s.add_argument("--unload", action="store_true", help="also unload the LaunchAgent")
     s.set_defaults(fn=cmd_stop)
+    s = sub.add_parser("restart", help="restart the daemon to apply config/code changes")
+    s.add_argument("--now", action="store_true", help="interrupt the running agent instead of waiting for the step")
+    s.add_argument("--timeout", type=int, default=4 * 3600, help="seconds to wait for the current step (default 4h)")
+    s.set_defaults(fn=cmd_restart)
     s = sub.add_parser("status")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_status)
@@ -404,6 +551,18 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("service", help="launchd LaunchAgent")
     s.add_argument("action", choices=["install", "uninstall", "status"])
     s.set_defaults(fn=cmd_service)
+    s = sub.add_parser("release", help="Gatekeeper: final review and merge of PRs")
+    s.add_argument("action", choices=["status", "review", "run"])
+    s.add_argument("--pr", type=int)
+    s.set_defaults(fn=cmd_release)
+    s = sub.add_parser("gfx", help="EC2 test host runs of the original game (agents' gfx_requests)")
+    s.add_argument("action", choices=["status", "request", "cancel", "run"])
+    s.add_argument("mode", nargs="?", choices=["probe", "compat", "capture"])
+    s.add_argument("target", nargs="?")
+    s.add_argument("--reason")
+    s.add_argument("--id", type=int)
+    s.add_argument("--limit", type=int, default=10)
+    s.set_defaults(fn=cmd_gfx)
     s = sub.add_parser("simulate", help="run the loop against scripted fake agents in a temp repo")
     s.add_argument("scenario", nargs="?", default="all")
     s.add_argument("--keep", action="store_true")
@@ -416,7 +575,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "simulate":
         return args.fn(None, args)
     root = Path(os.path.expanduser(args.repo)).resolve() if args.repo else find_repo_root()
-    cfg = Config.load(root)
+    try:
+        cfg = Config.load(root)
+    except ValueError as exc:  # json.JSONDecodeError is a ValueError
+        print("invalid configuration %s: %s" % (root / ".orchestrator" / "config.json", exc), file=sys.stderr)
+        return 2
+    if not isinstance(cfg.data.get("limits"), dict) or not isinstance(cfg.data.get("release"), dict):
+        print("invalid configuration: 'limits' and 'release' must be objects", file=sys.stderr)
+        return 2
     return int(args.fn(cfg, args) or 0)
 
 

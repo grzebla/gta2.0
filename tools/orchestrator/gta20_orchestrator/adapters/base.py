@@ -83,6 +83,8 @@ def agent_env(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
     for k, v in (extra or {}).items():
         if not k.startswith(ENV_DENYLIST_PREFIXES):
             env[k] = v
+    if env.get("GTA20_TOOLS_PATH"):
+        env["PATH"] = env["GTA20_TOOLS_PATH"] + ":" + env["PATH"]
     return env
 
 

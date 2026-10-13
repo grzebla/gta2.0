@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from . import github, gitops, memory, prompts, schemas
+from . import github, gitops, memory, prompts, schemas, toolchain
 from . import db as D
 from .adapters.base import (AgentError, AgentFailed, AgentInterrupted, AgentResult, AgentTimeout, ModelMismatch,
                             QuotaExceeded)
@@ -32,6 +32,7 @@ STOPPED = "STOPPED"
 WAITING_FOR_QUOTA = "WAITING_FOR_QUOTA"
 WAITING = "WAITING"
 HALTED = "HALTED"
+RESTARTING = "RESTARTING"
 
 
 class Wait(Exception):
@@ -48,7 +49,8 @@ class Halt(Exception):
 
 class Orchestrator:
     def __init__(self, cfg: Any, database: D.Database, astra: Any, claude: Any, *, use_github: bool = True,
-                 sleep: Callable[[float], None] = time.sleep):
+                 sleep: Callable[[float], None] = time.sleep, gatekeeper: Any = None, github_port: Any = None,
+                 gfx_runner: Any = None):
         self.cfg = cfg
         self.db = database
         self.astra = astra
@@ -62,6 +64,15 @@ class Orchestrator:
         self.wt_review = cfg.worktree("review")
         self.wt_int = cfg.worktree("integration")
         self.runs_dir = cfg.state_dir / "runs"
+        self.tools_dir: Optional[Path] = None
+        self.gatekeeper = None
+        if gatekeeper is not None and github_port is not None and cfg["release"].get("enabled", True):
+            from .release import Gatekeeper
+            self.gatekeeper = Gatekeeper(self, gatekeeper, github_port)
+        self.gfx = None
+        if gfx_runner is not None and cfg["gfx"].get("enabled", True):
+            from .gfx import GfxJobs
+            self.gfx = GfxJobs(self, gfx_runner)
 
     # ------------------------------------------------------------------ control helpers
     def request_stop(self, *_: Any) -> None:
@@ -93,6 +104,10 @@ class Orchestrator:
         gitops.ensure_worktree(self.repo, self.wt_review, detach=integ)
         gitops.ensure_worktree(self.repo, self.wt_dev, detach=integ)
         self.runs_dir.mkdir(parents=True, exist_ok=True)
+        if self.cfg["verify"].get("pinned_tools", True):
+            self.tools_dir = toolchain.ensure(self.cfg.state_dir)
+            with self.db.tx():
+                self.db.set_meta("pinned_tools", dumps(toolchain.versions(self.tools_dir)))
 
     def recover(self) -> List[int]:
         """Runs left 'running' by a previous process (crash, kill, reboot) are abandoned; their
@@ -104,6 +119,8 @@ class Orchestrator:
                 self.db.event("run_abandoned", task_id=run["task_id"], agent=run["agent"],
                               session_id=run["session_id"], outcome="abandoned", detail={"run": run["id"]})
                 abandoned.append(run["id"])
+        if self.gfx:
+            self.gfx.recover()
         return abandoned
 
     # ------------------------------------------------------------------ quota
@@ -242,7 +259,7 @@ class Orchestrator:
 
     def quota_text(self) -> str:
         out = []
-        for name in ("astra", "claude"):
+        for name in ("astra", "claude", "gatekeeper"):
             row = self.db.quota(name)
             if row:
                 out.append("- %s: %s reset=%s" % (name, row["state"], local_time(row["reset_at"]) if row["reset_at"] else "-"))
@@ -268,10 +285,33 @@ class Orchestrator:
                           outcome="committed", detail={"files": sorted(set(changed))})
         return sha
 
+    # ------------------------------------------------------------------ EC2 test host
+    def gfx_context(self, task_id: Optional[str] = None) -> str:
+        return self.gfx.context(task_id) if self.gfx else ""
+
+    def gfx_enqueue(self, out: Any, task_id: Optional[str], by: str, source: Path) -> List[str]:
+        if not self.gfx or not isinstance(out, dict) or not out.get("gfx_requests"):
+            return []
+        return self.gfx.enqueue(out["gfx_requests"], task_id, by, source)
+
     # ------------------------------------------------------------------ step
+    def release_due(self) -> bool:
+        if self.gatekeeper is None:
+            return False
+        last = float(self.db.get_meta("gatekeeper_last_check", "0") or 0)
+        return now() - last >= float(self.cfg["release"]["every_s"])
+
     def step(self) -> str:
         self.daily_cap()
+        if self.gfx and not self.agent_should_stop():
+            msg = self.gfx.run_next()
+            if msg:
+                return "gfx: " + msg
         task = self.db.active_task()
+        if task is None and self.release_due():
+            called, msg = self.gatekeeper.step()
+            if msg:
+                return "gatekeeper: " + msg
         if task is None:
             done = self.db.count_tasks(D.DONE)
             last = int(self.db.get_meta("arch_review_at_done", "0") or 0)
@@ -279,6 +319,10 @@ class Orchestrator:
             if every and done - last >= every:
                 return self.plan("arch_review")
             ready = self.db.ready_tasks()
+            if not ready and self.gfx and self.gfx.pending():
+                # Astra asked for an EC2 run before planning further: wait for it, do not re-plan.
+                until = self.gfx.next_possible()
+                raise Wait(until, "waiting for a queued EC2 test run (limits or `aws login`)")
             if not ready:
                 return self.plan("plan")
             task = self.start_task(ready[0])
@@ -318,7 +362,7 @@ class Orchestrator:
         prompt = prompts.astra_plan(
             kind=kind, memory=memory.context(self.wt_int), board=self.board(), decisions=self.decisions_text(),
             git_state=git_state, github_state=gh_state, quota_state=self.quota_text(), milestone=ms,
-            max_tasks=int(self.limits["max_tasks_per_plan"]))
+            max_tasks=int(self.limits["max_tasks_per_plan"]), gfx=self.gfx_context())
         try:
             res = self.call(self.astra, kind=kind, task_id=None, prompt=prompt, cwd=self.wt_review,
                             schema=schemas.ASTRA_PLAN)
@@ -326,6 +370,7 @@ class Orchestrator:
             self.count_failure(str(exc))
             return "plan failed: %s" % exc
         out = res.output or {}
+        gfx_msgs = self.gfx_enqueue(out, None, "astra", self.wt_review)
         added: List[str] = []
         with self.db.tx():
             m = out.get("milestone")
@@ -367,11 +412,13 @@ class Orchestrator:
             if out.get("needs_human"):
                 self.db.set_meta("human_question", out["needs_human"])
         body = "%s\n\nNew tasks: %s" % (out.get("assessment", ""), ", ".join(added) or "none")
+        if gfx_msgs:
+            body += "\n\nEC2 test runs: %s" % "; ".join(gfx_msgs)
         if out.get("needs_human"):
             body += "\n\nNeeds human: %s" % out["needs_human"]
         self.commit_memory(out.get("memory_updates"), "agent-memory: Astra %s" % kind,
                            [("decisions", "Astra %s" % kind, body)])
-        if not self.db.ready_tasks() and not self.db.active_task():
+        if not self.db.ready_tasks() and not self.db.active_task() and not (self.gfx and self.gfx.pending()):
             blocked = self.db.count_tasks(D.BLOCKED) + self.db.count_tasks(D.NEEDS_HUMAN)
             raise Halt("no runnable tasks after %s (%d blocked/needs-human)%s" % (
                 kind, blocked, "; Astra asks: " + out["needs_human"] if out.get("needs_human") else ""))
@@ -390,6 +437,12 @@ class Orchestrator:
             self.db.event("task_started", task_id=task["id"], agent="orchestrator", commits=[base],
                           outcome=D.IN_PROGRESS, detail={"branch": branch, "integration": integ})
         return self.db.task(task["id"])
+
+    def claude_env(self) -> Dict[str, str]:
+        env = dict(self.cfg.verify_env())
+        if self.tools_dir:
+            env["GTA20_TOOLS_PATH"] = str(self.tools_dir)
+        return env
 
     # ------------------------------------------------------------------ implement
     def implement(self, task: Any) -> str:
@@ -411,7 +464,8 @@ class Orchestrator:
                 task=dict(task), spec=spec, branch=task["branch"], base=task["base_commit"],
                 branch_state=self.branch_state(task),
                 feedback=task["feedback"] if task["status"] == D.CHANGES_REQUESTED else None,
-                game_dir_hint="available via the GTA20_GAME_DIR environment variable (read-only use)")
+                game_dir_hint="available via the GTA20_GAME_DIR environment variable (read-only use)",
+                gfx=self.gfx_context(tid))
         settings = build_settings(
             worktree=self.wt_dev, protected=self.cfg["protected_paths"],
             extra_write_dirs=[os.path.expanduser("~/.cache/uv"), os.path.expanduser("~/.cache/clang")],
@@ -420,7 +474,7 @@ class Orchestrator:
         try:
             res = self.call(self.claude, kind="implement", task_id=tid, prompt=prompt, cwd=self.wt_dev,
                             schema=schemas.CLAUDE_REPORT, session_id=session, resume=resume,
-                            extra={"settings": settings, "add_dirs": [], "env_extra": self.cfg.verify_env()})
+                            extra={"settings": settings, "add_dirs": [], "env_extra": self.claude_env()})
         except AgentInterrupted:
             return "implement %s interrupted" % tid
         except (AgentFailed, AgentTimeout, ModelMismatch) as exc:
@@ -440,6 +494,7 @@ class Orchestrator:
             self.count_failure(str(exc))
             return "implement %s failed: %s" % (tid, exc)
         head = gitops.rev(self.wt_dev)
+        self.gfx_enqueue(res.output, tid, "claude", self.wt_dev)
         with self.db.tx():
             self.db.update_task(tid, status=D.VERIFYING, head_commit=head, report=dumps(res.output),
                                 claude_session=res.session_id or session, agent_failures=0)
@@ -456,7 +511,7 @@ class Orchestrator:
         log_dir = self.runs_dir / ("%s-%s-verify" % (time.strftime("%Y%m%d-%H%M%S"), tid))
         result = verify_task(self.cfg, wt=self.wt_dev, base=task["base_commit"], head=head,
                              previous_hash=task["last_diff_hash"], log_dir=log_dir,
-                             run_commands_too=not blocked_report)
+                             run_commands_too=not blocked_report, tools_dir=self.tools_dir)
         summary = summarize(result)
         (log_dir / "summary.md").write_text(summary)
         no_progress = int(task["no_progress"]) + 1 if (result["repeated"] or not result["commits"]) else 0
@@ -504,7 +559,8 @@ class Orchestrator:
             diff=truncate(gitops.diff_text(self.wt_review, base, head), 60000),
             log=gitops.log_oneline(self.wt_review, base, head), history=self.decisions_text(5, tid),
             attempts=int(task["attempts"]), max_attempts=int(self.limits["max_attempts_per_task"]),
-            memory=memory.context(self.wt_int, log_entries=3, max_chars=6000), commit=head)
+            memory=memory.context(self.wt_int, log_entries=3, max_chars=6000), commit=head,
+            gfx=self.gfx_context(tid))
         try:
             res = self.call(self.astra, kind="review", task_id=tid, prompt=prompt, cwd=self.wt_review,
                             schema=schemas.ASTRA_REVIEW)
@@ -512,6 +568,7 @@ class Orchestrator:
             self.count_failure(str(exc))
             return "review %s failed: %s" % (tid, exc)
         out = res.output or {}
+        self.gfx_enqueue(out, tid, "astra", self.wt_review)
         decision = out.get("decision")
         rationale = out.get("rationale", "")
         if decision == "APPROVED" and not (ver and ver["passed"]):
@@ -579,21 +636,35 @@ class Orchestrator:
                 pr_url = pr.get("url")
             else:
                 pr_url = github.create_draft_pr(
-                    self.cfg["github_repo"], integ, self.cfg["base_branch"],
+                    self.cfg["github_repo"], integ, self.pr_base(),
                     "Agents: integration branch (Astra-approved tasks)",
-                    "Work approved by Astra and integrated by the GTA2.0 orchestrator. Draft: the human "
-                    "owner reviews and merges.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)")
+                    "Work approved by Astra and integrated by the GTA2.0 orchestrator. The Gatekeeper "
+                    "(final independent review) merges it once CI is green and every gate passes; label "
+                    "`do-not-merge` to stop that.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)")
         with self.db.tx():
             self.db.set_meta("last_push_at", str(now()))
             self.db.event("pushed", agent="orchestrator", commits=[gitops.rev(self.wt_int)], outcome=integ,
                           detail={"pr": pr_url})
         return True
 
+    def pr_base(self) -> str:
+        """The configured base until it has been merged into the release target, then the target."""
+        base, target, remote = self.cfg["base_branch"], self.cfg["release"]["target_branch"], self.cfg["remote"]
+        try:
+            gitops.git(self.repo, "fetch", "--quiet", remote)
+            gitops.git(self.repo, "merge-base", "--is-ancestor", "%s/%s" % (remote, base), "%s/%s" % (remote, target))
+            return target
+        except gitops.GitError:
+            return base
+
     # ------------------------------------------------------------------ main loop
+    def restart_pending(self) -> bool:
+        return self.db.get_meta("restart_requested") == "1"
+
     def sleep_until(self, until: float) -> None:
         poll = float(self.limits["poll_s"])
         while not self.stop_requested and now() < until:
-            if self.db.get_meta("desired_state") in (PAUSED, STOPPED):
+            if self.db.get_meta("desired_state") in (PAUSED, STOPPED) or self.restart_pending():
                 return
             self.sleep_fn(min(poll, max(0.0, until - now())))
 
@@ -602,6 +673,8 @@ class Orchestrator:
         self.recover()
         steps = 0
         while not self.stop_requested:
+            if self.restart_pending():
+                break  # between steps: the current step has been checkpointed
             desired = self.db.get_meta("desired_state", RUNNING)
             if desired == STOPPED:
                 break
@@ -645,10 +718,14 @@ class Orchestrator:
                     return HALTED
                 self.sleep_fn(min(300.0, float(self.limits["poll_s"]) * 2))
             on_step()
-        final = STOPPED if (self.stop_requested or self.db.get_meta("desired_state") == STOPPED) else RUNNING
-        self.set_loop_state(final, "stopped by the owner" if final == STOPPED else "step limit reached")
+        if self.restart_pending():
+            self.set_loop_state(RESTARTING, "restart requested by the owner")
+            on_step()
+            return RESTARTING
+        by_owner = self.stop_requested or self.db.get_meta("desired_state") == STOPPED
+        self.set_loop_state(STOPPED, "stopped by the owner" if by_owner else "step limit reached")
         on_step()
-        return final
+        return STOPPED
 
 
 def install_signal_handlers(orch: Orchestrator) -> None:

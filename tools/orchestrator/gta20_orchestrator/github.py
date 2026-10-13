@@ -70,3 +70,54 @@ def summarize(repo: str, integration_branch: str) -> str:
             for j in failed_jobs(repo, r["databaseId"]):
                 lines.append("    failed job: " + j)
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------- write port
+def _run(repo: str, *args: str, timeout: int = 120) -> tuple:
+    try:
+        out = subprocess.run(["gh", *args, "-R", repo], capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 127, "", str(exc)
+    return out.returncode, out.stdout, out.stderr
+
+
+PR_FIELDS = ("number,title,body,url,headRefName,baseRefName,headRefOid,isDraft,mergeable,mergeStateStatus,"
+             "labels,author,createdAt")
+
+
+class GitHubPort:
+    """Everything the Gatekeeper does on GitHub. Merges never use --admin (no bypass of checks)
+    and always pin --match-head-commit, so a push after the review cannot be merged unreviewed."""
+
+    def __init__(self, repo: str):
+        self.repo = repo
+
+    def open_prs(self) -> List[Dict[str, Any]]:
+        rc, out, _ = _run(self.repo, "pr", "list", "--state", "open", "--limit", "50", "--json", PR_FIELDS)
+        return json.loads(out) if rc == 0 and out.strip() else []
+
+    def checks(self, number: int) -> Optional[List[Dict[str, Any]]]:
+        # Exit code is non-zero while checks fail or are pending; the JSON is still printed.
+        rc, out, err = _run(self.repo, "pr", "checks", str(number), "--json", "name,state,bucket,link,workflow")
+        if out.strip():
+            try:
+                return json.loads(out)
+            except ValueError:
+                return None
+        return [] if "no checks reported" in (err or "") else None
+
+    def mark_ready(self, number: int) -> bool:
+        return _run(self.repo, "pr", "ready", str(number))[0] == 0
+
+    def merge(self, number: int, head_sha: str, method: str, subject: str) -> tuple:
+        if method not in ("merge", "squash", "rebase"):
+            raise ValueError("unsupported merge method %s" % method)
+        rc, out, err = _run(self.repo, "pr", "merge", str(number), "--" + method, "--match-head-commit", head_sha,
+                            "--subject", subject)
+        return rc == 0, (out + err).strip()
+
+    def retarget(self, number: int, base: str) -> bool:
+        return _run(self.repo, "pr", "edit", str(number), "--base", base)[0] == 0
+
+    def comment(self, number: int, body: str) -> bool:
+        return _run(self.repo, "pr", "comment", str(number), "--body", body)[0] == 0

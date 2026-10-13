@@ -35,7 +35,7 @@ def snapshot(database: D.Database) -> Dict[str, Any]:
     cur = database.task(current) if current else None
     last_dec = database.decisions(1)
     quota = {}
-    for name in ("astra", "claude"):
+    for name in ("astra", "claude", "gatekeeper"):
         row = database.quota(name)
         if row:
             detail = loads(row["detail"], {}) or {}
@@ -61,6 +61,7 @@ def snapshot(database: D.Database) -> Dict[str, Any]:
         "next_attempt_at": local_time(float(next_at)) if next_at else "-",
         "human_question": database.get_meta("human_question") or "",
         "release_candidate": database.get_meta("release_candidate") or "",
+        "last_merge": next(("%s %s" % (e["ts"], e["outcome"]) for e in database.events(200) if e["type"] == "pr_merged"), "-"),
     }
 
 
@@ -81,6 +82,7 @@ def format_status(s: Dict[str, Any], pid: int) -> str:
             c[D.BLOCKED], c[D.NEEDS_HUMAN], c[D.CANCELLED]),
         "  last activity:     %s  (%s)" % (s["last_activity"], s["last_step"]),
         "  next attempt:      %s" % s["next_attempt_at"],
+        "  last merge:        %s" % s.get("last_merge", "-"),
     ]
     for name, q in s["quota"].items():
         rl = q.get("rate_limits") or {}

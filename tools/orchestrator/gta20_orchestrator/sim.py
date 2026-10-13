@@ -44,7 +44,7 @@ class SimEnv:
         base = {
             "worktrees_dir": str(self.tmp / "wt"),
             "push_integration": True, "min_push_interval_s": 0, "open_draft_pr": False,
-            "verify": {"commands": [["sh", "-c", "test -f README.md"]], "timeout_s": 60, "env": {}},
+            "verify": {"commands": [["sh", "-c", "test -f README.md"]], "timeout_s": 60, "env": {}, "pinned_tools": False},
             "limits": {"poll_s": 0.01, "quota_reset_margin_s": 0, "quota_backoff_s": [0.05, 0.05, 0.1],
                        "quota_max_probes": 5, "arch_review_every": 0, "max_runs_per_day": 1000},
         }
@@ -169,3 +169,28 @@ def main(name: str = "all", keep: bool = False) -> int:
             else:
                 env.cleanup()
     return 0
+
+
+# ---------------------------------------------------------------------------- Gatekeeper
+def gatekeeper_env(env: SimEnv, decisions: Optional[List[str]] = None):
+    from .adapters.fake import FakeGatekeeper, FakeGitHub
+    gk = FakeGatekeeper(decisions)
+    port = FakeGitHub(env.repo)
+    orch = Orchestrator(env.cfg, env.db, FakeAstra(plans=[fake_plan("M1", ["walls"])]), FakeClaude(),
+                        use_github=False, sleep=lambda s: None, gatekeeper=gk, github_port=port)
+    return orch, gk, port
+
+
+def finish_one_task(env: SimEnv, orch: Orchestrator) -> None:
+    orch.run(max_steps=4)  # plan, implement, verify, review (APPROVED) -> merged + pushed
+
+
+def human_branch(env: SimEnv, name: str, start: str = "main", content: str = "x") -> str:
+    _git(env.repo, "fetch", "-q", "origin")
+    wt = env.tmp / ("h-" + name.replace("/", "-"))
+    _git(env.repo, "worktree", "add", "-q", "-b", name, str(wt), "origin/" + start)
+    (wt / (name.replace("/", "-") + ".txt")).write_text(content + "\n")
+    _git(wt, "add", "-A")
+    _git(wt, "commit", "-q", "-m", "owner change " + name)
+    _git(wt, "push", "-q", "origin", name)
+    return _git(wt, "rev-parse", "HEAD")

@@ -6,7 +6,8 @@ Lokalny, niezależny proces, który prowadzi rozwój GTA2.0 przez dwa agenty:
 |---|---|---|
 | **Astra** — Tech Lead, planista, recenzent | `gpt-6-astra` przez `codex exec` | sandbox **read-only**, bez zatwierdzeń, ignoruje `~/.codex/config.toml` (tam jest `danger-full-access`) |
 | **Claude** — developer | Claude Code `claude -p` | `dontAsk` + jawne reguły allow/deny, sandbox Basha (Seatbelt: zapis tylko w worktree, sieć tylko z allowlisty), bez MCP i ustawień użytkownika; **nigdy** `--dangerously-skip-permissions` |
-| **Orchestrator** | Python 3.9+, wyłącznie biblioteka standardowa | jedyny, kto scala do gałęzi integracyjnej i wysyła ją na GitHub (bez force push) |
+| **Gatekeeper** — ostateczne review i merge PR do `main` | `gpt-6.1-sol` przez `codex exec` (inny model niż Astra, dla niezależności) | sandbox **read-only**; scala wyłącznie przez Orchestrator, po twardych bramkach |
+| **Orchestrator** | Python 3.9+, wyłącznie biblioteka standardowa | scala zadania do gałęzi integracyjnej, wysyła ją na GitHub (bez force push) i wykonuje merge zatwierdzony przez Gatekeepera |
 
 ## Pętla
 
@@ -41,6 +42,97 @@ flowchart LR
   trzy leżą poza głównym checkoutem (`../gta2.0-agents/`). Agenci nigdy nie działają jednocześnie.
 - Powiązania zadanie → gałąź → commit → weryfikacja → decyzja są w tabelach `tasks`,
   `verifications` i `decisions`.
+
+### Gatekeeper: ostateczne review i merge
+
+Gatekeeper sprawdza otwarte PR-y co `release.every_s` (domyślnie 3 h), zawsze między zadaniami.
+Po każdym scaleniu sprawdza ponownie od razu, żeby przejść cały stos. Obsługuje jeden PR na krok:
+
+1. **Kwalifikacja.** PR musi celować w `main`. Kwalifikują się PR-y właściciela i draft PR
+   agentów (`agents/integration`). Pomijane są drafty właściciela, PR-y innych autorów oraz
+   etykiety `do-not-merge`, `hold` i `wip`. PR-y ułożone w stos czekają, aż ich baza trafi do
+   `main`.
+2. **Twarde bramki (bez modelu; modelowe MERGE ich nie obejdzie):**
+   - PR jest scalalny;
+   - CI na **dokładnie tym** commicie jest zielone (co najmniej 3 checki, żaden w toku);
+   - brak plików gry i binarek, brak sekretów w dodanych liniach;
+   - dzienny limit scaleń (6);
+   - w PR agentów każdy commit musi być zadaniem zatwierdzonym przez Astrę i zweryfikowanym
+     (`[Txxxx]` / `Merge Txxxx`) albo commitem pamięci zmieniającym tylko `docs/agent-memory/`.
+     Zadania nie mogą ruszać ścieżek chronionych.
+
+   Gdy CI jest czerwone lub bramka nie przechodzi:
+   - PR agentów → zadanie naprawcze (priorytet 0);
+   - PR właściciela → komentarz w PR.
+
+   Gdy CI trwa → czekanie.
+3. **Review modelu.** Worktree `release` jest ustawiony na sprawdzanym commicie, z pełnym diffem
+   względem `main`, wynikami CI, listą zadań i decyzjami Astry. Decyzje: `MERGE`,
+   `REQUEST_CHANGES`, `HOLD`, `NEEDS_HUMAN`.
+   - W PR-ach właściciela polityka agentów nie zabrania jego własnych zmian (np. narzędzi AWS);
+     liczy się ich bezpieczeństwo.
+   - Uwagi „blocker” i „major” przy `MERGE` stają się zadaniem uzupełniającym dla agentów.
+4. **Merge:**
+   - ponowny odczyt PR (head i bramki bez zmian), potem `gh pr ready` dla draftu;
+   - `gh pr merge --merge --match-head-commit <sprawdzony sha>`: commit scalający, bez
+     przepisywania historii, nigdy `--admin`;
+   - PR-y ułożone na scalonej gałęzi są przepinane na `main` (`gh pr edit --base main`).
+     Gałęzie nie są usuwane.
+5. Każdy head jest oceniany raz; nowy push oznacza nową ocenę. Decyzje trafiają do tabeli
+   `decisions`, do `DECISIONS.md` i do zdarzeń `gatekeeper_decision` / `pr_merged`.
+
+Prywatne repo na darmowym planie GitHuba nie ma ochrony gałęzi, dlatego wszystkie
+zabezpieczenia są w bramkach Orchestratora.
+
+Ręcznie:
+- `release status` — same bramki, bez modelu;
+- `release review [--pr N]` — recenzja, nigdy nie scala;
+- `release run [--pr N]` — recenzja i merge.
+
+Wyłączenie Gatekeepera: `"release": {"enabled": false}` w `.orchestrator/config.json`.
+Ograniczenie go do PR agentów: `"eligible": "integration_only"`.
+
+### Host testowy EC2: przebiegi oryginalnej gry na zlecenie agentów
+
+Agenci nie mają dostępu do AWS. Gdy potrzebują oryginalnego GTA 2 (stan hosta, macierz
+kompatybilności, zrzuty referencyjne ze skryptowanym wejściem), wpisują zlecenie w polu
+`gfx_requests` swojej odpowiedzi JSON (Astra w planie lub review, Claude w raporcie):
+`{"mode": "probe|compat|capture", "target": "...", "reason": "..."}`.
+
+Orchestrator (`gta20_orchestrator/gfx.py`):
+1. **waliduje** zlecenie: tryb z listy dozwolonych, id przypadków z `tests/gfx/compat-matrix.json`,
+   a dla `capture` scenariusz `tests/gfx/scenarios/<id>.json` według ścisłego schematu (tylko
+   dane: wrapper z macierzy, ustawienia ekranu, czas ≤ 300 s, ≤ 20 zrzutów, ≤ 100 klawiszy z
+   listy dozwolonych). Odrzucone zlecenie trafia do agentów z powodem.
+2. **pilnuje limitów** właściciela (sekcja `gfx`, decyzja 2026-10-13):
+
+   | Limit | Domyślnie | Skutek |
+   |---|---|---|
+   | `max_minutes_per_run` | 45 | twardy limit przebiegu (skrypt zawsze zatrzymuje instancję) |
+   | `max_runs_per_day` | 3 | zlecenie czeka do jutra |
+   | `monthly_budget_usd` (przy `usd_per_hour` 0,76) | 10 | zlecenie odrzucone + pytanie do właściciela |
+   | `max_pending` | 3 | nadmiarowe zlecenia odrzucone |
+
+   Przebieg przerwany restartem demona liczy się jako pełne 45 min.
+3. **sprawdza sesję AWS** (`aws sts get-caller-identity`). Gdy wygasła, ustawia pytanie
+   „run `aws login`” i ponawia po godzinie; zlecenie czeka.
+4. **uruchamia** `scripts/aws/run-gfx-compat-local.sh` z osobnego worktree `gfx` ustawionego na
+   `origin/main` (zrecenzowany kod, nigdy gałąź agenta), z `CONFIRM=uruchom-ec2`. Dla `capture`
+   wysyła na hosta tylko jeden znormalizowany plik scenariusza.
+5. **oddaje wyniki** jako dane: werdykty i lokalną ścieżkę wyników (`gfx.results_root`, domyślnie
+   `~/Games/GTA2-work/gfx-results`, poza repozytorium) w kolejnych promptach, w sekcji
+   „EC2 TEST HOST RUNS”.
+
+Przebiegi wykonują się między krokami, po kolei. Gdy Astra nie ma zadań i czeka na przebieg,
+pętla czeka zamiast planować ponownie.
+
+Ręcznie:
+- `gfx status` — kolejka, limity, wydatek w miesiącu;
+- `gfx request capture frontend-walk --reason "..."` — zlecenie od właściciela;
+- `gfx cancel --id N`;
+- `gfx run` — następne zlecenie teraz (gdy demon nie działa).
+
+Wyłączenie: `"gfx": {"enabled": false}`.
 
 ### Ochrona przed zapętleniem
 
@@ -106,8 +198,11 @@ $B dry-run           # następny krok, polecenia i prompt — bez wywołań agen
 $B start --foreground --max-steps 4   # pierwszy krok na pierwszym planie
 $B status | logs [-f] | logs --events | tasks [T0001] | memory [PROJECT] | report
 $B pause | resume | stop [--now] [--unload]
+$B restart [--now] [--timeout S]      # zastosuj zmiany konfiguracji / zainstalowanego kodu
 $B unblock T0003 --note "..."         # decyzja właściciela dla BLOCKED/NEEDS_HUMAN
 $B answer "..."                       # odpowiedź na pytanie Astry (NEEDS_HUMAN)
+$B release status | review [--pr N] | run [--pr N]   # Gatekeeper ręcznie
+$B gfx status | request <mode> <target> | cancel --id N | run   # przebiegi na hoście EC2
 $B simulate [all|happy|quota_known_reset|...]   # pętla na atrapach w tymczasowym repo
 $B service install | status | uninstall
 ```
@@ -119,7 +214,10 @@ po każdym kroku).
 
 1. `$B service install` kopiuje kod do `~/.local/share/gta20-orchestrator/<wersja>-<sha>`
    (agent pracujący w repo nie zmieni kodu nadzorcy), tworzy `~/.local/bin/gta20-orchestrator`
-   oraz `~/Library/LaunchAgents/com.gta20.orchestrator.plist`. **Niczego nie uruchamia.**
+   oraz `~/Library/LaunchAgents/com.gta20.orchestrator.plist`. **Nie uruchamia pracy
+   autonomicznej.** macOS (Background Task Management) może od razu wczytać nowy plist i
+   pokazać powiadomienie o elemencie w tle. Demon startuje wtedy, widzi stan `STOPPED`, kończy
+   się kodem 0, a launchd go nie restartuje (sprawdzone).
 2. **Jedno polecenie uruchamiające pracę wielodniową:** `gta20-orchestrator start`
    (`launchctl bootstrap gui/$UID …`).
 
@@ -160,15 +258,37 @@ Wartości domyślne są w `gta20_orchestrator/config.py`. Lokalne nadpisania tra
   "push_integration": true, "min_push_interval_s": 21600 }
 ```
 
-`push_integration` wysyła gałąź `agents/integration` i otwiera draft PR do `feature/orchestrator`,
-co uruchamia `native-ci`. Minuty CI w prywatnym repo są limitowane (macOS liczy się ×10), stąd
-limit częstotliwości. Scalanie PR należy wyłącznie do właściciela.
+`push_integration` wysyła gałąź `agents/integration` i otwiera draft PR, co uruchamia
+`native-ci`. Bazą PR jest `feature/orchestrator`, a po jej scaleniu `main`. Minuty CI w
+prywatnym repo są limitowane (macOS liczy się ×10), stąd limit częstotliwości. Scala Gatekeeper.
+
+### Zmiana konfiguracji: `restart`
+
+Demon wczytuje `.orchestrator/config.json` tylko przy starcie. Polecenia ręczne (`status`,
+`release …`) czytają go przy każdym wywołaniu.
+
+`restart` działa tak:
+1. Wczytuje konfigurację. Gdy JSON jest błędny, kończy się kodem 2 i niczego nie zatrzymuje.
+2. Ustawia prośbę o restart. Demon kończy bieżący krok: wywołanie agenta nie jest przerywane.
+   Oczekiwanie na limit i pauza kończą się od razu.
+3. Demon wychodzi ze stanem `RESTARTING` i kodem 0.
+4. Polecenie uruchamia demona ponownie przez launchd (`kickstart`).
+
+Opcje:
+- `--now` przerywa agenta od razu (SIGINT → SIGTERM, checkpoint, wznowienie tej samej sesji);
+- `--timeout` (domyślnie 4 h): po przekroczeniu prośba jest wycofywana, a demon pracuje dalej.
+
+Gdy demon nie działa, polecenie tylko informuje albo uruchamia usługę, jeśli stan to `RUNNING`.
+Zmiana kodu Orchestratora: `service install`, a potem `restart`.
 
 ## Ścieżki chronione
 
 Agenci nie zmieniają:
 - `tools/orchestrator/`, `.orchestrator/`, `.claude/`, `docs/agent-memory/`;
 - `infra/`, `scripts/aws/`, workflowów `gfx-*` i `infra-lint`;
+- skryptów hosta testowego: `scripts/ci/ec2-gpu-session.sh`, `tests/gfx/windows/`,
+  `tests/gfx/compat-matrix.json` (scenariusze w `tests/gfx/scenarios/` są dozwolone: to dane
+  sprawdzane przez walidator);
 - `CLAUDE.md`, `.gitignore`.
 
 Pilnują tego dwie warstwy: reguły `deny` Claude (sprawdzone na żywo przez `doctor --live`) oraz
@@ -180,7 +300,7 @@ niezależny test diffu. Zmiana zasad bezpieczeństwa należy do właściciela.
 python3 -m unittest discover -s tools/orchestrator/tests -v
 ```
 
-30 testów (w CI: zadanie `orchestrator-tests` w `native-ci`):
+47 testów (w CI: zadanie `orchestrator-tests` w `native-ci`):
 - parsowanie limitów Claude i Codex;
 - ścisłość schematów JSON;
 - reguły bezpieczeństwa, redakcja sekretów, blokada force push;
@@ -189,4 +309,10 @@ python3 -m unittest discover -s tools/orchestrator/tests -v
 - 8 scenariuszy symulacji;
 - twarde zabicie (SIGKILL) w trakcie pracy agenta i wznowienie bez duplikowania commitów;
 - SIGTERM i wznowienie;
-- `daemon` przy `STOPPED` i pętla awarii.
+- `daemon` przy `STOPPED` i pętla awarii;
+- `restart`: łagodny (krok kończy się normalnie), `--now` (checkpoint), przerwanie oczekiwania
+  na limit, odmowa przy błędnym configu;
+- Gatekeeper: merge PR agentów, czerwone CI → zadanie naprawcze, CI w toku → czekanie, obcy
+  commit w PR agentów → brak merge, dane gry mimo decyzji MERGE → brak merge, stos (merge od dołu
+  i przepięcie bazy), etykiety, drafty i autorzy, jedna ocena na head, dry run, dzienny limit,
+  zadania uzupełniające, uruchamianie w pętli i izolacja testów od prawdziwego launchd.

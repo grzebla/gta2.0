@@ -54,6 +54,38 @@ DEFAULTS: Dict[str, Any] = {
             "files.pythonhosted.org",
         ],
     },
+    # Gatekeeper: final independent review + merge. A different model than Astra on purpose.
+    "gatekeeper": {
+        "agent": "codex",
+        "command": "codex",
+        "model": "gpt-6.1-sol",
+        "reasoning_effort": "high",
+        "timeout_s": 2400,
+        "codex_home": "~/.codex",
+    },
+    "release": {
+        "enabled": True,
+        "target_branch": "main",
+        "merge_method": "merge",          # merge commit: history is never rewritten
+        "every_s": 3 * 3600,              # how often the loop looks at open PRs
+        "max_merges_per_day": 6,
+        "min_checks": 3,
+        "eligible": "owner_and_integration",  # or "integration_only"
+        "skip_labels": ["do-not-merge", "hold", "wip"],
+        "max_diff_chars": 80000,
+    },
+    # Runs of the ORIGINAL GTA 2 on the EC2 G4dn test host, requested by agents (gfx_requests)
+    # and executed only by the orchestrator with the owner's AWS session. Owner-approved limits
+    # (2026-10-13): 45 min per run, 3 runs per day, 10 USD per month.
+    "gfx": {
+        "enabled": True,
+        "max_minutes_per_run": 45,
+        "max_runs_per_day": 3,
+        "monthly_budget_usd": 10.0,
+        "usd_per_hour": 0.76,          # g4dn.xlarge Windows on-demand, eu-north-1 (incl. EBS while on)
+        "max_pending": 3,
+        "results_root": "~/Games/GTA2-work/gfx-results",
+    },
     "limits": {
         "max_attempts_per_task": 3,
         "max_agent_failures_per_task": 3,
@@ -71,10 +103,21 @@ DEFAULTS: Dict[str, Any] = {
     },
     "verify": {
         "timeout_s": 2400,
+        # Same gates as native-ci, run outside any sandbox. Entries are argv lists or
+        # {"name", "cmd", "env", "unset"}; "unset" removes variables (asset-free runs).
         "commands": [
-            ["cmake", "--preset", "debug"],
-            ["cmake", "--build", "--preset", "debug"],
-            ["ctest", "--preset", "debug", "--output-on-failure"],
+            {"name": "clang-format 23.1.3 (as CI)", "cmd": [
+                "sh", "-c", "git ls-files 'engine/*.cpp' 'engine/*.hpp' 'apps/*.cpp' 'tests/unit/*.cpp' "
+                "| xargs clang-format --dry-run --Werror"]},
+            {"name": "module boundaries", "cmd": ["bash", "scripts/ci/check-module-boundaries.sh"]},
+            {"name": "headless configure (no game data)", "cmd": ["cmake", "--preset", "headless"],
+             "unset": ["GTA20_GAME_DIR", "G2N_GAME_DIR", "GTA20_GAME_DIR_105"]},
+            {"name": "headless build", "cmd": ["cmake", "--build", "--preset", "headless"]},
+            {"name": "headless tests (no game data)", "cmd": ["ctest", "--preset", "headless", "--output-on-failure"],
+             "unset": ["GTA20_GAME_DIR", "G2N_GAME_DIR", "GTA20_GAME_DIR_105"]},
+            {"name": "debug configure", "cmd": ["cmake", "--preset", "debug"]},
+            {"name": "debug build", "cmd": ["cmake", "--build", "--preset", "debug"]},
+            {"name": "debug tests (with original data)", "cmd": ["ctest", "--preset", "debug", "--output-on-failure"]},
         ],
         "env": {"GTA20_GAME_DIR": "~/Games/GTA2"},
         "max_file_bytes": 5 * 1024 * 1024,
@@ -88,6 +131,9 @@ DEFAULTS: Dict[str, Any] = {
         "docs/agent-memory/",
         "infra/",
         "scripts/aws/",
+        "scripts/ci/ec2-gpu-session.sh",
+        "tests/gfx/windows/",
+        "tests/gfx/compat-matrix.json",
         ".github/workflows/gfx-",
         ".github/workflows/infra-lint.yml",
         "CLAUDE.md",
@@ -143,7 +189,10 @@ class Config:
         data = copy.deepcopy(DEFAULTS)
         local = repo_root / data["state_dir"] / "config.json"
         if local.exists():
-            data = deep_merge(data, json.loads(local.read_text()))
+            loaded = json.loads(local.read_text())
+            if not isinstance(loaded, dict):
+                raise ValueError("top level must be a JSON object")
+            data = deep_merge(data, loaded)
         if overrides:
             data = deep_merge(data, overrides)
         return cls(repo_root=repo_root, data=data)

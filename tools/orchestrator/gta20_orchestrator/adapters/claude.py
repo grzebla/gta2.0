@@ -106,6 +106,7 @@ def build_settings(*, worktree: Path, protected: List[str], extra_write_dirs: Li
         "Bash(git rm *)", "Bash(git rev-parse *)", "Bash(git ls-files*)", "Bash(git grep *)",
         "Bash(git stash *)", "Bash(cmake *)", "Bash(ctest *)", "Bash(ninja *)",
         "Bash(./build/*)", "Bash(build/*)", "Bash(uvx *)", "Bash(python3 *)", "Bash(bash scripts/ci/*)",
+        "Bash(clang-format *)", "Bash(env *)", "Bash(git ls-files *)",
     ]
     settings: Dict[str, Any] = {"permissions": {"allow": allow, "deny": deny}}
     if sandbox:

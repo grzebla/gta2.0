@@ -95,7 +95,7 @@ pierwszy bootstrap (sterownik + restarty) może dodać 10–15 min.
 | SCP projektu (Free i Paid) zawiera `Deny iam:*Provider*` | nie da się utworzyć dostawcy GitHub OIDC | aktywować advanced features w AWS Settings (decyzja właściciela) |
 | Limit „Running On-Demand G and VT instances” w eu-north-1 = **0 vCPU** | G4dn się nie uruchomi | wniosek o limit ≥ 4 vCPU (Service Quotas, kod `L-DB2E81BA`) |
 | Plan projektu: **FREE** (100 USD kredytów, wygasa 2027-04-12) | koszty G4dn zużywają kredyty; wniosek o limit GPU może zostać odrzucony | ewentualnie przejście na plan Paid |
-| Sterowniki GRID/gaming leżą w bucketach S3 w us-east-1; SCP `RegionFloor`/`UsEast1Partitional` nie przepuszcza `s3:GetObject` w us-east-1 | instalacja GRID prawdopodobnie się nie powiedzie | strategia `url`: publiczny sterownik NVIDIA 581.80 (R580) dla Windows Server 2022/2025 z SHA-256 i weryfikacją podpisu Authenticode; sterowniki Tesla startują w TCC, więc bootstrap jednorazowo przełącza T4 na WDDM (skuteczność potwierdzi `probe`) |
+| Sterowniki GRID/gaming leżą w bucketach S3 w us-east-1; SCP blokuje podpisane `s3:GetObject` w us-east-1 | podpisane pobranie GRID się nie powiedzie | **Rozwiązane 2026-10-13.** Strategia `grid-public`: anonimowe pobranie przez HTTPS publicznego obiektu `ec2-windows-nvidia-drivers/latest/…_aws_swl.exe` (bez podpisanego wywołania API, więc SCP go nie dotyczy). Plik jest przypięty kluczem, SHA-256 i podpisem Authenticode NVIDIA. GRID 596.86 uruchamia T4 w **WDDM** (Direct3D na GPU). Sterownik data center 581.80 (strategia `url`) instaluje się, ale **odmawia WDDM** (`nvidia-smi -dm 0`: Not Supported), więc zostaje tylko jako fallback. |
 | `CloudFormation` w us-east-1 zablokowane, `AWS::Budgets::Budget` niedostępny w eu-north-1 | budżetu nie da się utworzyć szablonem | `infra/aws/create-budget.sh` (API Budgets) |
 | Spot zablokowany przez SCP | tylko on-demand | — |
 
@@ -168,3 +168,53 @@ Kroki oznaczone 💰 tworzą płatne zasoby — wykonuj je dopiero po świadomej
 
 Sprzątanie: `aws cloudformation delete-stack` dla obu stosów; bucket artefaktów ma
 `DeletionPolicy: Retain` (usuń go ręcznie, gdy nie będzie potrzebny).
+
+## Lekcje z pierwszych przebiegów na EC2 (2026-10-13)
+
+- **Restart przez agenta SSM (`exit 3010`) zawiesza się na tym hoście** (powtórzone dwukrotnie; w
+  dzienniku zdarzeń nie ma nawet początku zamykania). Bootstrap kończy się więc kodem **194**
+  („wymagany restart”), a `ec2-gpu-session.sh run` restartuje instancję przez `ec2 reboot-instances`,
+  czeka na ponowny ping agenta SSM i wysyła polecenie jeszcze raz (maksymalnie 3 restarty).
+- **Zatrzymanie może zawisnąć w stanie `stopping`** (sterownik data center w TCC; zawieszenie już po
+  przejściu jądra w tryb zamykania). `ec2-gpu-session.sh stop` po `STOP_FORCE_AFTER_S` (240 s)
+  wymusza zatrzymanie (`--force`).
+- `nvidia-smi` zwraca 0 także wtedy, gdy odmawia zmiany modelu sterownika. Bootstrap ufa tylko
+  odczytanemu potem `driver_model.pending`.
+- Zimny start z sesją autologowania `gta2runner` działa (SSM online po ok. 2 min).
+
+### Stan środowiska po weryfikacji 2026-10-13: **GTA 2 renderuje się na T4**
+
+- Konfiguracja działająca: GTA 2 **9.6** (samodzielne `gta2.exe`) z wrapperem **DDrawCompat 0.7.1**
+  (`ddrawcompat-window` i `ddrawcompat-fullscreen` = PASS). Recenzja zrzutu potwierdziła
+  oryginalne menu główne: logo GTA2, „PLAY / OPTIONS / QUIT”, „GTA2 V9.6”, logo Rockstar;
+  kolory i proporcje poprawne.
+- Bez wrappera gra zgłasza „Videomode 16x16x16 is not available”: sterownik nie wystawia
+  16-bitowych trybów DirectDraw, które DDrawCompat emuluje. dgVoodoo2: brak obrazu (do zbadania).
+- Warunki konieczne, ustawiane przez bootstrap:
+  1. sterownik GRID (WDDM);
+  2. **DirectPlay** włączony (gta2.exe importuje `DPLAYX.dll`; bez niego loader kończy start
+     błędem 0xc0000022);
+  3. **jeden ekran**: Basic Display Adapter wyłączony, gdy T4 działa w WDDM (przy dwóch
+     adapterach `dmavideo.dll` padał z 0xc0000005);
+  4. katalog `player\` (zapisy; rozpakowane archiwum nie zawiera pustych katalogów);
+  5. tryb nienadzorowany (`ErrorMode=2`, WER bez UI).
+- Wydanie **10.5 z dystrybucji Freeloader** (`freeloader.dat` uruchamiany jako `gta2.exe`) nie
+  startuje (0xc0000022), bo oczekuje swojego launchera. Do testów służy 9.6.
+- Harness: każdy przypadek zaczyna od pustego katalogu i świeżych ustawień ekranu. Okno
+  dialogowe gry daje werdykt `FAIL_GAME_DIALOG` z treścią (wcześniej czarny ekran z oknem
+  błędu potrafił dać fałszywy PASS).
+- Koszt dnia testów: ok. 3,5 h pracy instancji (ok. 2,6 USD) i ok. 5 USD/mies. za dysk.
+
+### Tryb `capture` i przebiegi zamawiane przez agentów (2026-10-13)
+
+- `capture` uruchamia jeden scenariusz z `tests/gfx/scenarios/<id>.json`: wrapper, ustawienia
+  ekranu, czas, momenty zrzutów i skryptowane klawisze. Klawisze idą przez `SendInput` jako
+  kody skanowania (DirectInput czyta kody skanowania, nie komunikaty okna) do okna gry; wynik
+  zapisuje `inputsSent`. Scenariusze są wyłącznie danymi: host nie wykonuje z nich kodu.
+- Przykłady: `frontend-menu` (menu bez wejścia), `frontend-walk` (ENTER i strzałki w menu).
+- Lokalnie: `CONFIRM=uruchom-ec2 scripts/aws/run-gfx-compat-local.sh capture frontend-walk 45`.
+- Agenci zamawiają przebiegi przez Orchestrator (`gfx_requests`); limity właściciela: 45 min na
+  przebieg, 3 przebiegi dziennie, 10 USD miesięcznie. Szczegóły:
+  `tools/orchestrator/README.md`, sekcja „Host testowy EC2”.
+- Wymaga ważnej sesji `aws login` na Macu z Orchestratorem; po jej wygaśnięciu przebiegi czekają,
+  a Orchestrator pyta właściciela.

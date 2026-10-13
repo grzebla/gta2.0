@@ -134,9 +134,9 @@ class CodexAgent:
             raise QuotaExceeded("Codex usage limit: " + errors[:500], reset_at=reset_from_rate_limits(ro["rate_limits"]),
                                 limit_type="codex", session_id=tid, detail={"rate_limits": ro["rate_limits"]})
         if outcome.interrupted:
-            raise AgentInterrupted("Astra run interrupted by orchestrator stop", session_id=tid)
+            raise AgentInterrupted("%s run interrupted by orchestrator stop" % self.name, session_id=tid)
         if outcome.timed_out:
-            raise AgentTimeout("Astra run exceeded timeout", session_id=tid)
+            raise AgentTimeout("%s run exceeded timeout" % self.name, session_id=tid)
         if info["failed"] or outcome.returncode != 0:
             stderr = (run_dir / "stderr.txt").read_text(errors="replace")[-1500:]
             raise AgentFailed("Codex failed (exit %s): %s %s" % (outcome.returncode, errors[:1500], stderr),
@@ -152,7 +152,7 @@ class CodexAgent:
             try:
                 output = json.loads(text)
             except ValueError:
-                raise AgentFailed("Astra returned non-JSON output: %s" % text[:500], session_id=tid)
+                raise AgentFailed("%s returned non-JSON output: %s" % (self.name, text[:500]), session_id=tid)
         return AgentResult(session_id=tid, model=ro["models"][-1], output=output, text=text,
                            usage=info["usage"] or {}, rate_limits=ro["rate_limits"] or {})
 
