@@ -3,15 +3,130 @@
 | Rodzaj | Gdzie | Uruchamianie | Wymaga |
 |---|---|---|---|
 | Jednostkowe (doctest) | `tests/unit/` | `ctest --preset <p>` | nic |
+| Renderer: rozmiary i wstrzyknięte awarie GPU | `tests/unit/render_tests.cpp` (`gta20_render_tests`, tylko buildy z SDL) | CTest `Render sizes: *`, `Renderer: *` | rozmiary: nic; awarie: urządzenie GPU, bez niego SKIP |
 | Determinizm scenariuszy | `tests/conformance/` | CTest `conformance.determinism.*` | nic |
 | Regresja scenariuszy | `tests/conformance/golden/` | CTest `conformance.regression.*` | nic |
-| Dane oryginalnej gry | testy oznaczone `[gamedata]` | `GTA20_GAME_DIR=… ctest` | własna instalacja GTA 2 |
+| Wrapper `cmake/RunConformance.cmake` | `tests/conformance/wrapper/` (atrapa `gta20-headless`) | CTest `conformance.wrapper.*` | nic |
+| Dane oryginalnej gry (opcjonalne) | testy oznaczone `[gamedata]` | `GTA20_GAME_DIR=… ctest` | własna instalacja GTA 2; bez niej SKIP/sukces |
+| Dane oryginalnej gry (ścisłe) | `gta20-headless inventory` | `cmake --build --preset <p> --target gamedata-strict` | własna instalacja GTA 2; bez niej błąd |
+| Ścisła bramka bez danych | `tests/unit/inventory_tests.cpp`, `tests/inventory/` | CTest `Strict map inventory: *`, `inventory.strict.*` | nic (instalacje SYNTHETIC) |
 | Benchmark CPU/pamięci | `gta20-headless bench` | CI (Release) → podsumowanie zadania | nic |
 | Czas klatki | `gta2 --frames N` | lokalnie | okno/GPU |
 | Render bez okna | `gta2 --offscreen WxH --screenshot f.bmp` | CI (lavapipe, próbne) / lokalnie | Vulkan/Metal/D3D12 |
-| Infrastruktura gfx-compat | `tests/gfx/windows/tests` (Pester), `tests/scripts` (Bash) | `infra-lint` | nic (atrapa `aws`) |
+| Infrastruktura gfx-compat | `tests/gfx/windows/tests` (Pester), `tests/scripts/ec2-gpu-session.test.sh` (Bash) | `infra-lint` | nic (atrapa `aws`) |
+| Granice modułów | `scripts/ci/check-module-boundaries.sh`, `tests/scripts/check-module-boundaries.test.sh` (syntetyczne drzewa) | CTest `scripts.module-boundaries*` (poza Windows), CI `native-ci` | bash |
+| Scenariusze zrzutów oryginału (offline) | `tests/gfx/scenarios/*.json`, `cmake/ValidateGfxScenario.cmake` | CTest `gfx.scenario.*`, `gfx.scenario-check.*` | nic (host nie jest wywoływany) |
 
 Sanitizery: preset `asan` (ASan + UBSan, `-fno-sanitize-recover`) w CI na Linux i macOS.
+
+## Ścisła inwentaryzacja map (`gamedata-strict`)
+
+Testy `[gamedata]` w CTest są **opcjonalne**: bez `GTA20_GAME_DIR` kończą się sukcesem, żeby
+zwykłe CI bez danych było zielone. Dlatego same nie dowodzą, że dane zostały sprawdzone.
+Obowiązkową weryfikację lokalnej instalacji daje osobne polecenie, które **kończy się błędem**,
+gdy danych brakuje albo są niekompletne:
+
+```sh
+GTA20_GAME_DIR=~/Games/GTA2 cmake --build --preset debug --target gamedata-strict
+# to samo bezpośrednio (katalog z --game-dir ma pierwszeństwo przed GTA20_GAME_DIR):
+GTA20_GAME_DIR=~/Games/GTA2 ./build/debug/bin/gta20-headless inventory
+```
+
+Katalog gry pochodzi **wyłącznie** z jednej opcji `--game-dir <katalog>` albo, bez niej, ze
+zmiennej `GTA20_GAME_DIR`. Stara nazwa `G2N_GAME_DIR` (wciąż honorowana przez `gta2` i testy
+`[gamedata]`) jest tu ignorowana, a puste `GTA20_GAME_DIR` znaczy „nieustawione”.
+
+Kod wyjścia: `0` — instalacja kompletna, `1` — brak/błąd danych, `2` — błędne argumenty: każdy
+inny argument niż `--game-dir`, `--game-dir` bez wartości, z pustą wartością lub podane dwa razy
+(wtedy inwentaryzacja w ogóle się nie uruchamia). Bramka (`engine/assets/src/map_inventory.cpp`)
+zgłasza błąd, gdy:
+
+* katalog gry nie jest podany (ani `--game-dir`, ani niepuste `GTA20_GAME_DIR`), nie istnieje lub
+  nie ma `data/`;
+* `data/` nie zawiera **dokładnie** 17 map `.gmp` z listy w
+  [formats/map-styles.md](formats/map-styles.md) (brakująca, dodatkowa lub inna mapa);
+* dwie mapy albo dwa pliki konfiguracyjne różnią się tylko wielkością liter (na systemach plików
+  rozróżniających wielkość liter, np. `wil.gmp` i `WIL.GMP`) — nazwy są dopasowywane bez
+  względu na wielkość liter, więc taka para jest niejednoznaczna;
+* któraś mapa się nie parsuje (DMAP) albo nie ma żadnego bloku;
+* styl przypisany mapie nie istnieje lub się nie parsuje, albo przypisanie jest nierozstrzygnięte;
+* pliki konfiguracyjne gry (`data/test1.seq`, `data/*.mmp`) nie deklarują zapisanych par
+  mapa → styl albo im przeczą.
+
+Wypisuje wyłącznie metadane i sumy: dla stylu wersję i liczbę kafli, dla mapy rozmiar pliku,
+liczbę unikalnych bloków i zajętych komórek, zakres poziomów `z` z niepustymi blokami, liczby
+komórek dla każdego użytego kodu skosu (0–63) oraz liczby ścian i pokryw z kaflami
+zarezerwowanymi 992–1022 i ze znacznikiem 1023 (liczone po komórkach siatki 256×256×8).
+Nie wypisuje rekordów bloków ani pikseli. Raport jest ograniczony: najwyżej 40 problemów
+(pozostałe są tylko liczone: „… N more problems not shown”, a wynik `FAIL (M problems)` podaje
+pełną liczbę), każdy problem najwyżej 240 znaków (dłuższy kończy się ` [...]`, znaki sterujące
+zamieniane na `?`), cały raport najwyżej 32 KiB (ewentualne obcięcie zachowuje końcową linię
+`result:`). Polecenie nie jest testem CTest, więc ani preset `headless`, ani `debug` bez danych
+nie przestają przechodzić.
+
+Zachowanie bramki bez oryginalnych danych sprawdzają testy CTest w każdym presecie:
+
+* `Strict map inventory: *` i `Map styles: *` (`tests/unit/inventory_tests.cpp`, syntetyczna
+  instalacja w katalogu tymczasowym): brak wejścia, uszkodzone mapy, zła liczba map,
+  brakujące/uszkodzone style, sprzeczna konfiguracja, nierozstrzygnięte przypisanie, nazwy
+  różniące się wielkością liter (test na systemie plików rozróżniającym wielkość liter; na
+  nierozróżniającym, np. domyślnym APFS, kończy się komunikatem o pominięciu), ograniczenia
+  raportu przy setkach problemów i długich wartościach oraz poprawna inwentaryzacja 17 map ze
+  sprawdzonymi sumami;
+* `inventory.strict.*` (`tests/inventory/`): kod wyjścia samego `gta20-headless inventory` —
+  `1` bez `GTA20_GAME_DIR`, z pustym `GTA20_GAME_DIR` lub tylko z `G2N_GAME_DIR` wskazującym
+  **poprawną** syntetyczną instalację, z nieistniejącym katalogiem, bez `data/`, z pustymi
+  plikami map i z 16 mapami; `0` dla poprawnej syntetycznej instalacji przez `--game-dir` i
+  przez `GTA20_GAME_DIR`; `2` dla nieznanej opcji (także obok poprawnego `--game-dir`),
+  argumentu pozycyjnego, braku lub pustej wartości i powtórzonego `--game-dir`. Syntetyczną
+  instalację zapisuje pomocniczy program `gta20_write_synthetic_install`.
+
+## Zrzuty renderu z oryginalnych danych (`gamedata.render.*`)
+
+`gamedata.render.wil`, `.ste` i `.bil` renderują offscreen fragment dzielnicy z oryginalnych
+danych (`cmake/RunRenderCheck.cmake`) i sprawdzają tylko, czy obraz nie jest pusty
+(≥ 500 kolorów, ≥ 95% pokrycia). To **smoke test**: nie dowodzi wierności M1 i nie zastępuje
+obowiązkowej bramki M1 z danymi. Bez `GTA20_GAME_DIR` (ani starego `G2N_GAME_DIR`) albo bez
+urządzenia GPU test kończy się jako SKIP, zanim cokolwiek zapisze.
+
+Zrzut pochodzi z oryginalnych danych, więc **nigdy** nie trafia do drzewa źródeł ani do
+katalogu budowania (a więc ani do artefaktów CI, które są ścieżkami w checkoutcie:
+`build/<preset>/…`, `smoke.bmp`, `gfx-results/`). Trafia do katalogu zewnętrznego:
+
+* `GTA20_RENDER_CAPTURE_DIR` — zmienna cache CMake (absolutna ścieżka). Domyślnie katalog
+  cache użytkownika: `%LOCALAPPDATA%\gta20\render-captures` (Windows),
+  `$XDG_CACHE_HOME/gta20/render-captures` lub `~/.cache/gta20/render-captures`.
+* Zmienna środowiskowa `GTA20_RENDER_CAPTURE_DIR` w czasie `ctest` ma pierwszeństwo przed
+  wartością z cache.
+
+Przed uruchomieniem renderera skrypt sprawdza katalog: musi być absolutny i leżeć poza
+checkoutem oraz katalogiem budowania — zarówno w zapisanej postaci, jak i po rozwiązaniu
+dowiązań symbolicznych na każdym istniejącym poziomie ścieżki. Dowiązanie prowadzące do
+checkoutu, dowiązanie wewnątrz checkoutu i wiszące dowiązanie są odrzucane z błędem
+wskazującym, co ustawić; nie ma cichego powrotu do katalogu budowania. Każde uruchomienie
+tworzy osobny katalog `<root>/<UTC YYYYMMDDTHHMMSSZ>-<dzielnica>-<8 losowych znaków>/` z plikiem
+`render-<dzielnica>.bmp` i wypisuje jego ścieżkę (przed renderem i jako
+`Render capture saved: …`). Jeśli renderer nic nie zapisał (SKIP z braku GPU, błąd), pusty
+katalog uruchomienia jest usuwany; istniejące zrzuty nigdy nie są usuwane ani nadpisywane.
+
+Lokalnie:
+
+```sh
+cmake --preset debug -DGTA20_RENDER_CAPTURE_DIR="$HOME/gta20-captures"   # opcjonalnie
+cmake --build --preset debug
+GTA20_GAME_DIR=~/Games/GTA2 ctest --preset debug -R gamedata.render -V | grep 'Render capture'
+# albo jednorazowo: GTA20_RENDER_CAPTURE_DIR=/abs/poza/repo GTA20_GAME_DIR=… ctest …
+```
+
+Obrazy przeglądaj lokalnie; nie commituj ich i nie wysyłaj nigdzie.
+
+Obsługę katalogu sprawdzają testy bez danych `rendercheck.capture.*`
+(`tests/conformance/rendercheck/`): atrapa renderera w skrypcie CMake i katalogi w
+katalogu tymczasowym. Pokrywają akceptowaną ścieżkę zewnętrzną, odrzucenie ścieżek w źródłach i
+w katalogu budowania (także przez `..`), ścieżkę ze spacjami, niezależne katalogi kolejnych
+uruchomień, dowiązania symboliczne (SKIP, gdy system ich nie pozwala tworzyć), brak lub
+względną ścieżkę, nadpisanie zmienną środowiskową, SKIP bez danych i bez GPU, niezmienione
+progi obrazu oraz to, że skonfigurowany katalog leży poza bieżącym checkoutem.
 
 ## Framework porównawczy
 
@@ -48,6 +163,14 @@ Linia 1: `{"header":{…}}`, potem `{"tick":N,"entities":[{"id","kind","properti
 najkrótszą postacią odtwarzalną bit w bit (`std::to_chars`), wartości nieskończone jako
 `"nan"`/`"inf"`/`"-inf"`, bez znaczników czasu. Ten sam przebieg daje identyczny plik.
 
+Integralność (`validate(const Trace&)`, sprawdzana przez `read_trace` i przez `compare_traces`):
+`schemaVersion: 1`, niepusty `scenarioId`, `provenance` tylko `synthetic | originalGta2 | engine`
+(nieznana wartość jest błędem, nie „synthetic”), `tickRateHz > 0`, `ticks ≥ 0`, co najmniej
+jeden snapshot (sam nagłówek jest błędem), ticki ściśle rosnące w zakresie `0..ticks`
+(rzadki harmonogram jest dozwolony), niepuste i unikalne `id` encji w ticku, unikalne nazwy
+właściwości encji (powtórzony klucz JSON w pliku też jest błędem). Tożsamość adaptera
+(`adapter`, `adapterVersion`) ani `provenance` nie muszą się zgadzać między śladami.
+
 ### Raport
 
 `gta20-headless compare` zwraca kod 0 (zgodne), 1 (rozbieżne) lub 2 (błąd wejścia) i wypisuje
@@ -56,6 +179,9 @@ najniższy tick / encja / właściwość), statystyki na (rodzaj, właściwość
 odchylenie z tickiem, pierwszy tick poza tolerancją — oraz listę rozbieżności
 (`HeaderMismatch`, `MissingTick`, `UnexpectedTick`, `MissingEntity`, `UnexpectedEntity`,
 `KindMismatch`, `MissingProperty`, `UnexpectedProperty`, `ValueOutOfTolerance`).
+Gdy któryś ślad nie przechodzi walidacji, nic nie jest porównywane: raport ma status
+`INVALID INPUT` z listą problemów (`expected: …` / `actual: …`; w JSON `validInput: false`,
+`invalidInput`, `passed: false`), a `compare` zwraca kod 2.
 
 ### Wzorce regresyjne
 
@@ -69,3 +195,10 @@ nie mówią nic o GTA 2.
 Ślady `provenance: originalGta2` mają powstawać z oryginalnej gry uruchamianej na EC2
 ([aws/integration.md](aws/integration.md)). Do czasu ich nagrania w repozytorium nie ma
 żadnych danych referencyjnych GTA 2.
+
+Zrzuty ekranu oryginału na hoście EC2 opisuje scenariusz `tests/gfx/scenarios/<id>.json` (tylko
+pola przyjmowane przez hosta) z dokumentem towarzyszącym `<id>.md`, który oznacza go jako
+referencję z oryginalnej gry. Przed zgłoszeniem przebiegu scenariusz musi przejść
+`cmake -DSCENARIO=tests/gfx/scenarios/<id>.json -P cmake/ValidateGfxScenario.cmake`
+(CTest `gfx.scenario.<id>`). Zrzuty zostają w lokalnym katalogu wyników, nigdy w repozytorium.
+Pierwszy scenariusz: [m1-downtown-baseline](../tests/gfx/scenarios/m1-downtown-baseline.md).

@@ -1,19 +1,9 @@
-# PROJECT — GTA2.0 (current state)
+# Project
 
-Goal (fixed by the owner): faithful, native, cross-platform reimplementation of GTA 2 in C++20
-(CMake/Ninja, SDL3, SDL_GPU: Metal / D3D12 / Vulkan). Repository `grzebla/gta2.0` (private).
+GTA2.0 remains a native C++20/CMake/Ninja/SDL3/SDL_GPU reimplementation of GTA 2, with fidelity established by automated original-game comparisons. M1 is active and incomplete.
 
-State verified 2026-10-12 (commit on `feature/orchestrator`):
-- Engine modules: core (Q16.16 fixed point, angles, RNG, fixed-step clock, handles), assets
-  (GMP and STY parsers, game install detection), sim (deterministic, prototype rules), scene
-  (draw lists, tile atlas), render (SDL_GPU, instanced quads + atlas), platform (SDL3), testing
-  (scenarios, traces, comparison). Apps: `gta2` (window/offscreen), `gta20-headless`.
-- Real data: `.gmp` (17 maps) and `.sty` (4 styles) parse and are verified; lids of
-  Downtown/Residential/Industrial render with original textures on Metal (top-down only).
-- NOT yet: 3D walls, slopes, lighting, animated tiles, sprites, objects, any gameplay mechanic.
-- Tests: CTest 54/54 with original data (macOS ARM64 Debug); CI `native-ci` green on macOS,
-  Windows, Linux for PR #3 head. Original data lives only locally (`GTA20_GAME_DIR`).
-- Open PRs (owner merges, never agents): #2 engine -> main, #3 original assets -> #2,
-  #4 rename to GTA2.0 -> #3, orchestrator PR -> #4.
+Architecture review inspected clean integration HEAD 4dcbdeb167c147d36303089deaff37d69959ea8c. T0008, T0013, T0014, T0015 and T0019 approvals stand; their code is present on integration. Gatekeeper alone handles merging to main after all gates pass.
 
-Current milestone: M1 — full GTA 2 world geometry (see ROADMAP.md). Not started.
+Immediate priorities are Windows inventory compilation, Linux capture-test portability, WorldMesh allocation growth and strict GPU execution. Existing DirectInput captures now contain visible world geometry, so the historical world-entry blocker is superseded. Calibration and fidelity comparisons remain open.
+
+No AI, vehicle physics or mission work before M1 acceptance. No cloud commands or protected-path edits. Original assets and references remain local. No new paid capture requested by this review.

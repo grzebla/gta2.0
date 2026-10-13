@@ -25,6 +25,7 @@
 #include "gta20/assets/file_io.hpp"
 #include "gta20/assets/game_install.hpp"
 #include "gta20/assets/gmp_writer.hpp"
+#include "gta20/assets/map_inventory.hpp"
 #include "gta20/assets/sty_style.hpp"
 #include "gta20/core/clock.hpp"
 #include "gta20/core/diagnostics.hpp"
@@ -162,11 +163,20 @@ Result<LoadedWorld> load_world(const Options& o) {
     w.map = std::move(map.value());
     w.label = std::filesystem::path(o.map_path.empty() ? o.level : o.map_path).filename().string();
 
-    // Style: explicit, else the level's sibling .sty (wil.gmp -> wil.sty).
-    const std::string style_relative = std::filesystem::path(o.level).replace_extension(".sty").generic_string();
+    // Style: explicit, else the one the original game pairs with this map (lorne2e.gmp -> wil.sty),
+    // else the map's sibling .sty for maps that are not part of the original release.
+    const auto* paired = assets::find_map_style(o.map_path.empty() ? o.level : o.map_path);
+    const auto default_style = [&](const std::filesystem::path& map) {
+        auto style = std::filesystem::path(map).replace_extension(".sty");
+        if (paired != nullptr && paired->resolved()) {
+            style.replace_filename(std::filesystem::path(paired->style).filename());
+        }
+        return style;
+    };
+    const std::string style_relative = default_style(o.level).generic_string();
     std::string style_explicit = o.style_path;
     if (style_explicit.empty() && !o.map_path.empty()) {
-        style_explicit = std::filesystem::path(o.map_path).replace_extension(".sty").string();
+        style_explicit = default_style(o.map_path).string();
     }
     if (auto style_bytes = read_game_file(o, style_explicit, style_relative)) {
         auto style = assets::parse_sty(style_bytes.value());

@@ -39,12 +39,8 @@ Tolerance parse_tolerance(const json& j, const std::string& where) {
 }
 
 Provenance parse_provenance(const std::string& s) {
-    if (s == "synthetic")
-        return Provenance::Synthetic;
-    if (s == "originalGta2")
-        return Provenance::OriginalGta2;
-    if (s == "engine")
-        return Provenance::Engine;
+    if (const auto p = provenance_from_string(s))
+        return *p;
     throw std::runtime_error("unknown provenance '" + s + "' (synthetic | originalGta2 | engine)");
 }
 
@@ -57,6 +53,14 @@ const char* to_string(Provenance p) {
     case Provenance::Engine: return "engine";
     }
     return "?";
+}
+
+std::optional<Provenance> provenance_from_string(const std::string& s) {
+    for (const auto p : {Provenance::Synthetic, Provenance::OriginalGta2, Provenance::Engine}) {
+        if (s == to_string(p))
+            return p;
+    }
+    return std::nullopt;
 }
 
 double Tolerance::distance(double expected, double actual) const {

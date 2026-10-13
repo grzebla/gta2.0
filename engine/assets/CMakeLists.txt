@@ -4,6 +4,7 @@ add_library(gta20_assets
     src/gmp_map.cpp
     src/gmp_writer.cpp
     src/game_install.cpp
+    src/map_inventory.cpp
     src/sty_style.cpp)
 add_library(gta20::assets ALIAS gta20_assets)
 target_include_directories(gta20_assets PUBLIC include)

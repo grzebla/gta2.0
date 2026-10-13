@@ -158,6 +158,116 @@ TEST_CASE("Compare: structural differences are all reported, header first") {
     CHECK(r.first_divergence->kind == DivergenceKind::HeaderMismatch);
 }
 
+TEST_CASE("Trace: header-only input is rejected") {
+    const std::string header_only = trace_to_string(make_trace({}));
+    std::istringstream in(header_only);
+    const auto parsed = read_trace(in);
+    REQUIRE_FALSE(parsed);
+    CHECK(parsed.error().message.find("no snapshots") != std::string::npos);
+    std::istringstream with_blank_lines(header_only + "\n\n");
+    CHECK_FALSE(read_trace(with_blank_lines));
+
+    const auto r = compare_traces(make_trace({}), make_trace({}), {});
+    CHECK_FALSE(r.passed());
+    CHECK_FALSE(r.valid());
+    CHECK(r.compared_ticks == 0);
+    CHECK(r.invalid_input == std::vector<std::string>{"expected: trace has no snapshots (header only)",
+                                                      "actual: trace has no snapshots (header only)"});
+    CHECK(report_to_markdown(r).find("- INVALID INPUT") != std::string::npos);
+    CHECK(report_to_json(r).find("\"passed\": false") != std::string::npos);
+    CHECK(report_to_json(r).find("\"validInput\": false") != std::string::npos);
+}
+
+TEST_CASE("Compare: duplicate entity ids are invalid input, not a pass") {
+    const auto expected = make_trace({{0, 1}});
+    auto actual = make_trace({{0, 1}});
+    // The first copy is out of tolerance; indexing by id used to keep only the last one.
+    actual.snapshots[0].entities.insert(actual.snapshots[0].entities.begin(), {"p", "body", {{"x", 99}, {"y", 0}}});
+    const auto r = compare_traces(expected, actual, {});
+    CHECK_FALSE(r.passed());
+    CHECK(r.invalid_input == std::vector<std::string>{"actual: tick 0: duplicate entity id 'p'"});
+    auto expected_twice = expected;
+    expected_twice.snapshots[0].entities.push_back(expected_twice.snapshots[0].entities[0]);
+    const auto r2 = compare_traces(expected_twice, make_trace({{0, 1}}), {});
+    CHECK_FALSE(r2.passed());
+    CHECK(r2.invalid_input == std::vector<std::string>{"expected: tick 0: duplicate entity id 'p'"});
+
+    std::istringstream in(trace_to_string(make_trace({{0, 1}})) +
+                          R"({"entities":[{"id":"p","kind":"body","properties":{}},)"
+                          R"({"id":"p","kind":"body","properties":{}}],"tick":1})"
+                          "\n");
+    const auto parsed = read_trace(in);
+    REQUIRE_FALSE(parsed);
+    CHECK(parsed.error().message.find("duplicate entity id 'p'") != std::string::npos);
+}
+
+TEST_CASE("Compare: duplicate ticks and property names in memory are invalid input") {
+    auto ticks = make_trace({{0, 1}, {1, 1}, {1, 1}});
+    const auto r = compare_traces(ticks, make_trace({{0, 1}, {1, 1}}), {});
+    CHECK_FALSE(r.passed());
+    REQUIRE(r.invalid_input.size() == 1);
+    CHECK(r.invalid_input[0].rfind("expected: tick 1: ticks must be strictly increasing", 0) == 0);
+
+    auto props = make_trace({{0, 1}});
+    props.snapshots[0].entities[0].properties.emplace_back("x", 1);
+    const auto r2 = compare_traces(make_trace({{0, 1}}), props, {});
+    CHECK_FALSE(r2.passed());
+    CHECK(r2.invalid_input == std::vector<std::string>{"actual: tick 0: entity 'p' has duplicate property 'x'"});
+    CHECK(report_to_markdown(r2).find("- actual: tick 0: entity 'p' has duplicate property 'x'") != std::string::npos);
+
+    // In a file a repeated JSON key is rejected instead of silently keeping the last value.
+    std::istringstream in(trace_to_string(make_trace({{0, 1}})) +
+                          R"({"entities":[{"id":"p","kind":"body","properties":{"x":1,"x":2}}],"tick":1})"
+                          "\n");
+    const auto parsed = read_trace(in);
+    REQUIRE_FALSE(parsed);
+    CHECK(parsed.error().message.find("duplicate key \"x\"") != std::string::npos);
+
+    // Ticks outside 0..header.ticks.
+    CHECK_FALSE(validate(make_trace({{0, 1}, {3, 1}})).empty());
+    CHECK_FALSE(validate(make_trace({{-1, 1}, {0, 1}})).empty());
+}
+
+TEST_CASE("Trace: unknown provenance is rejected, never classified as synthetic") {
+    std::string text = trace_to_string(make_trace({{0, 1}}));
+    const std::string synthetic = R"("provenance":"synthetic")";
+    REQUIRE(text.find(synthetic) != std::string::npos);
+    text.replace(text.find(synthetic), synthetic.size(), R"("provenance":"made-up")");
+    std::istringstream in(text);
+    const auto parsed = read_trace(in);
+    REQUIRE_FALSE(parsed);
+    CHECK(parsed.error().message.find("unknown provenance 'made-up'") != std::string::npos);
+
+    CHECK(provenance_from_string("originalGta2") == Provenance::OriginalGta2);
+    CHECK_FALSE(provenance_from_string("Synthetic"));
+    auto bogus = make_trace({{0, 1}});
+    bogus.header.provenance = static_cast<Provenance>(42);
+    const auto r = compare_traces(make_trace({{0, 1}}), bogus, {});
+    CHECK_FALSE(r.passed());
+    CHECK(r.invalid_input == std::vector<std::string>{"actual: unknown provenance"});
+}
+
+TEST_CASE("Compare: sparse schedules and cross-adapter traces stay valid") {
+    auto expected = make_trace({{0, 1}, {2, 3}}); // tick 1 never captured
+    expected.header.provenance = Provenance::OriginalGta2;
+    expected.header.adapter = "original-capture";
+    expected.header.adapter_version = "9.6";
+    auto actual = make_trace({{0, 1}, {2, 3}});
+    actual.header.provenance = Provenance::Engine;
+    actual.header.adapter = "engine";
+    actual.header.adapter_version = "prototype-1";
+    CHECK(validate(expected).empty());
+    std::istringstream in(trace_to_string(expected));
+    REQUIRE(read_trace(in));
+    const auto r = compare_traces(expected, actual, {});
+    CHECK(r.valid());
+    CHECK(r.passed());
+    CHECK(r.compared_ticks == 2);
+    // Empty entity lists are a valid observation, not a missing tick.
+    CHECK(compare_traces(make_trace({{0, 1}}), make_trace({{0, 1}}), {}).passed());
+    CHECK(validate(Trace{expected.header, {{0, {}}}}).empty());
+}
+
 TEST_CASE("Runner: wall-slide scenario really collides and slides (SYNTHETIC map)") {
     auto scenario =
         load_scenario(std::string(GTA20_SOURCE_DIR) + "/tests/conformance/scenarios/synthetic-wall-slide.json");

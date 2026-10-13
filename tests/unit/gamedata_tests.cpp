@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdlib>
 #include <filesystem>
 #include <optional>
@@ -17,6 +18,7 @@
 #include "gta20/assets/gmp_map.hpp"
 #include "gta20/assets/sty_style.hpp"
 #include "gta20/scene/draw_list.hpp"
+#include "gta20/scene/world_mesh_map.hpp"
 
 using namespace gta20;
 using namespace gta20::assets;
@@ -229,6 +231,42 @@ TEST_CASE("[gamedata] every tile a level map uses exists in its style") {
         }
         const auto atlas = scene::build_tile_atlas(style.value());
         CHECK(atlas.tile_count == 992);
+    }
+}
+
+// Only the partial-coverage verdict of the unsloped builder (docs/specs/world-mesh.md) on real maps:
+// sloped cities must never come out as fully covered. This does not validate the generated geometry.
+TEST_CASE("[gamedata] WorldMeshMap: original cities are reported as partial coverage") {
+    const auto dir = game_dir();
+    if (!dir)
+        return;
+    for (const char* level : {"wil", "ste", "bil"}) {
+        CAPTURE(level);
+        auto map = parse_gmp(load(*dir, std::string("data/") + level + ".gmp"));
+        auto style = parse_sty(load(*dir, std::string("data/") + level + ".sty"));
+        REQUIRE(map);
+        REQUIRE(style);
+        const auto tile_count = static_cast<u16>(style.value().tile_count());
+        auto built = scene::build_unsloped_map_mesh(map.value(), tile_count);
+        REQUIRE(built);
+        const auto& s = built.value().stats;
+        CHECK(s.cells_visited == 256u * 256u * 8u);
+        CHECK(s.sloped_blocks > 0);
+        CHECK(s.out_of_style_faces == 0); // every tile is < tile_count or 1023 (test above)
+        CHECK(s.emitted_faces > 0);
+        CHECK(s.coverage() == scene::MapMeshCoverage::partial);
+        const auto& mesh = built.value().mesh;
+        REQUIRE(mesh.vertices().size() == 4u * s.emitted_faces);
+        REQUIRE(mesh.indices().size() == 6u * s.emitted_faces);
+        CHECK(std::all_of(mesh.indices().begin(), mesh.indices().end(),
+                          [&mesh](u32 i) { return i < mesh.vertices().size(); }));
+        CHECK(std::all_of(mesh.vertices().begin(), mesh.vertices().end(), [](const scene::WorldVertex& v) {
+            return std::isfinite(v.position.x) && std::isfinite(v.position.y) && std::isfinite(v.position.z) &&
+                   std::isfinite(v.u) && std::isfinite(v.v);
+        }));
+        MESSAGE(std::string(level) << ": " << s.emitted_faces << " faces emitted, " << s.sloped_blocks
+                                   << " sloped blocks, " << s.flat_faces << " flat, " << s.reserved_faces
+                                   << " reserved, " << s.blank_faces << " blank faces");
     }
 }
 

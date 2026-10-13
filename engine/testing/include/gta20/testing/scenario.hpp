@@ -14,6 +14,8 @@ namespace gta20::testing {
 enum class Provenance { Synthetic, OriginalGta2, Engine };
 
 [[nodiscard]] const char* to_string(Provenance p);
+/// Inverse of to_string; nullopt for any other spelling (never defaults to synthetic).
+[[nodiscard]] std::optional<Provenance> provenance_from_string(const std::string& s);
 
 struct Tolerance {
     double absolute = 0;
