@@ -126,7 +126,7 @@ dowodu [O], oznaczona jako nierozstrzygnięta.
 
 ### 5.1 Co robi dziś nasz silnik (tylko pokrywy) — [I]
 
-Źródło: `draw_list.cpp:104-112` i `quad.vert.glsl:17-24` (odpowiedniki: `quad.hlsl:32-38`,
+Źródło: `draw_list.cpp:104-113` i `quad.vert.glsl:17-24` (odpowiedniki: `quad.hlsl:32-38`,
 `quad.metal:30`). Bez obrotu narożnik `a_corner = (−½, −½)` dostaje (u0, v0) = **A** i leży w
 (x, y) — lewy górny róg komórki na ekranie. Odbicie zamienia u0 ↔ u1 **w przestrzeni tekstury,
 przed obrotem**; obrót o `kod · 90°` jest **zgodny z ruchem wskazówek zegara na ekranie** (dla
@@ -150,8 +150,9 @@ SE = (x+1, y+1), SW = (x, y+1)):
   (`assets_tests.cpp:41-58`).
 * Kierunek obrotu, oś odbicia i kolejność złożenia: **niezweryfikowane**. Jedyne wsparcie to [W]
   (`gmp.md:31-32`: ciągłe pasy, nieodbite napisy na Downtown w naszym renderze). Komentarz
-  `draw_list.cpp:111` powołuje się na „docs/formats/sty.md”, ale `sty.md` nie zawiera żadnej
-  informacji o obrocie — ta referencja jest niedostępna/martwa; status pozostaje [H].
+  `draw_list.cpp:111-112` powoływał się na „docs/formats/sty.md”, który nie zawiera żadnej
+  informacji o obrocie; od T0005 wskazuje na tę sekcję (`docs/specs/world-geometry.md`, sekcja 5).
+  Status pozostaje [H].
 * Dlaczego obserwacja [W] nie wystarcza: (a) „odbicie przed obrotem w prawo” i „obrót w lewo, potem
   odbicie” dają **identyczne** obrazy dla wszystkich kombinacji z odbiciem; różnią się tylko
   R90/R270 bez odbicia. (b) „Odbicie, potem obrót” vs „obrót, potem odbicie” (oba w prawo) różnią

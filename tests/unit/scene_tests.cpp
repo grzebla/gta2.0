@@ -3,11 +3,14 @@
 #include "gta20/assets/gmp_writer.hpp"
 #include "gta20/scene/block_geometry.hpp"
 #include "gta20/scene/draw_list.hpp"
+#include "gta20/scene/face_texture.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <iterator>
+#include <set>
+#include <string>
 #include <tuple>
 #include <vector>
 
@@ -252,4 +255,237 @@ TEST_CASE("[world-geometry] block face geometry is identical across repeated cal
             }
         }
     }
+}
+
+// Texture-corner mapping. SYNTHETIC expectations written by hand from docs/specs/world-geometry.md,
+// sections 3 and 5 (A = (0,0), B = (1,0), C = (1,1), D = (0,1) with v down the image; flip mirrors
+// A<->B and D<->C before a clockwise turn), not from the implementation.
+// - Lid rows: table 5.1 read at p0..p3 = NW, NE, SE, SW. Current-engine regression behaviour of
+//   append_map_textured, not evidence of the original game.
+// - Wall rows: hypothesis, see docs/specs/world-geometry.md (sections 3 and 5.3). The face seen from
+//   outside has p2, p3 on top and p0, p1 below, so table 5.1's NW, NE, SE, SW become p2, p3, p0, p1.
+namespace {
+
+using assets::Rotation;
+using scene::TexCorner;
+
+struct MappingCase {
+    BlockFace face;
+    const char* face_name;
+    Rotation rotation;
+    bool flip;
+    const char* expected; // labels at p0, p1, p2, p3
+};
+
+constexpr std::array<MappingCase, 40> kMappingCases{{
+    {BlockFace::lid, "lid", Rotation::R0, false, "ABCD"},
+    {BlockFace::lid, "lid", Rotation::R90, false, "DABC"},
+    {BlockFace::lid, "lid", Rotation::R180, false, "CDAB"},
+    {BlockFace::lid, "lid", Rotation::R270, false, "BCDA"},
+    {BlockFace::lid, "lid", Rotation::R0, true, "BADC"},
+    {BlockFace::lid, "lid", Rotation::R90, true, "CBAD"},
+    {BlockFace::lid, "lid", Rotation::R180, true, "DCBA"},
+    {BlockFace::lid, "lid", Rotation::R270, true, "ADCB"},
+
+    {BlockFace::left, "left", Rotation::R0, false, "CDAB"},
+    {BlockFace::left, "left", Rotation::R90, false, "BCDA"},
+    {BlockFace::left, "left", Rotation::R180, false, "ABCD"},
+    {BlockFace::left, "left", Rotation::R270, false, "DABC"},
+    {BlockFace::left, "left", Rotation::R0, true, "DCBA"},
+    {BlockFace::left, "left", Rotation::R90, true, "ADCB"},
+    {BlockFace::left, "left", Rotation::R180, true, "BADC"},
+    {BlockFace::left, "left", Rotation::R270, true, "CBAD"},
+
+    {BlockFace::right, "right", Rotation::R0, false, "CDAB"},
+    {BlockFace::right, "right", Rotation::R90, false, "BCDA"},
+    {BlockFace::right, "right", Rotation::R180, false, "ABCD"},
+    {BlockFace::right, "right", Rotation::R270, false, "DABC"},
+    {BlockFace::right, "right", Rotation::R0, true, "DCBA"},
+    {BlockFace::right, "right", Rotation::R90, true, "ADCB"},
+    {BlockFace::right, "right", Rotation::R180, true, "BADC"},
+    {BlockFace::right, "right", Rotation::R270, true, "CBAD"},
+
+    {BlockFace::top, "top", Rotation::R0, false, "CDAB"},
+    {BlockFace::top, "top", Rotation::R90, false, "BCDA"},
+    {BlockFace::top, "top", Rotation::R180, false, "ABCD"},
+    {BlockFace::top, "top", Rotation::R270, false, "DABC"},
+    {BlockFace::top, "top", Rotation::R0, true, "DCBA"},
+    {BlockFace::top, "top", Rotation::R90, true, "ADCB"},
+    {BlockFace::top, "top", Rotation::R180, true, "BADC"},
+    {BlockFace::top, "top", Rotation::R270, true, "CBAD"},
+
+    {BlockFace::bottom, "bottom", Rotation::R0, false, "CDAB"},
+    {BlockFace::bottom, "bottom", Rotation::R90, false, "BCDA"},
+    {BlockFace::bottom, "bottom", Rotation::R180, false, "ABCD"},
+    {BlockFace::bottom, "bottom", Rotation::R270, false, "DABC"},
+    {BlockFace::bottom, "bottom", Rotation::R0, true, "DCBA"},
+    {BlockFace::bottom, "bottom", Rotation::R90, true, "ADCB"},
+    {BlockFace::bottom, "bottom", Rotation::R180, true, "BADC"},
+    {BlockFace::bottom, "bottom", Rotation::R270, true, "CBAD"},
+}};
+
+const char* rotation_name(Rotation r) {
+    switch (r) {
+    case Rotation::R0: return "R0";
+    case Rotation::R90: return "R90";
+    case Rotation::R180: return "R180";
+    case Rotation::R270: return "R270";
+    }
+    return "R?";
+}
+
+std::string label_string(const std::array<TexCorner, 4>& corners) {
+    std::string s;
+    for (const TexCorner c : corners) {
+        switch (c) {
+        case TexCorner::A: s += 'A'; break;
+        case TexCorner::B: s += 'B'; break;
+        case TexCorner::C: s += 'C'; break;
+        case TexCorner::D: s += 'D'; break;
+        default: s += '?'; break;
+        }
+    }
+    return s;
+}
+
+bool is_permutation_of_abcd(std::string s) {
+    std::sort(s.begin(), s.end());
+    return s == "ABCD";
+}
+
+std::string describe(const MappingCase& c) {
+    return std::string(c.face_name) + " " + rotation_name(c.rotation) + (c.flip ? " flip" : " noflip");
+}
+
+} // namespace
+
+TEST_CASE("[world-geometry] face texture corners match the specified labels for all 40 combinations") {
+    std::set<std::tuple<int, int, bool>> seen;
+    std::string report;
+    for (const auto& c : kMappingCases) {
+        const std::string context = describe(c);
+        CAPTURE(context);
+        CAPTURE(c.expected);
+        CHECK(is_permutation_of_abcd(c.expected)); // sanity of the hand-written table
+        seen.emplace(static_cast<int>(c.face), static_cast<int>(c.rotation), c.flip);
+        const std::string actual = label_string(scene::face_texture_corners(c.face, c.rotation, c.flip));
+        CAPTURE(actual);
+        CHECK(is_permutation_of_abcd(actual));
+        CHECK(actual == c.expected);
+        report += "\n  " + context + ": p0..p3 = " + actual + (actual == c.expected ? " ok" : " MISMATCH");
+    }
+    // Every face x {R0, R90, R180, R270} x {no flip, flip} exactly once.
+    CHECK(seen.size() == 40);
+    MESSAGE("face/rotation/flip combinations checked: " << seen.size() << report);
+}
+
+TEST_CASE("[world-geometry] face texture corners read only the two rotation bits") {
+    for (const auto& c : kMappingCases) {
+        const std::string context = describe(c);
+        CAPTURE(context);
+        const auto wide = static_cast<Rotation>(static_cast<u8>(c.rotation) + 4);
+        CHECK(label_string(scene::face_texture_corners(c.face, wide, c.flip)) == c.expected);
+    }
+}
+
+TEST_CASE("[world-geometry] unrotated texture axes follow the section 3 proposal") {
+    // u = direction A -> B, v = direction A -> D (docs/specs/world-geometry.md, section 3 table).
+    struct Axes {
+        BlockFace face;
+        const char* name;
+        Position3f u, v;
+    };
+    constexpr std::array<Axes, 5> kAxes{{
+        {BlockFace::lid, "lid", {1, 0, 0}, {0, 1, 0}},
+        {BlockFace::left, "left", {0, 1, 0}, {0, 0, -1}},
+        {BlockFace::right, "right", {0, -1, 0}, {0, 0, -1}},
+        {BlockFace::top, "top", {-1, 0, 0}, {0, 0, -1}},
+        {BlockFace::bottom, "bottom", {1, 0, 0}, {0, 0, -1}},
+    }};
+    for (const auto& axes : kAxes) {
+        CAPTURE(axes.name);
+        const auto g = scene::block_face_geometry(axes.face, {3, 5, 2});
+        const auto labels = scene::face_texture_corners(axes.face, Rotation::R0, false);
+        std::array<Position3f, 4> at{}; // positions of A, B, C, D
+        for (std::size_t i = 0; i < 4; ++i) {
+            at[static_cast<std::size_t>(labels[i])] = g.positions[i];
+        }
+        CHECK(at[1] - at[0] == axes.u);
+        CHECK(at[3] - at[0] == axes.v);
+        CHECK(at[2] == at[0] + axes.u + axes.v);
+    }
+}
+
+TEST_CASE("[world-geometry] lid texture corners match the current append_map_textured output") {
+    // SYNTHETIC map: one lid per lid combination, tile 1, in a row at y = 20, z = 3.
+    constexpr u16 kTile = 1;
+    constexpr int kY = 20;
+    constexpr int kZ = 3;
+    std::vector<MappingCase> lids;
+    std::copy_if(kMappingCases.begin(), kMappingCases.end(), std::back_inserter(lids),
+                 [](const MappingCase& c) { return c.face == BlockFace::lid; });
+    REQUIRE(lids.size() == 8);
+    assets::GmpWriter writer;
+    for (std::size_t i = 0; i < lids.size(); ++i) {
+        assets::BlockInfo block;
+        block.lid =
+            static_cast<u16>(kTile | (lids[i].flip ? 1u << 13 : 0u) | (static_cast<unsigned>(lids[i].rotation) << 14));
+        writer.set_block(10 + 2 * static_cast<int>(i), kY, kZ, block);
+    }
+    auto map = assets::parse_gmp(writer.build_dmap());
+    REQUIRE(map);
+    scene::DrawList list;
+    scene::append_map_textured(list, map.value(), Rect{{0, 0}, {255, 255}}, kTile + 1);
+    REQUIRE(list.quads().size() == lids.size());
+
+    const scene::UvRect slot = scene::TileAtlas::slot_uv(kTile); // unflipped: u0 left, v0 top
+    // Documented quad transformation (quad.vert.glsl, draw_list.hpp): unit corner a in [-1/2, 1/2]^2
+    // is scaled by the size, rotated clockwise on screen (y down) by `rotation` about the centre and
+    // samples mix(uv0, uv1, a + 1/2).
+    constexpr std::array<std::array<float, 2>, 4> kUnitCorners{
+        {{-0.5f, -0.5f}, {0.5f, -0.5f}, {0.5f, 0.5f}, {-0.5f, 0.5f}}};
+    std::size_t checked = 0;
+    std::string report;
+    for (const auto& q : list.quads()) {
+        const auto index = static_cast<std::size_t>(std::lround((q.center_x - 10.5f) / 2.0f));
+        REQUIRE(index < lids.size());
+        const MappingCase& c = lids[index];
+        const std::string context = describe(c);
+        CAPTURE(context);
+        const int x = 10 + 2 * static_cast<int>(index);
+        CHECK(q.center_x == doctest::Approx(x + 0.5));
+        CHECK(q.center_y == doctest::Approx(kY + 0.5));
+        const auto g = scene::block_face_geometry(BlockFace::lid, {static_cast<float>(x), static_cast<float>(kY), kZ});
+
+        std::string drawn = "????"; // label found at each fixed geometric corner p0..p3
+        const float s = std::sin(q.rotation);
+        const float k = std::cos(q.rotation);
+        for (const auto& a : kUnitCorners) {
+            const float cx = a[0] * q.width;
+            const float cy = a[1] * q.height;
+            const float wx = q.center_x + cx * k - cy * s;
+            const float wy = q.center_y + cx * s + cy * k;
+            const float u = q.uv.u0 + (q.uv.u1 - q.uv.u0) * (a[0] + 0.5f);
+            const float v = q.uv.v0 + (q.uv.v1 - q.uv.v0) * (a[1] + 0.5f);
+            const bool left = std::abs(u - slot.u0) < std::abs(u - slot.u1);
+            const bool upper = std::abs(v - slot.v0) < std::abs(v - slot.v1);
+            const char label = upper ? (left ? 'A' : 'B') : (left ? 'D' : 'C');
+            bool found = false;
+            for (std::size_t p = 0; p < 4; ++p) {
+                if (std::abs(g.positions[p].x - wx) < 1e-3f && std::abs(g.positions[p].y - wy) < 1e-3f) {
+                    drawn[p] = label;
+                    found = true;
+                }
+            }
+            CHECK(found);
+        }
+        CAPTURE(drawn);
+        CHECK(is_permutation_of_abcd(drawn));
+        CHECK(drawn == c.expected);
+        CHECK(label_string(scene::face_texture_corners(BlockFace::lid, c.rotation, c.flip)) == drawn);
+        ++checked;
+        report += "\n  " + context + ": append_map_textured p0..p3 = " + drawn;
+    }
+    CHECK(checked == 8);
+    MESSAGE("existing-lid regression combinations checked: " << checked << report);
 }

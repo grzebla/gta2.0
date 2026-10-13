@@ -108,7 +108,8 @@ void append_map_textured(DrawList& list, const assets::GmpMap& map, const Rect& 
                 if (lid.flip) {
                     std::swap(q.uv.u0, q.uv.u1); // mirror horizontally in tile space, before rotation
                 }
-                // Hypothesis (docs/formats/sty.md): rotation codes turn the tile clockwise on screen.
+                // Hypothesis (docs/specs/world-geometry.md section 5): rotation codes turn the tile
+                // clockwise on screen.
                 q.rotation = static_cast<float>(static_cast<int>(lid.rotation)) * kQuarterTurn;
                 list.add(q);
             }
