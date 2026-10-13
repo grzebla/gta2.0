@@ -7,7 +7,7 @@ add_executable(gta20_unit_tests
     testing_tests.cpp
     gamedata_tests.cpp
     inventory_tests.cpp)
-target_link_libraries(gta20_unit_tests PRIVATE gta20::core gta20::assets gta20::sim gta20::scene gta20::testing gta20_synthetic_install doctest::doctest)
+target_link_libraries(gta20_unit_tests PRIVATE gta20::core gta20::assets gta20::sim gta20::scene gta20::testing synthetic_install_fixture doctest::doctest)
 target_compile_definitions(gta20_unit_tests PRIVATE GTA20_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 gta20_target_defaults(gta20_unit_tests)
 
