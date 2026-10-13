@@ -361,3 +361,29 @@ Dlaczego to: jest niezależne od nierozstrzygniętej projekcji i wysokości, prz
    EC2, na prośbę agenta (`gfx_requests`) i w limitach właściciela (sekcja 7); agenci nie
    uruchamiają AWS ani hosta. Otwarte: czy pierwszy przebieg (`m1-downtown-baseline`) dochodzi do
    świata, doprowadzenie pieszego do miejsc z trybu M samymi klawiszami i odczyt jego pozycji.
+
+## 9. Zadanie T0013 (składanie ścian w siatkę CPU) — kontrakt syntetyczny
+
+**Status: [I] + [A], kontrakt syntetyczny; nie jest dowodem zachowania oryginału.**
+`scene::WorldMesh` (`engine/scene/include/gta20/scene/world_mesh.hpp`,
+`engine/scene/src/world_mesh.cpp`) to indeksowana siatka trójkątów bez GPU: wierzchołek
+`WorldVertex` = pozycja (x, y, z) w jednostkach bloków + UV atlasu (v w dół atlasu), indeksy `u32`.
+
+* `WorldMesh::append_face(BlockFace, Position3f origin, FaceTile{tile, rotation, flip}, tile_count)`
+  dodaje **dokładnie jedną, wskazaną przez wywołującego** ścianę: cztery wierzchołki w kolejności
+  p0..p3 z `block_face_geometry` (sekcja 3, T0001), etykiety A–D z `face_texture_corners` (sekcja 5,
+  T0005) i prostokąt slotu z `TileAtlas::slot_uv` (wcięcie o pół teksela), oraz sześć indeksów
+  `{0, 1, 2, 0, 2, 3}` przesuniętych o liczbę wierzchołków sprzed wywołania.
+* Rysowalny jest tylko kafel `1 <= tile < tile_count` i `tile < 992` (`scene::is_drawable_tile`).
+  Odrzucane są: 0 (pusty), `>= tile_count` (brak w stylu), 992–1022 (zarezerwowane), 1023 (znacznik
+  mapy dla trzystronnych skosów — ten sam numer co biały slot atlasu `TileAtlas::kWhiteSlot`, ale
+  siatka nigdy nie odwołuje się do białego slotu), nieznana ściana i pozycje nieskończone/NaN. Błąd
+  wraca jako `Result` i nie zmienia siatki.
+* Siatka **nie** wybiera ścian z mapy, nie ustala wysokości pokryw względem poziomów GMP, orientacji
+  tekstur ścian (nadal [H], sekcja 5.3) ani widoczności ścian (sekcje 4 i 6). Nic jej jeszcze nie
+  rysuje; `DrawList` i `append_map_textured` są bez zmian.
+* Testy `WorldMesh:` w `tests/unit/scene_tests.cpp`: 40 kombinacji ściana × obrót × odbicie z
+  oczekiwaniami spisanymi ręcznie (narożniki, tabela etykiet z sekcji 5.4, współrzędne slotów — bez
+  wywoływania funkcji pomocniczych), kilka ścian w różnych miejscach (w tym 255,255,7) z kontrolą
+  indeksów, nawinięcia na zewnątrz, skończoności, zakresu UV i niezmienności wcześniejszej zawartości,
+  odrzucanie kafli oraz paczka 16 400 ścian (65 600 wierzchołków, indeksy > 65535).

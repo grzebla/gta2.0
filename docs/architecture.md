@@ -196,7 +196,10 @@ używa wyłącznie arytmetyki całkowitej. Wszelkie przyszłe użycie `float`/`d
   z Windows SDK).
 * Render offscreen z odczytem pikseli (`--offscreen WxH --screenshot`) — do testów bez okna.
 * CPU-owe pomocniki geometrii (`block_geometry.hpp`: pięć ścian bloku; `face_texture.hpp`:
-  narożniki tekstury A–D dla obrotu/odbicia) istnieją w `scene`, ale nic ich jeszcze nie rysuje.
+  narożniki tekstury A–D dla obrotu/odbicia; `world_mesh.hpp`: `WorldMesh`, indeksowana siatka
+  pozycja + UV atlasu z indeksami `u32`, do której dokłada się pojedyncze, jawnie wskazane ściany)
+  istnieją w `scene`, ale nic ich jeszcze nie rysuje. Kontrakt `WorldMesh` jest syntetyczny
+  ([specs/world-geometry.md](specs/world-geometry.md), sekcja 9): nie wybiera ścian z mapy.
 
 ### Propozycja: siatka świata i własność zasobów renderu
 
@@ -210,7 +213,7 @@ propozycja ustala tylko podział odpowiedzialności, nie zachowanie.
 |---|---|---|---|---|
 | Atlas kafli (piksele CPU) | `scene` (`TileAtlas`) | raz przy wczytaniu stylu | do zmiany stylu | bez zmian względem dziś |
 | Tekstura atlasu, sampler | `render` | `set_atlas` | do następnego `set_atlas` / destruktora | bez zmian |
-| Siatka świata CPU (proponowane `scene::WorldMesh`) | `scene` | z `GmpMap` + `tile_count` + `block_face_geometry` + `face_texture_corners`, w paczkach obszarów mapy | **do zmiany mapy, nie co klatkę** | wierzchołki: pozycja w jednostkach bloków (x, y, z), UV atlasu, kolor/odcień; indeksy `u32`; bez typów SDL; testy jednostkowe na mapach syntetycznych |
+| Siatka świata CPU (`scene::WorldMesh`: typ i składanie pojedynczych ścian istnieją, wybór ścian z mapy — propozycja) | `scene` | z `GmpMap` + `tile_count` + `block_face_geometry` + `face_texture_corners`, w paczkach obszarów mapy | **do zmiany mapy, nie co klatkę** | wierzchołki: pozycja w jednostkach bloków (x, y, z), UV atlasu, kolor/odcień; indeksy `u32`; bez typów SDL; testy jednostkowe na mapach syntetycznych |
 | Bufory GPU siatki (wierzchołki, indeksy) | `render` | jednorazowe przesłanie siatki z `scene` (uchwyt zwracany aplikacji) | do zwolnienia uchwytu / destruktora | `render` nie czyta `GmpMap` ani nie includuje `assets`; dostaje tylko dane `scene` |
 | Bufor głębi, pipeline świata | `render` | przy pierwszym rysowaniu danego celu / rozmiaru | jak pipeline'y dziś (keszowane) | konieczny, gdy pojawi się wysokość (sekcja 6.1 spec) |
 | Kamera świata (projekcja zależna od wysokości) | `scene` (bez SDL), obok `Camera2D` z `core` | aplikacja co klatkę | wartość | parametry `K`, `r`, `c` z pomiarów WG-ELEV / WG-PROJ |
