@@ -4,11 +4,13 @@
 #include "gta20/scene/block_geometry.hpp"
 #include "gta20/scene/draw_list.hpp"
 #include "gta20/scene/face_texture.hpp"
+#include "gta20/scene/world_mesh.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <iterator>
+#include <limits>
 #include <set>
 #include <string>
 #include <tuple>
@@ -488,4 +490,299 @@ TEST_CASE("[world-geometry] lid texture corners match the current append_map_tex
     }
     CHECK(checked == 8);
     MESSAGE("existing-lid regression combinations checked: " << checked << report);
+}
+
+// World mesh assembly. SYNTHETIC expectations: corner positions are the literal unit-block corners of
+// the block_geometry.hpp contract, labels come from the hand-written kMappingCases table and atlas
+// rectangles are written out from the 32 x 32 grid of 64-pixel slots with half-texel insets. None of
+// them calls block_face_geometry, face_texture_corners or TileAtlas::slot_uv. This is an assembly
+// contract only: it is not evidence of the original game's elevation, wall orientation or visibility.
+namespace {
+
+using scene::FaceTile;
+using scene::WorldMesh;
+using scene::WorldVertex;
+
+// p0..p3 of each face of the block at the origin, indexed by BlockFace (block_geometry.hpp).
+constexpr std::array<std::array<Position3f, 4>, 5> kExpectedCorners{{
+    {{{0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}}}, // lid
+    {{{0, 1, 0}, {0, 0, 0}, {0, 0, 1}, {0, 1, 1}}}, // left
+    {{{1, 0, 0}, {1, 1, 0}, {1, 1, 1}, {1, 0, 1}}}, // right
+    {{{0, 0, 0}, {1, 0, 0}, {1, 0, 1}, {0, 0, 1}}}, // top
+    {{{1, 1, 0}, {0, 1, 0}, {0, 1, 1}, {1, 1, 1}}}, // bottom
+}};
+
+constexpr std::array<u32, 6> kQuadPattern{0, 1, 2, 0, 2, 3};
+constexpr u16 kStyleTiles = 992; // a full style: tiles 0-991
+
+struct ExpectedSlot {
+    float u0, v0, u1, v1;
+};
+
+// Slot rectangle of `tile` in the 2048 x 2048 atlas, half a texel inside the 64 x 64 slot. All values
+// are exact in float (multiples of 1/4096), so they can be compared with ==.
+ExpectedSlot expected_slot(u16 tile) {
+    const auto col = static_cast<float>(tile % 32);
+    const auto row = static_cast<float>(tile / 32);
+    return {(64.0f * col + 0.5f) / 2048.0f, (64.0f * row + 0.5f) / 2048.0f, (64.0f * col + 63.5f) / 2048.0f,
+            (64.0f * row + 63.5f) / 2048.0f};
+}
+
+// Atlas UV of image corner `label` ('A'..'D', v down the image).
+std::array<float, 2> expected_uv(u16 tile, char label) {
+    const ExpectedSlot s = expected_slot(tile);
+    switch (label) {
+    case 'A': return {s.u0, s.v0};
+    case 'B': return {s.u1, s.v0};
+    case 'C': return {s.u1, s.v1};
+    default: return {s.u0, s.v1};
+    }
+}
+
+Position3f outward_normal(BlockFace face) {
+    for (const auto& spec : kFaces) {
+        if (spec.face == face) {
+            return spec.normal;
+        }
+    }
+    return {};
+}
+
+bool finite(const WorldVertex& v) {
+    return std::isfinite(v.position.x) && std::isfinite(v.position.y) && std::isfinite(v.position.z) &&
+           std::isfinite(v.u) && std::isfinite(v.v);
+}
+
+// Checks the face appended last: positions, rebased indices, outward winding, finite values and UVs
+// inside the tile's slot. `base` is the vertex count before the append.
+void check_appended_face(const WorldMesh& mesh, std::size_t base, BlockFace face, Position3f origin, u16 tile) {
+    REQUIRE(mesh.vertices().size() == base + 4);
+    REQUIRE(mesh.indices().size() == base / 4 * 6 + 6);
+    const auto& corners = kExpectedCorners[static_cast<std::size_t>(face)];
+    const ExpectedSlot slot = expected_slot(tile);
+    for (std::size_t i = 0; i < 4; ++i) {
+        const WorldVertex& v = mesh.vertices()[base + i];
+        CHECK(v.position == origin + corners[i]);
+        CHECK(finite(v));
+        CHECK(v.u >= slot.u0);
+        CHECK(v.u <= slot.u1);
+        CHECK(v.v >= slot.v0);
+        CHECK(v.v <= slot.v1);
+        CHECK(v.u > 0.0f);
+        CHECK(v.u < 1.0f);
+        CHECK(v.v > 0.0f);
+        CHECK(v.v < 1.0f);
+    }
+    const std::size_t first = mesh.indices().size() - 6;
+    for (std::size_t k = 0; k < 6; ++k) {
+        CHECK(mesh.indices()[first + k] == static_cast<u32>(base) + kQuadPattern[k]);
+        CHECK(mesh.indices()[first + k] < mesh.vertices().size());
+    }
+    for (std::size_t t = 0; t < 2; ++t) {
+        const Position3f p0 = mesh.vertices()[mesh.indices()[first + 3 * t]].position;
+        const Position3f p1 = mesh.vertices()[mesh.indices()[first + 3 * t + 1]].position;
+        const Position3f p2 = mesh.vertices()[mesh.indices()[first + 3 * t + 2]].position;
+        CHECK(cross(p1 - p0, p2 - p0) == outward_normal(face)); // outward, half a unit square
+    }
+}
+
+} // namespace
+
+TEST_CASE("WorldMesh: all 40 face/rotation/flip combinations give the expected corners and atlas UVs") {
+    constexpr std::array<Position3f, 2> kCaseOrigins{{{3, 5, 2}, {255, 255, 7}}};
+    std::set<std::tuple<int, int, bool>> seen;
+    WorldMesh mesh;
+    for (std::size_t n = 0; n < kMappingCases.size(); ++n) {
+        const MappingCase& c = kMappingCases[n];
+        const std::string context = describe(c);
+        CAPTURE(context);
+        const auto tile = static_cast<u16>(1 + 25 * n); // 1 .. 976: many atlas rows and columns
+        const Position3f origin = kCaseOrigins[n % kCaseOrigins.size()];
+        CAPTURE(tile);
+        const std::size_t base = mesh.vertices().size();
+        REQUIRE(mesh.append_face(c.face, origin, FaceTile{tile, c.rotation, c.flip}, kStyleTiles).ok());
+        check_appended_face(mesh, base, c.face, origin, tile);
+        for (std::size_t i = 0; i < 4; ++i) {
+            CAPTURE(i);
+            const auto uv = expected_uv(tile, c.expected[i]);
+            CHECK(mesh.vertices()[base + i].u == uv[0]);
+            CHECK(mesh.vertices()[base + i].v == uv[1]);
+        }
+        seen.emplace(static_cast<int>(c.face), static_cast<int>(c.rotation), c.flip);
+    }
+    CHECK(seen.size() == 40);
+    CHECK(mesh.vertices().size() == 160);
+    CHECK(mesh.indices().size() == 240);
+}
+
+TEST_CASE("WorldMesh: faces at different origins are rebased and leave earlier contents unchanged") {
+    struct Append {
+        BlockFace face;
+        Position3f origin;
+        FaceTile texture;
+    };
+    const std::array<Append, 7> appends{{
+        {BlockFace::lid, {0, 0, 0}, {1, Rotation::R0, false}},
+        {BlockFace::left, {255, 255, 7}, {991, Rotation::R90, true}},
+        {BlockFace::right, {12, 40, 3}, {32, Rotation::R180, false}},
+        {BlockFace::top, {255, 0, 7}, {63, Rotation::R270, true}},
+        {BlockFace::bottom, {0, 255, 0}, {500, Rotation::R0, true}},
+        {BlockFace::lid, {255, 255, 7}, {2, Rotation::R90, false}},
+        {BlockFace::lid, {12, 40, 3}, {2, Rotation::R90, false}}, // same face and texture, other origin
+    }};
+    WorldMesh mesh;
+    for (std::size_t n = 0; n < appends.size(); ++n) {
+        const Append& a = appends[n];
+        CAPTURE(n);
+        const std::vector<WorldVertex> vertices_before = mesh.vertices();
+        const std::vector<u32> indices_before = mesh.indices();
+        REQUIRE(mesh.append_face(a.face, a.origin, a.texture, kStyleTiles).ok());
+        check_appended_face(mesh, vertices_before.size(), a.face, a.origin, a.texture.tile);
+        CHECK(std::equal(vertices_before.begin(), vertices_before.end(), mesh.vertices().begin()));
+        CHECK(std::equal(indices_before.begin(), indices_before.end(), mesh.indices().begin()));
+    }
+    REQUIRE(mesh.vertices().size() == 4 * appends.size());
+    REQUIRE(mesh.indices().size() == 6 * appends.size());
+    // Every index of the finished mesh is in bounds and each face uses only its own four vertices.
+    for (std::size_t i = 0; i < mesh.indices().size(); ++i) {
+        CHECK(mesh.indices()[i] < mesh.vertices().size());
+        CHECK(mesh.indices()[i] / 4 == i / 6);
+    }
+    // The two lids with the same tile and transform have the same UVs and translated corners.
+    for (std::size_t i = 0; i < 4; ++i) {
+        const WorldVertex& high = mesh.vertices()[20 + i];
+        const WorldVertex& mid = mesh.vertices()[24 + i];
+        CHECK(high.u == mid.u);
+        CHECK(high.v == mid.v);
+        CHECK(high.position - mid.position == Position3f{243, 215, 4});
+    }
+    CHECK(mesh.vertices()[20].position == Position3f{255, 255, 8}); // lid of 255,255,7 at z + 1
+
+    mesh.clear();
+    CHECK(mesh.vertices().empty());
+    CHECK(mesh.indices().empty());
+    REQUIRE(mesh.append_face(BlockFace::top, {7, 7, 1}, {3, Rotation::R0, false}, kStyleTiles).ok());
+    check_appended_face(mesh, 0, BlockFace::top, {7, 7, 1}, 3);
+}
+
+TEST_CASE("WorldMesh: blank, missing and reserved tiles are rejected without modifying the mesh") {
+    WorldMesh mesh;
+    REQUIRE(mesh.append_face(BlockFace::lid, {1, 2, 3}, {5, Rotation::R90, true}, kStyleTiles).ok());
+    const std::vector<WorldVertex> vertices = mesh.vertices();
+    const std::vector<u32> indices = mesh.indices();
+
+    struct Rejected {
+        const char* why;
+        u16 tile;
+        u16 tile_count;
+    };
+    constexpr std::array<Rejected, 12> kRejected{{
+        {"blank", 0, kStyleTiles},
+        {"blank, empty style", 0, 0},
+        {"missing, empty style", 1, 0},
+        {"missing, tile == tile_count", 40, 40},
+        {"missing, tile > tile_count", 41, 40},
+        {"first reserved", 992, kStyleTiles},
+        {"reserved although tile_count covers it", 992, 1023},
+        {"reserved", 1000, 1024},
+        {"last reserved", 1022, 1024},
+        {"map marker 1023", 1023, 1024},
+        {"atlas white slot", scene::TileAtlas::kWhiteSlot, kStyleTiles},
+        {"outside the 10-bit range", 1024, 65535},
+    }};
+    for (const auto& r : kRejected) {
+        CAPTURE(r.why);
+        CAPTURE(r.tile);
+        CAPTURE(r.tile_count);
+        CHECK_FALSE(scene::is_drawable_tile(r.tile, r.tile_count));
+        for (const auto& spec : kFaces) {
+            CAPTURE(spec.name);
+            for (const bool flip : {false, true}) {
+                const auto result =
+                    mesh.append_face(spec.face, {9, 9, 1}, {r.tile, Rotation::R180, flip}, r.tile_count);
+                REQUIRE_FALSE(result.ok());
+                CHECK_FALSE(result.error().message.empty());
+                CHECK(mesh.vertices() == vertices);
+                CHECK(mesh.indices() == indices);
+            }
+        }
+    }
+
+    // An unknown face and non-finite corners are rejected the same way.
+    const float inf = std::numeric_limits<float>::infinity();
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    CHECK_FALSE(mesh.append_face(static_cast<BlockFace>(5), {0, 0, 0}, {1, Rotation::R0, false}, kStyleTiles).ok());
+    CHECK_FALSE(mesh.append_face(BlockFace::lid, {nan, 0, 0}, {1, Rotation::R0, false}, kStyleTiles).ok());
+    CHECK_FALSE(mesh.append_face(BlockFace::left, {0, inf, 0}, {1, Rotation::R0, false}, kStyleTiles).ok());
+    CHECK_FALSE(mesh.append_face(BlockFace::top, {0, 0, -inf}, {1, Rotation::R0, false}, kStyleTiles).ok());
+    CHECK(mesh.vertices() == vertices);
+    CHECK(mesh.indices() == indices);
+
+    // Drawable boundaries are accepted.
+    struct Accepted {
+        u16 tile;
+        u16 tile_count;
+    };
+    constexpr std::array<Accepted, 4> kAccepted{{{1, 2}, {39, 40}, {991, kStyleTiles}, {991, 1024}}};
+    for (const auto& a : kAccepted) {
+        CAPTURE(a.tile);
+        CAPTURE(a.tile_count);
+        CHECK(scene::is_drawable_tile(a.tile, a.tile_count));
+        const std::size_t base = mesh.vertices().size();
+        REQUIRE(mesh.append_face(BlockFace::right, {4, 4, 4}, {a.tile, Rotation::R0, false}, a.tile_count).ok());
+        check_appended_face(mesh, base, BlockFace::right, {4, 4, 4}, a.tile);
+    }
+}
+
+TEST_CASE("WorldMesh: a batch of more than 65535 vertices keeps full u32 indices") {
+    constexpr std::size_t kFacesInBatch = 16400; // 65600 vertices
+    WorldMesh mesh;
+    const auto origin_of = [](std::size_t f) {
+        return Position3f{static_cast<float>(f % 256), static_cast<float>((f / 256) % 256), static_cast<float>(f % 8)};
+    };
+    const auto face_of = [](std::size_t f) { return static_cast<BlockFace>(f % 5); };
+    const auto tile_of = [](std::size_t f) { return static_cast<u16>(1 + f % 991); };
+    for (std::size_t f = 0; f < kFacesInBatch; ++f) {
+        const auto result = mesh.append_face(face_of(f), origin_of(f), {tile_of(f), Rotation::R0, false}, kStyleTiles);
+        REQUIRE(result.ok());
+    }
+    REQUIRE(mesh.vertices().size() == 4 * kFacesInBatch);
+    REQUIRE(mesh.indices().size() == 6 * kFacesInBatch);
+    CHECK(mesh.vertices().size() > 65535);
+
+    std::size_t wrong_index = 0;
+    std::size_t wrong_position = 0;
+    std::size_t non_finite = 0;
+    u32 largest = 0;
+    for (std::size_t f = 0; f < kFacesInBatch; ++f) {
+        for (std::size_t k = 0; k < 6; ++k) {
+            const u32 index = mesh.indices()[6 * f + k];
+            largest = std::max(largest, index);
+            if (index != static_cast<u32>(4 * f) + kQuadPattern[k] || index >= mesh.vertices().size()) {
+                ++wrong_index;
+            }
+        }
+        const auto& corners = kExpectedCorners[f % 5];
+        for (std::size_t i = 0; i < 4; ++i) {
+            const WorldVertex& v = mesh.vertices()[4 * f + i];
+            if (!(v.position == origin_of(f) + corners[i])) {
+                ++wrong_position;
+            }
+            if (!finite(v)) {
+                ++non_finite;
+            }
+        }
+    }
+    CHECK(wrong_index == 0);
+    CHECK(wrong_position == 0);
+    CHECK(non_finite == 0);
+    CHECK(largest == 4 * kFacesInBatch - 1);
+    // Face 16384 is the first whose indices do not fit in 16 bits.
+    CHECK(mesh.indices()[6 * 16384] == 65536u);
+    CHECK(mesh.indices()[6 * 16384 + 2] == 65538u);
+    // Appending to the large mesh still rebases and keeps the earlier contents.
+    const WorldVertex last = mesh.vertices().back();
+    REQUIRE(mesh.append_face(BlockFace::lid, {255, 255, 7}, {991, Rotation::R270, true}, kStyleTiles).ok());
+    check_appended_face(mesh, 4 * kFacesInBatch, BlockFace::lid, {255, 255, 7}, 991);
+    CHECK(mesh.vertices()[4 * kFacesInBatch - 1] == last);
 }

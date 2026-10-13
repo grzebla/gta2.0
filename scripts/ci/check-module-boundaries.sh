@@ -3,7 +3,8 @@
 #
 # Every engine module (engine/<name>) and app (apps/<name>) is a unit with an allow-list of gta20
 # modules it may depend on. SDL, GPU API headers, nlohmann/json and OS headers/libraries have their
-# own allow-lists. A module or app directory without rules is an error.
+# own allow-lists. A module or app directory without rules is an error. Test-only gta20 helper
+# libraries (TEST_HELPERS, defined under tests/) may be linked by test targets but by no unit.
 #
 # Sources: every #include/#import in a unit's C/C++/Objective-C files whose path contains
 # gta20/<module>/ is an edge of the unit that holds the file.
@@ -60,6 +61,9 @@ allowed_modules() {
     *) return 1 ;;
   esac
 }
+# Test-only gta20 helper libraries (defined under tests/): test targets may link them, units may not.
+# Keep in sync with docs/architecture.md.
+TEST_HELPERS="synthetic_install"
 may_use_sdl() { [[ $1 == engine/render || $1 == engine/platform || $1 == apps/gta2 ]]; }
 may_use_gpu_api() { [[ $1 == engine/render ]]; }
 may_use_json() { [[ $1 == engine/testing ]]; }
@@ -338,7 +342,13 @@ check_atom() { # owner kind label atom item file line target
       name="${name#gta20_}"
       [[ $kind == link ]] && link_edges=$((link_edges + 1))
       # shellcheck disable=SC2086
-      if ! contains "$name" $MODULES; then
+      if contains "$name" $TEST_HELPERS; then
+        if [[ $owner == "?" ]]; then
+          violation "$file" "$line" "$target -> $atom ($label): cannot attribute a variable target; only test targets may use test helpers"
+        elif is_unit "$owner"; then
+          violation "$file" "$line" "$owner -> $atom ($label): test helper target; only test targets may use it"
+        fi
+      elif ! contains "$name" $MODULES; then
         violation "$file" "$line" "${owner:-$target} -> $atom ($label): unknown gta20 target"
       elif [[ $owner == "?" ]]; then
         violation "$file" "$line" "$target -> $name ($label): cannot attribute a variable target to a module; name the module target"
