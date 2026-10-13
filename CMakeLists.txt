@@ -42,6 +42,7 @@ endif()
 
 if(GTA20_BUILD_TESTS)
     enable_testing()
+    add_subdirectory(tests/inventory)
     add_subdirectory(tests/unit)
     add_subdirectory(tests/conformance)
     add_subdirectory(tests/gfx)

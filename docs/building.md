@@ -69,8 +69,12 @@ identyczne mapy i style. Aby użyć instalacji:
 
 ```bash
 export GTA20_GAME_DIR=/ścieżka/do/GTA2
-./build/release/bin/gta2 --level data/wil.gmp     # wil/ste/bil; styl .sty dobierany automatycznie
+./build/release/bin/gta2 --level data/wil.gmp     # każda z 17 map; styl wg docs/formats/map-styles.md
 ./build/release/bin/gta2 --level data/ste.gmp --camera 100,60 --zoom 12   # Tab = kamera swobodna
+cmake --build --preset release --target gamedata-strict   # ścisła bramka: kod ≠ 0 bez kompletnych danych
 ctest --preset release                             # włącza testy [gamedata] i gamedata.render.*
 GTA20_GAME_DIR_105=~/Games/GTA2-10.5 ctest ...        # dodatkowo porównanie danych 9.6 i 10.5
 ```
+
+Testy `[gamedata]` w CTest są opcjonalne (bez danych przechodzą jako pominięte). Obowiązkową
+weryfikację danych daje tylko ścisła bramka — [testing.md](testing.md#ścisła-inwentaryzacja-map-gamedata-strict).

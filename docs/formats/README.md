@@ -12,7 +12,7 @@
 | `*.scr` | skrypty misji | brak |
 | `*.gxt` | teksty (`GBL`) | brak |
 | `*.sdt` + `*.raw` | dźwięki | brak |
-| `*.mmp` | opis poziomu (mapa, styl, skrypt) | brak |
+| `*.mmp`, `test1.seq` | opis poziomu (mapa, styl, skrypt) | tylko pary mapa → styl, sprawdzane przez `gamedata-strict` — [map-styles.md](map-styles.md) |
 | `*.bik` | filmy Bink | poza zakresem (kodek zastrzeżony) |
 
 Kontener chunków (`engine/assets/chunk_file.*`) obsługuje każdy plik o układzie:
