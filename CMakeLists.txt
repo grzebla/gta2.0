@@ -23,9 +23,9 @@ include(CompilerOptions)
 include(Dependencies)
 include(EmbedBinary)
 
-# Module graph (no cycles):
+# Module graph (no cycles; enforced by scripts/ci/check-module-boundaries.sh, see docs/architecture.md):
 #   core <- assets <- sim <- testing
-#   core <- scene(render-independent draw lists) <- render(SDL_GPU) <- app
+#   core <- assets <- scene(render-independent draw lists) <- render(SDL_GPU) <- app
 #   core <- platform(SDL3) <- app
 add_subdirectory(engine/core)
 add_subdirectory(engine/assets)
@@ -46,4 +46,5 @@ if(GTA20_BUILD_TESTS)
     add_subdirectory(tests/unit)
     add_subdirectory(tests/conformance)
     add_subdirectory(tests/gfx)
+    add_subdirectory(tests/scripts)
 endif()

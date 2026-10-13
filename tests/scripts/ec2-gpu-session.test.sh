@@ -175,25 +175,38 @@ workspace_self_test() {
   local src="$SELFTEST_DIR/source" missing="$SELFTEST_DIR/source-missing-input"
   local inj="$SELFTEST_DIR/injection-base" rel code failed_ws unmarked out
   # Tripwire: any aws call during the self-test is recorded and fails it.
-  mkdir -p "$SELFTEST_DIR/bin" &&
-    printf '#!/usr/bin/env bash\necho "$*" >> "%s/aws-invoked"\nexit 97\n' "$SELFTEST_DIR" > "$SELFTEST_DIR/bin/aws" &&
-    chmod +x "$SELFTEST_DIR/bin/aws" || setup_failed "aws tripwire"
+  if ! {
+    mkdir -p "$SELFTEST_DIR/bin" &&
+      printf '#!/usr/bin/env bash\necho "$*" >> "%s/aws-invoked"\nexit 97\n' "$SELFTEST_DIR" > "$SELFTEST_DIR/bin/aws" &&
+      chmod +x "$SELFTEST_DIR/bin/aws"
+  }; then
+    setup_failed "aws tripwire"
+  fi
   export PATH="$SELFTEST_DIR/bin:$PATH"
 
   # SYNTHETIC source checkout: placeholder inputs (never executed) plus pre-existing results.
   for rel in "${FIXTURE_INPUTS[@]}"; do
-    mkdir -p "$src/$(dirname "$rel")" &&
-      printf '#!/usr/bin/env bash\n# SYNTHETIC self-test fixture for %s; never executed.\nexit 99\n' "$rel" > "$src/$rel" ||
+    if ! {
+      mkdir -p "$src/$(dirname "$rel")" &&
+        printf '#!/usr/bin/env bash\n# SYNTHETIC self-test fixture for %s; never executed.\nexit 99\n' "$rel" > "$src/$rel"
+    }; then
       setup_failed "source fixture $rel"
+    fi
   done
-  mkdir -p "$src/gfx-results/local-existing" "$src/tmp-inside" "$inj" &&
-    printf 'SYNTHETIC sentinel %s\n\001\377\000 binary tail\n' "$RANDOM$RANDOM" > "$src/gfx-results/local-existing/sentinel" &&
-    cp -p "$src/gfx-results/local-existing/sentinel" "$SELFTEST_DIR/sentinel.ref" &&
-    cp -Rp "$src" "$missing" && rm -f -- "$missing/${FIXTURE_INPUTS[1]}" ||
+  if ! {
+    mkdir -p "$src/gfx-results/local-existing" "$src/tmp-inside" "$inj" &&
+      printf 'SYNTHETIC sentinel %s\n\001\377\000 binary tail\n' "$RANDOM$RANDOM" > "$src/gfx-results/local-existing/sentinel" &&
+      cp -p "$src/gfx-results/local-existing/sentinel" "$SELFTEST_DIR/sentinel.ref" &&
+      cp -Rp "$src" "$missing" && rm -f -- "$missing/${FIXTURE_INPUTS[1]}"
+  }; then
     setup_failed "sentinel / injection fixtures"
-  ln -s "$src" "$SELFTEST_DIR/source-alias" && ln -s "$src/tmp-inside" "$SELFTEST_DIR/source-inner-alias" &&
-    ln -s "$ROOT" "$SELFTEST_DIR/checkout-alias" && ln -s "$inj" "$SELFTEST_DIR/allowed-alias" ||
+  fi
+  if ! {
+    ln -s "$src" "$SELFTEST_DIR/source-alias" && ln -s "$src/tmp-inside" "$SELFTEST_DIR/source-inner-alias" &&
+      ln -s "$ROOT" "$SELFTEST_DIR/checkout-alias" && ln -s "$inj" "$SELFTEST_DIR/allowed-alias"
+  }; then
     setup_failed "symlink aliases"
+  fi
   SRC_LISTING="$(tree_listing "$src")" || setup_failed "source listing"
 
   WS1="$(workspace_create "$src")" || setup_failed "first workspace"
@@ -207,8 +220,9 @@ workspace_self_test() {
   assert "workspace holds only the required inputs (no gfx-results)" only_inputs "$WS1"
   assert "cleanup refuses the source fixture" not workspace_cleanup "$src"
   assert "cleanup refuses another temp directory" not workspace_cleanup "$SELFTEST_DIR"
-  unmarked="$(mktemp -d "$TEST_TMP_BASE/${WORKSPACE_PREFIX}XXXXXX")" && [[ -d "$unmarked" ]] ||
+  if ! { unmarked="$(mktemp -d "$TEST_TMP_BASE/${WORKSPACE_PREFIX}XXXXXX")" && [[ -d "$unmarked" ]]; }; then
     setup_failed "unmarked directory"
+  fi
   assert "cleanup refuses a workspace-named directory without its owner marker" not workspace_cleanup "$unmarked"
   assert "unmarked directory left in place" is_dir "$unmarked"
   assert "outputs refused for an unmarked workspace-named directory" not simulate_outputs "$unmarked"
@@ -251,17 +265,21 @@ workspace_self_test() {
   (TEST_TMP_BASE="$inj"; cp() { return 1; }; workspace_create "$src") > /dev/null 2>&1; code=$?
   assert "copy failure exits nonzero" differs "$code" 0
   assert "copy failure removes its partial workspace" empty_dir "$inj"
+  # shellcheck disable=SC2030 # the injected base is meant to stay local to this subshell
   (TEST_TMP_BASE="$inj"; workspace_enter "$missing" 2>/dev/null || exit 1; : > "$SELFTEST_DIR/wrote-after-enter"); code=$?
   assert "failed workspace setup stops the invocation" equals "$code" 1
   assert "no write after a failed workspace setup" removed "$SELFTEST_DIR/wrote-after-enter"
   assert "outputs refused for an empty workspace path" not simulate_outputs "" 2>/dev/null
+  # shellcheck disable=SC2031 # the real base, unchanged by the subshells above
   assert "outputs refused for a missing workspace" not simulate_outputs "$TEST_TMP_BASE/${WORKSPACE_PREFIX}absent" 2>/dev/null
   assert "outputs refused for the source tree" not simulate_outputs "$src" 2>/dev/null
   assert "injected failures left the source tree unchanged" source_unchanged
   assert "injected failures left nothing in the injection base" empty_dir "$inj"
   assert "injected failures created no workspace in the checkout" no_checkout_workspace
 
-  simulate_outputs "$WS1" && simulate_outputs "$WS2" || setup_failed "workspace outputs"
+  if ! { simulate_outputs "$WS1" && simulate_outputs "$WS2"; }; then
+    setup_failed "workspace outputs"
+  fi
   workspace_cleanup "$WS1"; code=$?
   assert "normal cleanup succeeds" equals "$code" 0
   assert "normal cleanup removes its workspace" removed "$WS1"

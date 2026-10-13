@@ -12,7 +12,8 @@
 | Benchmark CPU/pamięci | `gta20-headless bench` | CI (Release) → podsumowanie zadania | nic |
 | Czas klatki | `gta2 --frames N` | lokalnie | okno/GPU |
 | Render bez okna | `gta2 --offscreen WxH --screenshot f.bmp` | CI (lavapipe, próbne) / lokalnie | Vulkan/Metal/D3D12 |
-| Infrastruktura gfx-compat | `tests/gfx/windows/tests` (Pester), `tests/scripts` (Bash) | `infra-lint` | nic (atrapa `aws`) |
+| Infrastruktura gfx-compat | `tests/gfx/windows/tests` (Pester), `tests/scripts/ec2-gpu-session.test.sh` (Bash) | `infra-lint` | nic (atrapa `aws`) |
+| Granice modułów | `scripts/ci/check-module-boundaries.sh`, `tests/scripts/check-module-boundaries.test.sh` (syntetyczne drzewa) | CTest `scripts.module-boundaries*` (poza Windows), CI `native-ci` | bash |
 | Scenariusze zrzutów oryginału (offline) | `tests/gfx/scenarios/*.json`, `cmake/ValidateGfxScenario.cmake` | CTest `gfx.scenario.*`, `gfx.scenario-check.*` | nic (host nie jest wywoływany) |
 
 Sanitizery: preset `asan` (ASan + UBSan, `-fno-sanitize-recover`) w CI na Linux i macOS.

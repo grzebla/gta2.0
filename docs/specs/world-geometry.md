@@ -6,6 +6,10 @@ założeń o zachowaniu oryginalnego GTA 2. Zakres: bloki **bez skosów** (`slop
 pokryw, animacje kafli i kolizje są poza zakresem (wymienione tylko tam, gdzie dotykają tabeli
 decyzji). Stan na rewizji `cb06317` (gałąź `agent/t0002`), 2026-10-12.
 
+Aktualizacja 2026-10-13 (T0008): zadanie z sekcji 8 (T0005) jest zakończone; poprawiony przykład
+przemianowania poziomów w sekcji 6.2 (zachowuje `r − ℓ`); sekcje 1, 7 i 8 opisują referencje z
+oryginału według obecnej polityki właściciela (przechwytywanie wyłącznie przez orkiestrator).
+
 ## 0. Statusy
 
 Każde stwierdzenie o zachowaniu ma lokalizację źródła i jeden z czterech statusów
@@ -18,7 +22,7 @@ Każde stwierdzenie o zachowaniu ma lokalizację źródła i jeden z czterech st
 | **[O]** | pomiar na oryginalnej grze | Zrzut lub ślad `provenance: originalGta2` z uruchomionego oryginału. **W przejrzanych materiałach nie znaleziono żadnego** (sekcja 1). |
 | **[H]** | hipoteza | Wszystko inne, także propozycje konwencji w tym dokumencie. |
 
-Dwa dodatkowe oznaczenia, które **nie** są dowodem zachowania oryginału:
+Trzy dodatkowe oznaczenia, które **nie** są dowodem zachowania oryginału:
 
 * **[W]** — historyczna obserwacja wizualna: ktoś obejrzał zrzut **naszego silnika** i ocenił
   go „na oko”. Nie jest to porównanie z oryginałem ani test automatyczny.
@@ -41,8 +45,8 @@ Dwa dodatkowe oznaczenia, które **nie** są dowodem zachowania oryginału:
 | CMAP | `tests/unit/gamedata_tests.cpp:121-139` | [A] | tylko `wil.gmp` i `mike1m.gmp`: oba chunki się dekodują, a DMAP ma **więcej unikalnych bloków** niż CMAP. Test **nie** porównuje komórek; „inna, starsza wersja miasta” i „inne pokrywy” (`gmp.md:17`, `:27`) to [D]. |
 | Układ kolumn DMAP 100 % | `docs/formats/gmp.md:16`, `:23` | [D] | parser przechodzi na 17 mapach (`gamedata_tests.cpp:77-90`), ale przyleganie kolumn nie jest asercją. |
 | Orientacja pokryw, obrót, odbicie | `docs/formats/gmp.md:31-32`, `docs/reports/2026-10-12-original-assets.md` (sekcja 6–7) | [W] | zrzuty **naszego** silnika (lokalnie `~/Games/GTA2-work/review/*.png`, opisane w lokalnym `REPORT.md`): pasy ciągłe, napisy „SLOW” nieodbite. To nie są zrzuty oryginału ani porównanie automatyczne. |
-| Zrzuty/ślady oryginału | repozytorium (`docs/`, `tests/`), `~/Games/GTA2-work/REPORT.md` i nazwy plików graficznych w `~/Games/GTA2-work/` (`review/`, `Disk1/`) | — | **W przejrzanych materiałach nie znaleziono żadnej referencji z oryginału.** Pliki w `review/` to według `REPORT.md` zrzuty naszego silnika i podglądy atlasu (`render-*`, `wil-*`, `tiles-*`); `Disk1/setup.bmp` to grafika instalatora. Nie przeglądano innych miejsc na dysku, więc to stwierdzenie nie wyklucza, że lokalne referencje istnieją gdzie indziej. |
-| Historyczna dokumentacja AWS | `docs/aws/integration.md:1-6`, `:32`; `docs/testing.md:69`; `docs/ci/gpu-testing.md:42` | — | Opisuje przechwytywanie na EC2 i prywatny bucket. **Dla tego procesu jest nieaktualna**: obecna polityka zabrania agentom poleceń AWS, więc referencje powstają lokalnie (sekcja 7). To, że na AWS nic nie wdrożono (`integration.md:11-18`), nie dowodzi braku referencji lokalnych. |
+| Zrzuty/ślady oryginału | repozytorium (`docs/`, `tests/`), `~/Games/GTA2-work/REPORT.md` i nazwy plików graficznych w `~/Games/GTA2-work/` (`review/`, `Disk1/`) | — | **W przejrzanych materiałach nie znaleziono żadnej referencji z oryginału.** Pliki w `review/` to według `REPORT.md` zrzuty naszego silnika i podglądy atlasu (`render-*`, `wil-*`, `tiles-*`); `Disk1/setup.bmp` to grafika instalatora. Nie przeglądano innych miejsc na dysku, więc to stwierdzenie nie wyklucza, że lokalne referencje istnieją gdzie indziej. Stan 2026-10-13: jest pierwszy scenariusz przechwycenia `tests/gfx/scenarios/m1-downtown-baseline.json` (T0009), ale orkiestrator nie wykonał jeszcze żadnego przebiegu — nadal brak [O]. |
+| Dokumentacja AWS i hosta EC2 | `docs/aws/integration.md`, `docs/testing.md` („Dane referencyjne z oryginału”), `docs/ci/gpu-testing.md` | — | Opisuje host EC2 z oryginalnym GTA 2 i prywatny bucket artefaktów. Według obecnej polityki właściciela agenci **nie** uruchamiają poleceń AWS ani hosta; przebiegi na hoście zleca się wyłącznie przez orkiestrator (sekcja 7). Opisy ręcznej obsługi hosta w tych plikach nie są ścieżką dla agentów. |
 | GTA2_RE | `docs/mechanics-matrix.md:17`, `:19` | — | tylko nazwy funkcji jako wskazówka, gdzie szukać (`DrawGradientSlope_4F6630`, `DrawDiagonalWall_4F02D0`, `Draw_4F6A20`, `Camera.cpp`). W tej sesji GTA2_RE nie był czytany (brak lokalnej kopii); nic tutaj nie pochodzi z jego kodu. |
 
 ## 2. Układ współrzędnych
@@ -216,9 +220,11 @@ a więc obraz — nie jest niezmiennikiem.) Przekształcenie (b) zmienia `h / w`
 przy tym modelu do odtworzenia obrazu nie jest potrzebna. Rozstrzygnęłaby ją tylko niezależna
 kalibracja: wielkość znana jednocześnie w jednostkach poziomych i pionowych świata (np. wewnętrzne
 współrzędne obiektu odczytane ze śladu oryginału). W przejrzanych materiałach takiego źródła nie
-ma, więc `h / w` zostaje otwarte. Podobnie przesunięcie indeksu poziomu (`ℓ` → `ℓ + 1`) jest
-nieodróżnialne od `r` → `r − 1`: zrzuty wyznaczają `r` względem przyjętego oznaczenia poziomów
-pokryw, a nie „bezwzględną” wysokość świata pokrywy poziomu GMP z.
+ma, więc `h / w` zostaje otwarte. Podobnie przemianowanie wszystkich poziomów o stałą
+(`ℓ` → `ℓ + 1`) **razem z** `r` → `r + 1` zachowuje różnicę `r − ℓ` każdej pokrywy, a więc każdy
+piksel: model zależy od `ℓ` i `r` tylko przez `r − ℓ`. (Para `ℓ` → `ℓ + 1` z `r` → `r − 1` zmienia
+`r − ℓ` o 2 i **nie** jest niezmiennikiem.) Zrzuty wyznaczają więc `r` tylko względem przyjętego
+oznaczenia poziomów pokryw, a nie „bezwzględną” wysokość świata pokrywy poziomu GMP z.
 
 Pomiary niezależne (każdy wymaga zrzutu oryginału, [O]):
 
@@ -245,13 +251,32 @@ Nieobserwowalne ze zrzutów i bez źródła: indeks poziomu GMP, na którym „s
 
 ## 7. Przyszłe scenariusze porównawcze
 
-**Referencje i ich przechowywanie.** Referencja = zrzut **oryginału uruchomionego lokalnie**
-(`provenance: originalGta2`, `docs/testing.md:26`). Zrzuty i surowe nagrania leżą **poza
-repozytorium**, w lokalnym katalogu roboczym (np. `~/Games/GTA2-work/reference/<scenariusz>/`),
-nigdy w repo, w artefaktach CI ani w chmurze. Do repo trafiają tylko: opis scenariusza, współrzędne
-mapy, numery kafli i słowa ścian, warunki kamery oraz wyciągnięte liczby (piksele etykietowanych
-punktów, `K`, `r`, `c`). Opis EC2 i prywatnego bucketu w `docs/aws/` i `docs/testing.md:69` jest
-dla tego procesu nieaktualny (sekcja 1). **Żaden scenariusz nie ma dziś dowodu [O].**
+**Referencje i ich przechowywanie (polityka właściciela, stan 2026-10-13).** Referencja = zrzut
+**oryginalnego GTA 2** (`provenance: originalGta2`, [testing.md](../testing.md)) wykonany przez
+**orkiestrator** na hoście testowym EC2 (GTA 2 9.6 + DDrawCompat, NVIDIA T4, Windows Server 2022).
+Przebiegi przechwycenia wykonuje wyłącznie orkiestrator:
+
+1. Agent opisuje przebieg scenariuszem `tests/gfx/scenarios/<id>.json` (tylko pola przyjmowane
+   przez hosta: `id`, `wrapper`, `screen`, `durationSeconds`, `screenshotsAtSeconds`, `inputs`) i
+   dokumentem `<id>.md`, który oznacza go jako referencyjne przechwycenie oryginału. Scenariusz
+   musi przejść walidację offline (`cmake/ValidateGfxScenario.cmake`, CTest `gfx.scenario.<id>`) i
+   być zacommitowany na gałęzi zadania.
+2. Agent **prosi** o przebieg tylko polem `gfx_requests` w raporcie (`mode: capture`,
+   `target: <id>`, uzasadnienie). Agenci nie uruchamiają poleceń AWS, nie włączają ani nie
+   zatrzymują hosta i nie mają dostępu do bucketu.
+3. Orkiestrator sprawdza prośbę, egzekwuje limity właściciela (czas przebiegu, liczba przebiegów
+   na dobę, miesięczny budżet; prośby ponad limit są kolejkowane albo odrzucane) i wykonuje
+   przebieg. Werdykt i lokalne ścieżki wyników wracają do agenta w kolejnych poleceniach.
+4. Zrzuty zostają w **lokalnym katalogu wyników orkiestratora**, poza repozytorium — nigdy w repo,
+   w artefaktach CI ani w miejscach publicznych. Prywatny bucket artefaktów właściciela obsługuje
+   wyłącznie orkiestrator.
+
+Do repo trafiają tylko: opis scenariusza, współrzędne mapy, numery kafli i słowa ścian, warunki
+kamery oraz wyciągnięte liczby (piksele etykietowanych punktów, `K`, `r`, `c`). Wejścia scenariusza
+to wyłącznie naciśnięcia klawiszy w czasie, więc ustawienie pieszego w zadanym miejscu (tryb M
+poniżej) wymaga sekwencji klawiszy, a nie teleportu. Pierwszy scenariusz to przebieg odkrywczy
+[m1-downtown-baseline](../../tests/gfx/scenarios/m1-downtown-baseline.md) (T0009), jeszcze nie
+wykonany. **Żaden scenariusz nie ma dziś dowodu [O].**
 
 **Odtwarzalność — dwa tryby ustawienia, ta sama scena w obu środowiskach:**
 
@@ -267,7 +292,8 @@ dla tego procesu nieaktualny (sekcja 1). **Żaden scenariusz nie ma dziś dowodu
 * **Tryb S (ta sama mapa syntetyczna w obu):** mapa z `GmpWriter` (`gmp_writer.hpp:11-27`),
   `provenance: synthetic`, id `synthetic-*`, wczytana **także przez oryginał**. Czy oryginał wczyta
   własną mapę (np. przez plik `.mmp` trybu wieloosobowego), jest [H] i niesprawdzone; do tego czasu
-  tryb S jest tylko zapasowy.
+  tryb S jest tylko zapasowy. Scenariusz hosta (pola w pkt 1 wyżej) nie pozwala dziś dostarczyć
+  własnej mapy, więc przez orkiestrator tryb S jest niewykonalny bez zmiany hosta przez właściciela.
 
 **Porównania między różnymi scenami** (np. gdy referencja i nasz render nie dają się ustawić
 identycznie). Bez warunków dodatkowych porównywalne są tylko wielkości dyskretne: reguła
@@ -287,17 +313,27 @@ na podstawie jego własnych pokryw. Surowe piksele — tylko w tej samej scenie 
 
 | Nazwa | Ustawienie (tryb) | Obserwowany wynik | Pochodzenie referencji | Dowód dziś |
 |---|---|---|---|---|
-| **WG-ELEV** — wysokość pokryw | M (S zapasowo): co najmniej trzy **osobne** kolumny z górnymi pokrywami na różnych poziomach GMP plus pokrywa gruntu, z odstępami, tak by żadna górna pokrywa nie była zasłonięta przez wyższego sąsiada i każda mieściła się w kadrze; pieszy stoi w spoczynku | długość boku każdej górnej pokrywy w pikselach → `r`, `K` (sekcja 6.2, pkt 1) i sprawdzenie modelu trzecim poziomem | `originalGta2`, lokalny zrzut | brak [O]; kontrakt T0001 [I]/[A] tylko matematyczny |
-| **WG-PROJ** — parametry rzutu | M: kadr jak WG-ELEV, z pionowymi narożnikami budynków w co najmniej trzech ćwiartkach; dwa zrzuty w spoczynku | `c`, izotropia, stabilność (pkt 2–4, 6); sprawdzenia spójności krawędzi ścian | `originalGta2`, lokalny | brak |
-| **WG-WALL-SEL** — wybór ścian | M: bloki o różnych kaflach na `left`/`right`/`top`/`bottom`, położone w czterech ćwiartkach względem `c`; dodatkowo blok, którego jedną ścianę zasłania sąsiad | **tylko widoczne piksele**: które kafle ścian są widoczne w każdej ćwiartce. Czy zasłonięta ściana jest wysyłana do rysowania — nieobserwowalne bez osobnego śladu wywołań (brak źródła) | `originalGta2`, lokalny | brak |
-| **WG-WALL-BITS** — flagi kolizji a widoczność | M: miejsca (zapytanie do danych) ze ścianą boczną o zwykłym kaflu przy `wall` = 0, `wall` = 1, `bullet_wall` = 1, z kaflem 0 i flagami, oraz słowo 0, każda zwrócona ku otwartej komórce; S, jeśli któraś kombinacja nie występuje | widoczne piksele każdej z tych ścian; przechodzenie pieszego to osobny test kolizji | `originalGta2`, lokalny | brak; występowanie kombinacji w miastach niezmierzone |
-| **WG-FLAT** — flagi `flat` | M: ściany boczne i pokrywy z `flat` = 1 (zapytanie do danych), najlepiej z kaflem o przezroczystych pikselach; S, jeśli brak | położenie, przezroczystość, widoczność z obu stron | znaczenie z dokumentu [F] (do przepisania do `gmp.md`) + `originalGta2`, lokalny | brak; dokument niedostępny w tej sesji |
-| **WG-ROT-LID** — obrót pokrywy | M: pokrywy z asymetrycznym kaflem (np. napis) w kodach R0–R270 bez odbicia; ten sam blok renderowany przez oba środowiska | dla każdej pokrywy: który narożnik obrazka kafla (A–D) jest w którym narożniku na ekranie (tabela 5.1) | `originalGta2`, lokalny | tylko [W] (nasz render Downtown), brak [O] |
-| **WG-FLIP-ORDER** — kolejność odbicia | jak WG-ROT-LID, z odbiciem: flip + R0 … flip + R270 | jw.; rozróżnia „odbicie przed/po obrocie”, kierunek obrotu i oś odbicia (sekcja 5.2) | `originalGta2`, lokalny | brak |
-| **WG-ROT-WALL** — obrót/odbicie ścian | M (S zapasowo): ściany boczne z asymetrycznym kaflem, 8 kombinacji na każdą z czterech stron, widoczne według WG-WALL-SEL | etykiety A–D w narożnikach widocznej ściany; czy `left`/`right` są lustrzane (sekcja 3) | `originalGta2`, lokalny (po WG-WALL-SEL i WG-PROJ) | brak |
-| **WG-RESERVED** — kafle spoza stylu | M na mapie `mike1*` (rekordy z kaflami 992–1022 według [D]) oraz pokrywy 1023 bez skosu; S dla kafli ≥ `tile_count` | co widać w miejscu tych ścian/pokryw (nic, animacja, inny kafel) | `originalGta2`, lokalny | brak |
+| **WG-ELEV** — wysokość pokryw | M (S zapasowo): co najmniej trzy **osobne** kolumny z górnymi pokrywami na różnych poziomach GMP plus pokrywa gruntu, z odstępami, tak by żadna górna pokrywa nie była zasłonięta przez wyższego sąsiada i każda mieściła się w kadrze; pieszy stoi w spoczynku | długość boku każdej górnej pokrywy w pikselach → `r`, `K` (sekcja 6.2, pkt 1) i sprawdzenie modelu trzecim poziomem | `originalGta2`, zrzut przez orkiestrator (EC2) | brak [O]; kontrakt T0001 [I]/[A] tylko matematyczny |
+| **WG-PROJ** — parametry rzutu | M: kadr jak WG-ELEV, z pionowymi narożnikami budynków w co najmniej trzech ćwiartkach; dwa zrzuty w spoczynku | `c`, izotropia, stabilność (pkt 2–4, 6); sprawdzenia spójności krawędzi ścian | `originalGta2`, orkiestrator (EC2) | brak |
+| **WG-WALL-SEL** — wybór ścian | M: bloki o różnych kaflach na `left`/`right`/`top`/`bottom`, położone w czterech ćwiartkach względem `c`; dodatkowo blok, którego jedną ścianę zasłania sąsiad | **tylko widoczne piksele**: które kafle ścian są widoczne w każdej ćwiartce. Czy zasłonięta ściana jest wysyłana do rysowania — nieobserwowalne bez osobnego śladu wywołań (brak źródła) | `originalGta2`, orkiestrator (EC2) | brak |
+| **WG-WALL-BITS** — flagi kolizji a widoczność | M: miejsca (zapytanie do danych) ze ścianą boczną o zwykłym kaflu przy `wall` = 0, `wall` = 1, `bullet_wall` = 1, z kaflem 0 i flagami, oraz słowo 0, każda zwrócona ku otwartej komórce; S, jeśli któraś kombinacja nie występuje | widoczne piksele każdej z tych ścian; przechodzenie pieszego to osobny test kolizji | `originalGta2`, orkiestrator (EC2) | brak; występowanie kombinacji w miastach niezmierzone |
+| **WG-FLAT** — flagi `flat` | M: ściany boczne i pokrywy z `flat` = 1 (zapytanie do danych), najlepiej z kaflem o przezroczystych pikselach; S, jeśli brak | położenie, przezroczystość, widoczność z obu stron | znaczenie z dokumentu [F] (do przepisania do `gmp.md`) + `originalGta2`, orkiestrator (EC2) | brak; dokument niedostępny w tej sesji |
+| **WG-ROT-LID** — obrót pokrywy | M: pokrywy z asymetrycznym kaflem (np. napis) w kodach R0–R270 bez odbicia; ten sam blok renderowany przez oba środowiska | dla każdej pokrywy: który narożnik obrazka kafla (A–D) jest w którym narożniku na ekranie (tabela 5.1) | `originalGta2`, orkiestrator (EC2) | tylko [W] (nasz render Downtown), brak [O] |
+| **WG-FLIP-ORDER** — kolejność odbicia | jak WG-ROT-LID, z odbiciem: flip + R0 … flip + R270 | jw.; rozróżnia „odbicie przed/po obrocie”, kierunek obrotu i oś odbicia (sekcja 5.2) | `originalGta2`, orkiestrator (EC2) | brak |
+| **WG-ROT-WALL** — obrót/odbicie ścian | M (S zapasowo): ściany boczne z asymetrycznym kaflem, 8 kombinacji na każdą z czterech stron, widoczne według WG-WALL-SEL | etykiety A–D w narożnikach widocznej ściany; czy `left`/`right` są lustrzane (sekcja 3) | `originalGta2`, orkiestrator (EC2) (po WG-WALL-SEL i WG-PROJ) | brak |
+| **WG-RESERVED** — kafle spoza stylu | M na mapie `mike1*` (rekordy z kaflami 992–1022 według [D]) oraz pokrywy 1023 bez skosu; S dla kafli ≥ `tile_count` | co widać w miejscu tych ścian/pokryw (nic, animacja, inny kafel) | `originalGta2`, orkiestrator (EC2) | brak |
 
-## 8. Rekomendacja na następne zadanie (1–2 h)
+## 8. Zadanie T0005 (mapowanie tekstury ścian) — zakończone
+
+**Status: zakończone.** T0005 zatwierdzone 2026-10-13, commit `e41b6ae`:
+`scene::face_texture_corners(BlockFace, assets::Rotation, bool flip)` w
+`engine/scene/include/gta20/scene/face_texture.hpp` (`engine/scene/src/face_texture.cpp`), test
+syntetyczny `[world-geometry]` w `tests/unit/scene_tests.cpp` z 40 przypadkami z sekcji 5.4 i 8
+regresjami względem obecnego rysowania pokryw. Zachowanie w czasie działania bez zmian; nic jeszcze
+nie rysuje z tą funkcją. Status merytoryczny bez zmian: dla pokrywy [I] (regresja obecnego silnika),
+dla ścian [H]; to nie jest dowód zgodności z oryginałem.
+
+Pierwotna rekomendacja (zachowana jako opis zakresu T0005):
 
 **Zadanie:** dodać w `engine/scene` czysto CPU-ową funkcję mapowania tekstury ściany, np.
 `face_texture_corners(BlockFace, Rotation, bool flip) → std::array<TexCorner, 4>` (etykieta A–D
@@ -310,7 +346,7 @@ Bez zmian w rendererze, kamerze, shaderach i zachowaniu w czasie działania.
 Dlaczego to: jest niezależne od nierozstrzygniętej projekcji i wysokości, przygotowuje dane do
 ścian i od razu ustala nazwy/etykiety, którymi posłużą się testy WG-ROT-*.
 
-**Nierozstrzygnięte zależności** (żadna nie blokuje tego zadania, wszystkie blokują renderowanie ścian):
+**Nierozstrzygnięte zależności** (żadna nie blokowała T0005, wszystkie nadal blokują renderowanie ścian):
 
 1. Kierunek obrotu, oś i kolejność odbicia w oryginale (WG-ROT-LID, WG-FLIP-ORDER) — może zmienić
    oczekiwania dla pokrywy, a więc i obecny render.
@@ -319,10 +355,9 @@ Dlaczego to: jest niezależne od nierozstrzygniętej projekcji i wysokości, prz
    pokrywy poziomu GMP z zostają otwarte (sekcja 6.2); renderer nie powinien od nich zależeć.
 4. Widoczność ścian a bity `wall`/`bullet_wall`/`flat`, kafel 0 z flagami — WG-WALL-BITS, WG-FLAT;
    najpierw przepisać do `gmp.md` znaczenie `flat` z dokumentu DMA (niedostępnego w tej sesji).
-5. Lokalne uruchomienie oryginału. `gta2.exe` to program Windows (PE;
+5. Uruchomienie oryginału. `gta2.exe` to program Windows (PE;
    `docs/reports/2026-10-12-original-assets.md`, sekcja 1) z własnymi DLL-ami renderera (sekcja 4
-   raportu), a ten komputer to macOS arm64. Potrzebne jest środowisko Windows, którym właściciel
-   już dysponuje (np. zainstalowana tu aplikacja UTM albo osobny komputer z Windows); czy renderer
-   oryginału w nim działa, nie sprawdzono. Do tego: sposób robienia zrzutów, doprowadzenie pieszego
-   do miejsc z trybu M i odczyt jego pozycji. Żadna płatna infrastruktura nie jest tu proponowana;
-   przechwytywanie robi właściciel albo zadanie, które dostanie takie środowisko.
+   raportu). Według obecnej polityki właściciela oryginał uruchamia **tylko orkiestrator** na hoście
+   EC2, na prośbę agenta (`gfx_requests`) i w limitach właściciela (sekcja 7); agenci nie
+   uruchamiają AWS ani hosta. Otwarte: czy pierwszy przebieg (`m1-downtown-baseline`) dochodzi do
+   świata, doprowadzenie pieszego do miejsc z trybu M samymi klawiszami i odczyt jego pozycji.
