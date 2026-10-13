@@ -222,7 +222,8 @@ $B doctor            # narzędzia, logowanie, repo, dane gry, zasilanie (tylko o
 $B doctor --live     # + minimalne prawdziwe wywołania Astry i Claude + test uprawnień/sandboxa
 $B dry-run           # następny krok, polecenia i prompt — bez wywołań agentów
 $B start --foreground --max-steps 4   # pierwszy krok na pierwszym planie
-$B status | logs [-f] | logs --events | tasks [T0001] | memory [PROJECT] | report
+$B status [--all] [--plain] [--json]  # panel: stan, tabela zadań, limity (kolory na TTY, NO_COLOR wyłącza)
+$B logs [-f] | logs --events | tasks [T0001] | memory [PROJECT] | report
 $B pause | resume | stop [--now] [--unload]
 $B restart [--now] [--timeout S]      # zastosuj zmiany konfiguracji / zainstalowanego kodu
 $B unblock T0003 --note "..."         # decyzja właściciela dla BLOCKED/NEEDS_HUMAN
@@ -233,6 +234,11 @@ $B gfx status | request <mode> <target> | cancel --id N | run   # przebiegi na h
 $B simulate [all|happy|quota_known_reset|...]   # pętla na atrapach w tymczasowym repo
 $B service install | status | uninstall
 ```
+
+`status` pokazuje zadania w toku, zablokowane (z powodem), gotowe (z zależnościami, na które
+czekają) i trzy ostatnie zakończone (`--all`: wszystkie), a pod tabelą paski limitów: dzienne
+uruchomienia agentów, okna subskrypcji Astry, Claude i Gatekeepera oraz przebiegi i budżet EC2.
+`--plain` daje dawny format liniowy.
 
 Raport bez czytania logów: `.orchestrator/report.md` i `.orchestrator/report.html` (odświeżane
 po każdym kroku).
