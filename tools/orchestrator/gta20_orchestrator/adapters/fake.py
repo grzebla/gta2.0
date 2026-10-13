@@ -66,6 +66,8 @@ class FakeClaude:
                 if should_stop():
                     raise AgentInterrupted("stopped", session_id=session_id)
                 time.sleep(0.05)
+        if kind == "sync":
+            return self._sync(cwd, step, session_id)
         commits: List[str] = []
         if step.get("scenario"):
             sc = step["scenario"]
@@ -96,6 +98,24 @@ class FakeClaude:
             "tests": [{"command": "true", "passed": True, "summary": "simulated"}], "benchmarks": [],
             "unresolved": [], "questions_for_astra": [], "gfx_requests": step.get("gfx") or [],
         }
+        return AgentResult(session_id=session_id, model="fake-claude", output=report, text=json.dumps(report))
+
+    def _sync(self, cwd: Path, step: Dict[str, Any], session_id: str) -> AgentResult:
+        """Resolve a conflicted merge: keep both sides (ours, then theirs) unless scripted otherwise."""
+        files = [f for f in _git(cwd, "diff", "--name-only", "--diff-filter=U").splitlines() if f]
+        do = step["do"]
+        for f in files:
+            if do == "leave_markers":
+                continue
+            ours = subprocess.run(["git", "show", ":2:" + f], cwd=cwd, capture_output=True, text=True).stdout
+            theirs = subprocess.run(["git", "show", ":3:" + f], cwd=cwd, capture_output=True, text=True).stdout
+            (cwd / f).write_text(ours + theirs)
+        if step.get("content"):
+            for f, text in step["content"].items():
+                (cwd / f).write_text(text)
+        status = "cannot_resolve" if do == "cannot" else "resolved"
+        report = {"status": status, "summary": "simulated sync %s" % do,
+                  "files": [{"file": f, "resolution": "both sides"} for f in files], "tests": []}
         return AgentResult(session_id=session_id, model="fake-claude", output=report, text=json.dumps(report))
 
     def _commit(self, cwd: Path, task_id: str, content: str) -> str:

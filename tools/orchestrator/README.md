@@ -73,12 +73,21 @@ Po każdym scaleniu sprawdza ponownie od razu, żeby przejść cały stos. Obsł
    - PR właściciela → komentarz w PR.
 
    Gdy CI trwa → czekanie.
-   **Synchronizacja z `main`.** Zanim Gatekeeper oceni PR agentów, sprawdza, czy `main` jest już
-   w gałęzi integracyjnej. Jeśli nie, Orchestrator scala `origin/main` (commit „Sync origin/main
-   into agents/integration (orchestrator)”), wypycha i czeka na CI nowego heada. Konflikt nie
-   staje się zadaniem dla agentów, bo nie mogą scalać. Scalenie jest przerywane, a właściciel
-   dostaje pytanie z listą plików i instrukcją: `pause` → `git merge origin/main` w worktree
-   integracyjnym → rozwiązanie → commit → push → `resume`.
+   **Synchronizacja z `main`.** Co `release.sync_every_s` (30 min, gdy nie trwa żadne zadanie)
+   oraz przed oceną PR agentów Orchestrator sprawdza, czy `main` jest już w gałęzi integracyjnej.
+   Jeśli nie, scala `origin/main` (commit „Sync origin/main into agents/integration
+   (orchestrator)”), wypycha i czeka na CI nowego heada. Częste, małe synchronizacje rzadziej
+   kończą się konfliktem. Gdy konflikt jednak wystąpi:
+   - scalenie jest powtarzane w osobnym worktree `sync`; worktree integracyjny pozostaje czysty;
+   - pliki w ścieżkach chronionych (należą do właściciela) dostają wersję z `main`;
+   - resztę rozwiązuje agent Claude (prompt `claude_sync`): zachowuje intencję obu stron, nie
+     commituje, a commit scalający tworzy Orchestrator;
+   - Orchestrator sprawdza, że nie zostały znaczniki konfliktu ani nierozwiązane pliki, a ręcznie
+     scalone pliki nie dotykają ścieżek chronionych. Potem uruchamia pełną weryfikację;
+   - przy porażce agent dostaje wynik i ma drugą próbę (`release.sync_resolve_attempts`);
+   - dopiero gdy i to zawiedzie, właściciel dostaje jedno pytanie (dla danego heada `main`) z
+     listą plików, powodem i instrukcją: `pause` → `git merge origin/main` w worktree
+     integracyjnym → rozwiązanie → commit → push → `resume`.
 3. **Review modelu.** Worktree `release` jest ustawiony na sprawdzanym commicie, z pełnym diffem
    względem `main`, wynikami CI, listą zadań i decyzjami Astry. Decyzje: `MERGE`,
    `REQUEST_CHANGES`, `HOLD`, `NEEDS_HUMAN`.
