@@ -34,7 +34,12 @@ flowchart LR
   - brak zmian w ścieżkach chronionych, plików gry i binarek;
   - brak plików > 5 MB i sekretów w dodanych liniach;
   - czy diff różni się od poprzedniej próby;
-  - build i testy (`cmake --preset debug`, build, `ctest`) z `GTA20_GAME_DIR`.
+  - build i testy (`cmake --preset debug`, build, `ctest`) z `GTA20_GAME_DIR`;
+  - te same kroki co `infra-lint`: shellcheck i offline'owe testy Bash (atrapa `aws`).
+
+  Narzędzia przypięte jak w CI (`.orchestrator/tools-venv`, także na PATH Claude): clang-format
+  23.1.3, shellcheck 0.10.0. Weryfikacja uruchamia kod agentów poza sandboxem, więc nie widzi
+  sesji AWS właściciela (`AWS_CONFIG_FILE=/dev/null`, zmienne `AWS_*` usunięte).
 - Astra nie może zatwierdzić commitu, który nie przeszedł weryfikacji — Orchestrator zamienia
   taką decyzję na `CHANGES_REQUESTED`.
 - Recenzja odbywa się w osobnym worktree `review`, w trybie detached na niezmiennym commicie.

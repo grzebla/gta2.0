@@ -42,8 +42,13 @@ jobs:
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           "$(go env GOPATH)/bin/actionlint" -color
 
-      - name: shellcheck
-        run: shellcheck -x -P SCRIPTDIR scripts/ci/*.sh scripts/aws/*.sh infra/aws/*.sh tests/scripts/*.sh
+      - name: shellcheck (pinned, same version as the orchestrator's verification)
+        run: |
+          python3 -m venv "$RUNNER_TEMP/shellcheck"
+          "$RUNNER_TEMP/shellcheck/bin/pip" install --quiet --only-binary=:all: shellcheck-py==0.10.0.1
+          export PATH="$RUNNER_TEMP/shellcheck/bin:$PATH"
+          shellcheck --version
+          shellcheck -x -P SCRIPTDIR scripts/ci/*.sh scripts/aws/*.sh infra/aws/*.sh tests/scripts/*.sh
 
       - name: Bash tests (session + operator scripts, fake aws)
         run: bash tests/scripts/ec2-gpu-session.test.sh
