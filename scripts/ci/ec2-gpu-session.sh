@@ -4,9 +4,10 @@
 # Usage: ec2-gpu-session.sh <resolve|start|upload|run|collect|stop>
 #
 # Required env: AWS_REGION, GFX_BUCKET, RUN_ID
-# Optional env: GFX_MODE (probe|compat|e2e, default compat), GFX_CASES (default all),
+# Optional env: GFX_MODE (probe|compat|e2e|capture, default compat), GFX_CASES (default all;
+#               for capture: one scenario id from tests/gfx/scenarios),
 #               MAX_MINUTES (default 45, capped at 60), GFX_INSTANCE_ID (set by `resolve`),
-#               RESULTS_DIR (default gfx-results)
+#               RESULTS_DIR (default gfx-results), GFX_SCENARIOS_DIR (default tests/gfx/scenarios)
 #
 # Every value that ends up inside the remote PowerShell command is validated
 # against a strict allow-list first.
@@ -26,7 +27,8 @@ PROJECT_TAG="${PROJECT_TAG:-GTA20}"
 
 [[ "$RUN_ID" =~ ^[A-Za-z0-9-]{1,64}$ ]] || die "invalid RUN_ID"
 [[ "$GFX_BUCKET" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || die "invalid GFX_BUCKET"
-[[ "$GFX_MODE" =~ ^(probe|compat|e2e)$ ]] || die "invalid GFX_MODE"
+[[ "$GFX_MODE" =~ ^(probe|compat|e2e|capture)$ ]] || die "invalid GFX_MODE"
+if [[ "$GFX_MODE" == capture ]]; then [[ "$GFX_CASES" =~ ^[a-z0-9-]{1,64}$ ]] || die "capture needs one scenario id in GFX_CASES"; fi
 [[ "$GFX_CASES" =~ ^(all|[a-z0-9-]+(,[a-z0-9-]+)*)$ ]] || die "invalid GFX_CASES"
 [[ "$MAX_MINUTES" =~ ^[0-9]{1,3}$ ]] || die "invalid MAX_MINUTES"
 (( MAX_MINUTES >= 10 && MAX_MINUTES <= 60 )) || die "MAX_MINUTES must be within 10..60"
@@ -92,6 +94,11 @@ cmd_upload() {
   local dest="s3://${GFX_BUCKET}/runs/${RUN_ID}/scripts/"
   aws s3 cp --region "$AWS_REGION" --recursive --only-show-errors "$REPO_ROOT/tests/gfx/windows/" "$dest"
   aws s3 cp --region "$AWS_REGION" --only-show-errors "$REPO_ROOT/tests/gfx/compat-matrix.json" "$dest"
+  # GFX_SCENARIOS_DIR: a directory of already validated scenarios (the orchestrator stages one).
+  local scenarios="${GFX_SCENARIOS_DIR:-$REPO_ROOT/tests/gfx/scenarios}"
+  if [[ -d "$scenarios" ]]; then
+    aws s3 cp --region "$AWS_REGION" --recursive --only-show-errors "$scenarios/" "${dest}scenarios/"
+  fi
   log "scripts uploaded to $dest"
 }
 

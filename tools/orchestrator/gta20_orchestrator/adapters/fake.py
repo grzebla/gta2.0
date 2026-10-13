@@ -67,6 +67,13 @@ class FakeClaude:
                     raise AgentInterrupted("stopped", session_id=session_id)
                 time.sleep(0.05)
         commits: List[str] = []
+        if step.get("scenario"):
+            sc = step["scenario"]
+            sp = cwd / "tests" / "gfx" / "scenarios" / ("%s.json" % sc.get("id", "x"))
+            sp.parent.mkdir(parents=True, exist_ok=True)
+            sp.write_text(json.dumps(sc))
+            _git(cwd, "add", "-A")
+            _git(cwd, "commit", "-q", "-m", "[%s] scenario" % task_id)
         if do in ("commit", "hang"):
             commits.append(self._commit(cwd, task_id, step.get("content", "work %s" % uuid.uuid4().hex[:8])))
         elif do == "same_change":
@@ -87,7 +94,7 @@ class FakeClaude:
             "task_id": task_id, "status": "completed", "summary": "simulated %s" % do,
             "changes": ["simulated"], "files_changed": ["sim/%s.txt" % task_id], "commits": commits,
             "tests": [{"command": "true", "passed": True, "summary": "simulated"}], "benchmarks": [],
-            "unresolved": [], "questions_for_astra": [],
+            "unresolved": [], "questions_for_astra": [], "gfx_requests": step.get("gfx") or [],
         }
         return AgentResult(session_id=session_id, model="fake-claude", output=report, text=json.dumps(report))
 
@@ -128,7 +135,8 @@ class FakeAstra:
         if kind in ("plan", "arch_review"):
             plan = self.plans.pop(0) if self.plans else {
                 "assessment": "nothing left", "milestone": None, "tasks": [], "cancel_tasks": [],
-                "memory_updates": empty_memory(), "needs_human": None, "release_candidate": False}
+                "memory_updates": empty_memory(), "needs_human": None, "release_candidate": False,
+                "gfx_requests": []}
             if plan == "quota":
                 raise QuotaExceeded("codex usage limit", reset_at=time.time() + 1, session_id=sid)
             return AgentResult(session_id=sid, model="fake-astra", output=plan)
@@ -144,6 +152,7 @@ class FakeAstra:
             "architecture_notes": None, "memory_updates": empty_memory(),
             "progress_entry": "simulated progress" if decision == "APPROVED" else None,
             "human_question": "simulated question" if decision == "NEEDS_HUMAN" else None,
+            "gfx_requests": [],
         }
         return AgentResult(session_id=sid, model="fake-astra", output=review)
 
@@ -170,8 +179,31 @@ def fake_plan(milestone_id: str, titles: List[str], depends: Optional[Dict[int, 
         "milestone": {"id": milestone_id, "title": "Simulated milestone", "goal": "simulate",
                       "acceptance_criteria": ["all simulated tasks done"], "status": "active"},
         "tasks": tasks, "cancel_tasks": [], "memory_updates": empty_memory(), "needs_human": None,
-        "release_candidate": False,
+        "release_candidate": False, "gfx_requests": [],
     }
+
+
+class FakeGfxRunner:
+    """Stands in for the EC2 operator script: no AWS, records what would have run."""
+
+    def __init__(self, session: bool = True, rc: int = 0, minutes: float = 20.0, overall: str = "PASS"):
+        self.session = session
+        self.rc = rc
+        self.minutes = minutes
+        self.overall = overall
+        self.calls: List[Dict[str, Any]] = []
+
+    def session_ok(self) -> Any:
+        return (True, "ok") if self.session else (False, "Your session has expired. Please run aws login")
+
+    def run(self, mode: str, target: str, minutes: int, scenarios_dir: Optional[Path], log: Path) -> Dict[str, Any]:
+        staged = sorted(p.name for p in scenarios_dir.iterdir()) if scenarios_dir else []
+        self.calls.append({"mode": mode, "target": target, "minutes": minutes, "staged": staged})
+        log.write_text("fake run\n")
+        case = "capture-%s" % target if mode == "capture" else "c1"
+        return {"rc": self.rc, "minutes": self.minutes, "result_dir": str(log.parent / "fake-results"),
+                "summary": {"overall": self.overall, "cases": [{"id": case, "verdict": self.overall}]},
+                "log_tail": "fake"}
 
 
 class FakeGatekeeper:

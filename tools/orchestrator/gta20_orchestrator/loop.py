@@ -49,7 +49,8 @@ class Halt(Exception):
 
 class Orchestrator:
     def __init__(self, cfg: Any, database: D.Database, astra: Any, claude: Any, *, use_github: bool = True,
-                 sleep: Callable[[float], None] = time.sleep, gatekeeper: Any = None, github_port: Any = None):
+                 sleep: Callable[[float], None] = time.sleep, gatekeeper: Any = None, github_port: Any = None,
+                 gfx_runner: Any = None):
         self.cfg = cfg
         self.db = database
         self.astra = astra
@@ -68,6 +69,10 @@ class Orchestrator:
         if gatekeeper is not None and github_port is not None and cfg["release"].get("enabled", True):
             from .release import Gatekeeper
             self.gatekeeper = Gatekeeper(self, gatekeeper, github_port)
+        self.gfx = None
+        if gfx_runner is not None and cfg["gfx"].get("enabled", True):
+            from .gfx import GfxJobs
+            self.gfx = GfxJobs(self, gfx_runner)
 
     # ------------------------------------------------------------------ control helpers
     def request_stop(self, *_: Any) -> None:
@@ -114,6 +119,8 @@ class Orchestrator:
                 self.db.event("run_abandoned", task_id=run["task_id"], agent=run["agent"],
                               session_id=run["session_id"], outcome="abandoned", detail={"run": run["id"]})
                 abandoned.append(run["id"])
+        if self.gfx:
+            self.gfx.recover()
         return abandoned
 
     # ------------------------------------------------------------------ quota
@@ -278,6 +285,15 @@ class Orchestrator:
                           outcome="committed", detail={"files": sorted(set(changed))})
         return sha
 
+    # ------------------------------------------------------------------ EC2 test host
+    def gfx_context(self, task_id: Optional[str] = None) -> str:
+        return self.gfx.context(task_id) if self.gfx else ""
+
+    def gfx_enqueue(self, out: Any, task_id: Optional[str], by: str, source: Path) -> List[str]:
+        if not self.gfx or not isinstance(out, dict) or not out.get("gfx_requests"):
+            return []
+        return self.gfx.enqueue(out["gfx_requests"], task_id, by, source)
+
     # ------------------------------------------------------------------ step
     def release_due(self) -> bool:
         if self.gatekeeper is None:
@@ -287,6 +303,10 @@ class Orchestrator:
 
     def step(self) -> str:
         self.daily_cap()
+        if self.gfx and not self.agent_should_stop():
+            msg = self.gfx.run_next()
+            if msg:
+                return "gfx: " + msg
         task = self.db.active_task()
         if task is None and self.release_due():
             called, msg = self.gatekeeper.step()
@@ -299,6 +319,10 @@ class Orchestrator:
             if every and done - last >= every:
                 return self.plan("arch_review")
             ready = self.db.ready_tasks()
+            if not ready and self.gfx and self.gfx.pending():
+                # Astra asked for an EC2 run before planning further: wait for it, do not re-plan.
+                until = self.gfx.next_possible()
+                raise Wait(until, "waiting for a queued EC2 test run (limits or `aws login`)")
             if not ready:
                 return self.plan("plan")
             task = self.start_task(ready[0])
@@ -338,7 +362,7 @@ class Orchestrator:
         prompt = prompts.astra_plan(
             kind=kind, memory=memory.context(self.wt_int), board=self.board(), decisions=self.decisions_text(),
             git_state=git_state, github_state=gh_state, quota_state=self.quota_text(), milestone=ms,
-            max_tasks=int(self.limits["max_tasks_per_plan"]))
+            max_tasks=int(self.limits["max_tasks_per_plan"]), gfx=self.gfx_context())
         try:
             res = self.call(self.astra, kind=kind, task_id=None, prompt=prompt, cwd=self.wt_review,
                             schema=schemas.ASTRA_PLAN)
@@ -346,6 +370,7 @@ class Orchestrator:
             self.count_failure(str(exc))
             return "plan failed: %s" % exc
         out = res.output or {}
+        gfx_msgs = self.gfx_enqueue(out, None, "astra", self.wt_review)
         added: List[str] = []
         with self.db.tx():
             m = out.get("milestone")
@@ -387,11 +412,13 @@ class Orchestrator:
             if out.get("needs_human"):
                 self.db.set_meta("human_question", out["needs_human"])
         body = "%s\n\nNew tasks: %s" % (out.get("assessment", ""), ", ".join(added) or "none")
+        if gfx_msgs:
+            body += "\n\nEC2 test runs: %s" % "; ".join(gfx_msgs)
         if out.get("needs_human"):
             body += "\n\nNeeds human: %s" % out["needs_human"]
         self.commit_memory(out.get("memory_updates"), "agent-memory: Astra %s" % kind,
                            [("decisions", "Astra %s" % kind, body)])
-        if not self.db.ready_tasks() and not self.db.active_task():
+        if not self.db.ready_tasks() and not self.db.active_task() and not (self.gfx and self.gfx.pending()):
             blocked = self.db.count_tasks(D.BLOCKED) + self.db.count_tasks(D.NEEDS_HUMAN)
             raise Halt("no runnable tasks after %s (%d blocked/needs-human)%s" % (
                 kind, blocked, "; Astra asks: " + out["needs_human"] if out.get("needs_human") else ""))
@@ -437,7 +464,8 @@ class Orchestrator:
                 task=dict(task), spec=spec, branch=task["branch"], base=task["base_commit"],
                 branch_state=self.branch_state(task),
                 feedback=task["feedback"] if task["status"] == D.CHANGES_REQUESTED else None,
-                game_dir_hint="available via the GTA20_GAME_DIR environment variable (read-only use)")
+                game_dir_hint="available via the GTA20_GAME_DIR environment variable (read-only use)",
+                gfx=self.gfx_context(tid))
         settings = build_settings(
             worktree=self.wt_dev, protected=self.cfg["protected_paths"],
             extra_write_dirs=[os.path.expanduser("~/.cache/uv"), os.path.expanduser("~/.cache/clang")],
@@ -466,6 +494,7 @@ class Orchestrator:
             self.count_failure(str(exc))
             return "implement %s failed: %s" % (tid, exc)
         head = gitops.rev(self.wt_dev)
+        self.gfx_enqueue(res.output, tid, "claude", self.wt_dev)
         with self.db.tx():
             self.db.update_task(tid, status=D.VERIFYING, head_commit=head, report=dumps(res.output),
                                 claude_session=res.session_id or session, agent_failures=0)
@@ -530,7 +559,8 @@ class Orchestrator:
             diff=truncate(gitops.diff_text(self.wt_review, base, head), 60000),
             log=gitops.log_oneline(self.wt_review, base, head), history=self.decisions_text(5, tid),
             attempts=int(task["attempts"]), max_attempts=int(self.limits["max_attempts_per_task"]),
-            memory=memory.context(self.wt_int, log_entries=3, max_chars=6000), commit=head)
+            memory=memory.context(self.wt_int, log_entries=3, max_chars=6000), commit=head,
+            gfx=self.gfx_context(tid))
         try:
             res = self.call(self.astra, kind="review", task_id=tid, prompt=prompt, cwd=self.wt_review,
                             schema=schemas.ASTRA_REVIEW)
@@ -538,6 +568,7 @@ class Orchestrator:
             self.count_failure(str(exc))
             return "review %s failed: %s" % (tid, exc)
         out = res.output or {}
+        self.gfx_enqueue(out, tid, "astra", self.wt_review)
         decision = out.get("decision")
         rationale = out.get("rationale", "")
         if decision == "APPROVED" and not (ver and ver["passed"]):

@@ -1,0 +1,16 @@
+{
+  "$comment": "Exploratory: walk the frontend from PLAY with ENTER/DOWN presses and capture each screen. The exact menu flow of 9.6 is learnt from these captures.",
+  "id": "frontend-walk",
+  "wrapper": "ddrawcompat",
+  "screen": { "start_mode": 1 },
+  "durationSeconds": 75,
+  "screenshotsAtSeconds": [12, 18, 24, 30, 36, 45, 60, 72],
+  "inputs": [
+    { "atSeconds": 14, "key": "ENTER", "holdMs": 80 },
+    { "atSeconds": 20, "key": "ENTER", "holdMs": 80 },
+    { "atSeconds": 26, "key": "ENTER", "holdMs": 80 },
+    { "atSeconds": 32, "key": "ENTER", "holdMs": 80 },
+    { "atSeconds": 40, "key": "UP", "holdMs": 1500 },
+    { "atSeconds": 50, "key": "LEFT", "holdMs": 800 }
+  ]
+}

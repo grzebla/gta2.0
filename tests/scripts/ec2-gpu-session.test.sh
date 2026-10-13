@@ -86,6 +86,11 @@ assert "no command sent for bad GFX_CASES" log_lacks "send-command"
 check "rejects MAX_MINUTES above 60" 1 env MAX_MINUTES=61 bash "$SCRIPT" run
 check "rejects MAX_MINUTES below 10" 1 env MAX_MINUTES=5 bash "$SCRIPT" run
 check "rejects unknown mode" 1 env GFX_MODE=deploy bash "$SCRIPT" run
+check "capture needs exactly one scenario id" 1 env GFX_MODE=capture GFX_CASES=a,b bash "$SCRIPT" resolve
+check "capture accepts one scenario id" 0 env GFX_MODE=capture GFX_CASES=frontend-walk bash "$SCRIPT" resolve
+mkdir -p "$WORK/staged"; echo '{}' > "$WORK/staged/frontend-walk.json"
+check "upload sends the staged scenario directory" 0 env GFX_MODE=capture GFX_CASES=frontend-walk GFX_SCENARIOS_DIR="$WORK/staged" bash "$SCRIPT" upload
+assert "staged scenarios go next to the host scripts" log_has "$WORK/staged/ s3://gta20-gfx-artifacts-433213574600/runs/123-1/scripts/scenarios/"
 check "rejects bad RUN_ID" 1 env RUN_ID='1;rm -rf /' bash "$SCRIPT" resolve
 check "rejects bad bucket" 1 env GFX_BUCKET='Bad_Bucket' bash "$SCRIPT" resolve
 check "rejects unknown subcommand" 1 run terminate

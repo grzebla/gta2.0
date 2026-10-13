@@ -74,6 +74,18 @@ DEFAULTS: Dict[str, Any] = {
         "skip_labels": ["do-not-merge", "hold", "wip"],
         "max_diff_chars": 80000,
     },
+    # Runs of the ORIGINAL GTA 2 on the EC2 G4dn test host, requested by agents (gfx_requests)
+    # and executed only by the orchestrator with the owner's AWS session. Owner-approved limits
+    # (2026-10-13): 45 min per run, 3 runs per day, 10 USD per month.
+    "gfx": {
+        "enabled": True,
+        "max_minutes_per_run": 45,
+        "max_runs_per_day": 3,
+        "monthly_budget_usd": 10.0,
+        "usd_per_hour": 0.76,          # g4dn.xlarge Windows on-demand, eu-north-1 (incl. EBS while on)
+        "max_pending": 3,
+        "results_root": "~/Games/GTA2-work/gfx-results",
+    },
     "limits": {
         "max_attempts_per_task": 3,
         "max_agent_failures_per_task": 3,
@@ -119,6 +131,9 @@ DEFAULTS: Dict[str, Any] = {
         "docs/agent-memory/",
         "infra/",
         "scripts/aws/",
+        "scripts/ci/ec2-gpu-session.sh",
+        "tests/gfx/windows/",
+        "tests/gfx/compat-matrix.json",
         ".github/workflows/gfx-",
         ".github/workflows/infra-lint.yml",
         "CLAUDE.md",

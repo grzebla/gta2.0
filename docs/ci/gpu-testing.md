@@ -204,3 +204,17 @@ Sprzątanie: `aws cloudformation delete-stack` dla obu stosów; bucket artefakt�
   dialogowe gry daje werdykt `FAIL_GAME_DIALOG` z treścią (wcześniej czarny ekran z oknem
   błędu potrafił dać fałszywy PASS).
 - Koszt dnia testów: ok. 3,5 h pracy instancji (ok. 2,6 USD) i ok. 5 USD/mies. za dysk.
+
+### Tryb `capture` i przebiegi zamawiane przez agentów (2026-10-13)
+
+- `capture` uruchamia jeden scenariusz z `tests/gfx/scenarios/<id>.json`: wrapper, ustawienia
+  ekranu, czas, momenty zrzutów i skryptowane klawisze. Klawisze idą przez `SendInput` jako
+  kody skanowania (DirectInput czyta kody skanowania, nie komunikaty okna) do okna gry; wynik
+  zapisuje `inputsSent`. Scenariusze są wyłącznie danymi: host nie wykonuje z nich kodu.
+- Przykłady: `frontend-menu` (menu bez wejścia), `frontend-walk` (ENTER i strzałki w menu).
+- Lokalnie: `CONFIRM=uruchom-ec2 scripts/aws/run-gfx-compat-local.sh capture frontend-walk 45`.
+- Agenci zamawiają przebiegi przez Orchestrator (`gfx_requests`); limity właściciela: 45 min na
+  przebieg, 3 przebiegi dziennie, 10 USD miesięcznie. Szczegóły:
+  `tools/orchestrator/README.md`, sekcja „Host testowy EC2”.
+- Wymaga ważnej sesji `aws login` na Macu z Orchestratorem; po jej wygaśnięciu przebiegi czekają,
+  a Orchestrator pyta właściciela.
