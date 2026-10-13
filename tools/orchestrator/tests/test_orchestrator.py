@@ -361,6 +361,25 @@ class GitHubExcerptTests(unittest.TestCase):
         self.assertNotIn("lint", out)
 
 
+class InterleavedTaskTests(SimCase):
+    def test_verify_checks_the_tasks_own_branch(self) -> None:
+        orch = self.env.orchestrator(FakeAstra(plans=[fake_plan("M1", ["walls"])]), FakeClaude())
+        orch.run(max_steps=2)  # plan, implement -> VERIFYING
+        t = self.env.db.task("T0001")
+        self.assertEqual(t["status"], "VERIFYING")
+        wt = self.env.cfg.worktree("dev")
+        # Another active task left the developer worktree on its own branch.
+        subprocess.run(["git", "switch", "-q", "-c", "agent/t0099"], cwd=wt, check=True)
+        (wt / "other.txt").write_text("another task\n")
+        subprocess.run(["git", "add", "-A"], cwd=wt, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "[T0099] other"], cwd=wt, check=True)
+        orch.step()
+        t = self.env.db.task("T0001")
+        own = subprocess.run(["git", "rev-parse", "agent/t0001"], cwd=wt, capture_output=True, text=True).stdout.strip()
+        self.assertEqual(t["head_commit"], own)
+        self.assertEqual(t["status"], "IN_REVIEW")
+
+
 class GatekeeperTests(SimCase):
     def setUp(self) -> None:
         super().setUp()
