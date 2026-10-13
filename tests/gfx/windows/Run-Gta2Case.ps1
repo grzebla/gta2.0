@@ -54,6 +54,9 @@ public delegate bool EnumProc(System.IntPtr hWnd, System.IntPtr lParam);
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(System.IntPtr hWnd, System.Text.StringBuilder s, int n);
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(System.IntPtr hWnd, System.Text.StringBuilder s, int n);
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+public struct IO_COUNTERS { public ulong ReadOperationCount; public ulong WriteOperationCount; public ulong OtherOperationCount; public ulong ReadTransferCount; public ulong WriteTransferCount; public ulong OtherTransferCount; }
+[DllImport("kernel32.dll")] public static extern bool GetProcessIoCounters(System.IntPtr hProcess, out IO_COUNTERS counters);
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
 public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 '@
 [Gta20.Native]::SetProcessDPIAware() | Out-Null
@@ -218,6 +221,18 @@ function Send-GameKey([string] $Key, [int] $HoldMs, [IntPtr] $Window, [string] $
     return $diag
 }
 
+# Bytes the game process has read so far. Entering a new menu screen or a map reads files
+# (frontend images, .gmp/.sty), so this shows progress even when screenshots cannot.
+function Get-ReadBytes($Process) {
+    try {
+        $c = New-Object Gta20.Native+IO_COUNTERS
+        if ([Gta20.Native]::GetProcessIoCounters($Process.Handle, [ref] $c)) { return [int64]$c.ReadTransferCount }
+    } catch {
+        return $null
+    }
+    return $null
+}
+
 # Visible dialog boxes (class #32770) owned by a process, with their static texts.
 # A game that stops at its own message box must not count as rendered.
 function Get-ProcessDialog([int] $ProcessId) {
@@ -290,6 +305,7 @@ try {
             $method = if ($inputMethod -eq 'cycle') { $script:InputMethods[$keyIndex % $script:InputMethods.Count] } else { $inputMethod }
             $keyIndex++
             $cpuBefore = $proc.TotalProcessorTime.TotalMilliseconds
+            $readBefore = Get-ReadBytes $proc
             $diag = Send-GameKey -Key $ev.key -HoldMs $ev.hold -Window $proc.MainWindowHandle -Method $method -GamePid $proc.Id
             # What the screen shows shortly after the key (evidence, not proof of consumption).
             Start-Sleep -Milliseconds 1500
@@ -304,6 +320,8 @@ try {
             $diag.afterFile = (Split-Path -Leaf $afterPng)
             $diag.afterChangedRatio = (Compare-FrameSample -Baseline $lastSample -Frame $after).ChangedRatio
             $diag.gameCpuMsDuring = [math]::Round($proc.TotalProcessorTime.TotalMilliseconds - $cpuBefore)
+            $readAfter = Get-ReadBytes $proc
+            $diag.gameReadBytesDuring = $(if ($null -ne $readBefore -and $null -ne $readAfter) { $readAfter - $readBefore } else { $null })
             $result.inputsSent += $diag
             $lastSample = $after
             continue
@@ -334,11 +352,24 @@ try {
             processAlive = -not $proc.HasExited
             foreground   = ([Gta20.Native]::GetForegroundWindow() -eq $proc.MainWindowHandle)
             windowCapture = $winInfo
+            gameReadBytes = (Get-ReadBytes $proc)
         }
     }
 
     $proc.Refresh()
     $result.alive = -not $proc.HasExited
+    if ($result.alive) {
+        # Which input/graphics libraries the game actually loaded (e.g. DINPUT.dll and its path).
+        # tasklist lists the modules of a 32-bit (WOW64) process; Process.Modules from this
+        # 64-bit host would only show the WOW64 layer.
+        try {
+            $csv = & tasklist.exe /m /fi "PID eq $($proc.Id)" /fo csv /nh 2>$null
+            $names = @((($csv | Select-Object -First 1) -split '","')[-1].Trim('"') -split ',\s*' | Where-Object { $_ })
+            $result.modules = @($names | Where-Object { $_ -match '^(dinput|dinput8|ddraw|d3d|dsound|dplay|winmm|xinput)' })
+        } catch {
+            $result.modulesError = $_.Exception.Message
+        }
+    }
     # @(if ...) - an if-expression would unroll an empty array to $null (defect D1).
     $result.dialogs = @(if ($result.alive) { Get-ProcessDialog -ProcessId $proc.Id })
     if ($proc.HasExited) {
