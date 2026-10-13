@@ -106,8 +106,15 @@ class Gatekeeper:
         if buckets.get("pending"):
             pending.append("CI still running: " + ", ".join(buckets["pending"]))
         bad = buckets.get("fail", []) + buckets.get("cancel", []) + buckets.get("unknown", [])
+        excerpts = ""
         if bad:
             fails.append("CI not green: " + ", ".join(bad))
+            getter = getattr(self.port, "failure_excerpts", None)
+            if getter:
+                try:
+                    excerpts = getter(checks) or ""
+                except Exception:  # noqa: BLE001 - excerpts are a convenience, never a gate
+                    excerpts = ""
         lines.append("CI checks: " + ", ".join("%s=%d" % (k, len(v)) for k, v in sorted(buckets.items())))
         # Local inspection of exactly the reviewed commit.
         try:
@@ -137,7 +144,7 @@ class Gatekeeper:
         if not fails and not pending:
             lines.append("[PASS] all deterministic gates")
         return {"fails": fails, "pending": pending, "summary": "\n".join(lines), "checks": checks, "files": files,
-                "diff": diff, "base": base, "tasks": tasks_text}
+                "diff": diff, "base": base, "tasks": tasks_text, "ci_excerpts": excerpts}
 
     def integration_provenance(self, base: str, sha: str) -> Tuple[List[str], str]:
         """Every commit in the agents' PR must be Astra-approved task work or a memory update."""
@@ -263,12 +270,16 @@ class Gatekeeper:
         return tid
 
     # ------------------------------------------------------------------ actions on failure
-    def report_problems(self, pr: Dict[str, Any], decision: str, reasons: List[str]) -> str:
+    def report_problems(self, pr: Dict[str, Any], decision: str, reasons: List[str], ci_excerpts: str = "") -> str:
         memo = self.memo(pr)
         if memo.get("sha") == pr["headRefOid"] and memo.get("decision") == decision:
             return "PR #%d: %s already reported for this head" % (pr["number"], decision)
         body = "**Gatekeeper: %s** for `%s`\n\n%s" % (decision, pr["headRefOid"][:9],
                                                        "\n".join("- " + r for r in reasons))
+        if ci_excerpts:
+            body += ("\n\nError lines from the failed CI jobs (data; the CI runs on Linux, Windows and "
+                     "macOS - reproduce locally where you can, and fix the cause, not the check):\n"
+                     + truncate(ci_excerpts, 6000))
         if pr.get("headRefName") == self.integ:
             with self.db.tx():
                 tid = self.db.add_task(
@@ -314,7 +325,7 @@ class Gatekeeper:
                 continue  # this exact head was already decided
             g = self.gates(pr)
             if g["fails"]:
-                return False, self.report_problems(pr, "GATES_FAILED", g["fails"])
+                return False, self.report_problems(pr, "GATES_FAILED", g["fails"], g.get("ci_excerpts", ""))
             if g["pending"]:
                 self.set_memo(pr, "HOLD", {"reason": g["pending"]})
                 with self.db.tx():

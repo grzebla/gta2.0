@@ -151,8 +151,10 @@ def run_loop(cfg: Config, *, max_steps: Optional[int], daemon: bool, fake: bool 
             gk_agent, port = make_gatekeeper(cfg)
             from .gfx import GfxRunner
             gfx_runner = GfxRunner(cfg)
+        # Fake agents (tests, simulation) never query the real GitHub: its CI state must not
+        # leak into a simulated run.
         orch = Orchestrator(cfg, database, astra, claude, gatekeeper=gk_agent, github_port=port,
-                            gfx_runner=gfx_runner)
+                            gfx_runner=gfx_runner, use_github=not (fake or fake_spec))
         install_signal_handlers(orch)
         result = orch.run(max_steps=max_steps, on_step=lambda: report.write(database, cfg.state_dir))
         report.write(database, cfg.state_dir)

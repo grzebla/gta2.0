@@ -339,6 +339,28 @@ class SimulationTests(SimCase):
 
 
 # ------------------------------------------------------------------------------- Gatekeeper
+class GitHubExcerptTests(unittest.TestCase):
+    def test_failure_excerpts_keep_error_lines_only(self) -> None:
+        from gta20_orchestrator import github as G
+        log = ("linux\tTest\t2026-10-13T11:01:38.8256651Z 105/155 Test #105: rendercheck.x ***Failed 0.01 sec\n"
+               "linux\tTest\t2026-10-13T11:01:38.8257308Z   root: expected rejection 'inside the checkout'\n"
+               "linux\tTest\t2026-10-13T11:01:38.8257309Z just progress output\n")
+        orig = G._run
+        G._run = lambda repo, *a, **k: (1, log, "")
+        try:
+            out = G.GitHubPort("o/r").failure_excerpts([
+                {"name": "linux-x64-release", "bucket": "fail", "link": "https://github.com/o/r/actions/runs/1/job/2"},
+                {"name": "lint", "bucket": "pass", "link": "https://github.com/o/r/actions/runs/1/job/3"}])
+        finally:
+            G._run = orig
+        self.assertIn("--- linux-x64-release ---", out)
+        self.assertIn("***Failed", out)
+        self.assertIn("expected rejection", out)
+        self.assertNotIn("progress output", out)
+        self.assertNotIn("2026-10-13T", out)
+        self.assertNotIn("lint", out)
+
+
 class GatekeeperTests(SimCase):
     def setUp(self) -> None:
         super().setUp()
@@ -445,6 +467,8 @@ class GatekeeperTests(SimCase):
         fix = [t for t in self.env.db.tasks() if t["created_by"] == "gatekeeper"]
         self.assertEqual(len(fix), 1)
         self.assertEqual((fix[0]["status"], fix[0]["priority"]), ("READY", 0))
+        # The developer has no GitHub access: the task carries the CI error lines.
+        self.assertIn("simulated error: expected X, got Y", json.loads(fix[0]["spec"])["context"])
         orch.gatekeeper.step()  # same head: no duplicate task
         self.assertEqual(len([t for t in self.env.db.tasks() if t["created_by"] == "gatekeeper"]), 1)
         self.assertEqual(port.merged, [])

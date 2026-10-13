@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from typing import Any, Dict, List, Optional
 
@@ -85,6 +86,9 @@ PR_FIELDS = ("number,title,body,url,headRefName,baseRefName,headRefOid,isDraft,m
              "labels,author,createdAt")
 
 
+ERROR_LINE = re.compile(r"\*\*\*Failed|FAILED|FAIL\b|Error|error[:\[]|expected|Assertion|SC\d{4}|\bnot ok\b")
+
+
 class GitHubPort:
     """Everything the Gatekeeper does on GitHub. Merges never use --admin (no bypass of checks)
     and always pin --match-head-commit, so a push after the review cannot be merged unreviewed."""
@@ -105,6 +109,28 @@ class GitHubPort:
             except ValueError:
                 return None
         return [] if "no checks reported" in (err or "") else None
+
+    def failure_excerpts(self, checks: List[Dict[str, Any]], max_jobs: int = 4, max_lines: int = 30) -> str:
+        """Error lines from the logs of failed CI jobs, so a fix task can be done without GitHub access."""
+        parts: List[str] = []
+        for c in [c for c in checks if c.get("bucket") == "fail"][:max_jobs]:
+            m = re.search(r"/runs/(\d+)/job/(\d+)", c.get("link") or "")
+            if not m:
+                continue
+            rc, out, _ = _run(self.repo, "run", "view", m.group(1), "--job", m.group(2), "--log-failed", timeout=180)
+            if not out:
+                continue
+            lines: List[str] = []
+            for raw in out.splitlines():
+                text = raw.split("\t")[-1]
+                text = re.sub(r"^\ufeff?\d{4}-\d\d-\d\dT[\d:.]+Z ?", "", text).rstrip()
+                if ERROR_LINE.search(text) and text not in lines:
+                    lines.append(text[:300])
+                if len(lines) >= max_lines:
+                    break
+            if lines:
+                parts.append("--- %s ---\n%s" % (c.get("name"), "\n".join(lines)))
+        return "\n".join(parts)
 
     def mark_ready(self, number: int) -> bool:
         return _run(self.repo, "pr", "ready", str(number))[0] == 0
