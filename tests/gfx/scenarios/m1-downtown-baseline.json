@@ -1,0 +1,12 @@
+{
+  "id": "m1-downtown-baseline",
+  "wrapper": "ddrawcompat",
+  "screen": { "start_mode": 1 },
+  "durationSeconds": 120,
+  "screenshotsAtSeconds": [6, 12, 18, 22, 28, 32, 36, 40, 45, 50, 55, 60, 64, 68, 72, 80, 90, 100, 110, 118],
+  "inputs": [
+    { "atSeconds": 15, "key": "ENTER", "holdMs": 150 },
+    { "atSeconds": 25, "key": "ENTER", "holdMs": 150 },
+    { "atSeconds": 65, "key": "ENTER", "holdMs": 150 }
+  ]
+}

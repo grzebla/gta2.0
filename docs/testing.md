@@ -11,6 +11,7 @@
 | Czas klatki | `gta2 --frames N` | lokalnie | okno/GPU |
 | Render bez okna | `gta2 --offscreen WxH --screenshot f.bmp` | CI (lavapipe, próbne) / lokalnie | Vulkan/Metal/D3D12 |
 | Infrastruktura gfx-compat | `tests/gfx/windows/tests` (Pester), `tests/scripts` (Bash) | `infra-lint` | nic (atrapa `aws`) |
+| Scenariusze zrzutów oryginału (offline) | `tests/gfx/scenarios/*.json`, `cmake/ValidateGfxScenario.cmake` | CTest `gfx.scenario.*`, `gfx.scenario-check.*` | nic (host nie jest wywoływany) |
 
 Sanitizery: preset `asan` (ASan + UBSan, `-fno-sanitize-recover`) w CI na Linux i macOS.
 
@@ -128,3 +129,10 @@ nie mówią nic o GTA 2.
 Ślady `provenance: originalGta2` mają powstawać z oryginalnej gry uruchamianej na EC2
 ([aws/integration.md](aws/integration.md)). Do czasu ich nagrania w repozytorium nie ma
 żadnych danych referencyjnych GTA 2.
+
+Zrzuty ekranu oryginału na hoście EC2 opisuje scenariusz `tests/gfx/scenarios/<id>.json` (tylko
+pola przyjmowane przez hosta) z dokumentem towarzyszącym `<id>.md`, który oznacza go jako
+referencję z oryginalnej gry. Przed zgłoszeniem przebiegu scenariusz musi przejść
+`cmake -DSCENARIO=tests/gfx/scenarios/<id>.json -P cmake/ValidateGfxScenario.cmake`
+(CTest `gfx.scenario.<id>`). Zrzuty zostają w lokalnym katalogu wyników, nigdy w repozytorium.
+Pierwszy scenariusz: [m1-downtown-baseline](../tests/gfx/scenarios/m1-downtown-baseline.md).
