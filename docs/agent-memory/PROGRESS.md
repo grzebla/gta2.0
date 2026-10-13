@@ -41,3 +41,7 @@ Approved T0009 at 519e9aa: committed the first bounded original-game discovery s
 ## 2026-10-13T07:44:19Z — T0010 Add a strict local map inventory gate
 
 Approved T0010 at c4c0c8b. The strict local inventory validates all 17 maps and their sourced style associations, reports bounded aggregates and rejects missing data, invalid arguments and case collisions. Verified 150/150 headless and 153/153 Debug passes plus a direct successful original-data inventory. M1 remains incomplete.
+
+## 2026-10-13T09:24:47Z — T0012 Classify the discovery capture and document the blocked world entry
+
+Approved T0012 at 1584314. Independently confirmed all 20 discovery frames show an unchanged MENU region, with no usable WORLD reference. The report separates observed pixels, runner values and unresolved input behavior, and hands protected runner diagnostics to the owner. Required checks and inspected 150/150 headless and 153/153 Debug results pass. No further capture requested; M1 remains incomplete.
