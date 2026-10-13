@@ -39,10 +39,12 @@ Import-Module (Join-Path $scriptDir 'GfxAnalysis.psm1') -Force
 $boot = & (Join-Path $scriptDir 'Initialize-GfxHost.ps1') -Bucket $Bucket -Region $Region `
     -MatrixPath $matrixPath -Root $Root -TestUser $TestUser | Select-Object -Last 1
 if ($boot.RebootRequired) {
-    # SSM reboots on 3010 and re-runs this whole command; the counter stops an endless loop.
+    # Not SSM's exit 3010: on this host the agent-initiated reboot hangs (seen 2026-10-13, twice).
+    # Exit 194 tells the caller to reboot through the EC2 API and send the command again;
+    # the counter stops an endless loop.
     $attempt = Register-RebootAttempt -StateDir (Join-Path $Root 'state') -RunId $RunId -MaxReboots 3
-    Write-Host "Bootstrap changed drivers/autologon/WDDM - requesting reboot $attempt/3 (SSM exit 3010)."
-    exit 3010
+    Write-Host "REBOOT_REQUIRED: bootstrap changed drivers/autologon/WDDM - reboot $attempt/3 (exit 194)."
+    exit 194
 }
 
 function Get-InteractiveSession([string] $User) {
@@ -119,6 +121,11 @@ function Set-ScreenSetting($Settings) {
     } finally { $key.Close(); $base.Close() }
 }
 
+function Reset-ScreenSetting {
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry32')
+    try { $base.DeleteSubKeyTree("$($matrix.game.registryKey)\Screen", $false) } finally { $base.Close() }
+}
+
 function Get-ScreenSetting([string] $Name) {
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry32')
     $key = $base.OpenSubKey("$($matrix.game.registryKey)\Screen")
@@ -158,6 +165,8 @@ if ($Mode -ne 'probe') {
     $runner = Join-Path $scriptDir 'Run-Gta2Case.ps1'
     foreach ($c in $selected) {
         $caseDir = Join-Path $resultsDir "cases\$($c.id)"
+        # A rerun with the same RunId must never read the previous run's result.json/frames.
+        Remove-Item -Recurse -Force -Path $caseDir -ErrorAction SilentlyContinue
         New-Item -ItemType Directory -Force -Path $caseDir | Out-Null
         $installed = @()
         $entry = [ordered]@{ id = $c.id; wrapper = $c.wrapper; verdict = $null; detail = $null }
@@ -178,6 +187,9 @@ if ($Mode -ne 'probe') {
                 }
             }
 
+            # Each case starts from the base settings only: values a previous case wrote
+            # (e.g. renderdevice=2) or the game itself rewrote must not leak into the next case.
+            Reset-ScreenSetting
             $screen = Merge-Setting $matrix.baseScreen $c.screen
             Set-ScreenSetting $screen
 
