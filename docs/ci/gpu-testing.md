@@ -273,6 +273,10 @@ przypadku runner usuwa proxy z katalogu gry, dopiero gdy proces gry się zakońc
   `mapname`/`stylename`/`scriptname` startuje prosto w mapie.
 - Menu po ok. 60 s bez klawisza samo uruchamia demo, co przydaje się jako test, czy pętla
   menu działa.
+- Dźwięk nie przeszkadza: z włączonym dźwiękiem menu i rozgrywka reagują na klawisze z proxy
+  (przebiegi `mcp-20261013-j`/`-k`, proxy zbudowane na hoście, skrót `af20ddb6c4076e68`).
+  Pierwsza kompilacja na hoście trwa ok. 8 min (pobranie `zig` + biblioteka C), kolejne biorą
+  DLL z pamięci podręcznej.
 - **Otwarte:** przy starcie przez `skip_frontend` Downtown nie ma pieszych ani ruchu ulicznego;
   w demie z menu są.
 
