@@ -5,6 +5,7 @@
 #include "gta20/scene/draw_list.hpp"
 #include "gta20/scene/face_texture.hpp"
 #include "gta20/scene/world_mesh.hpp"
+#include "gta20/scene/world_mesh_map.hpp"
 
 #include <algorithm>
 #include <array>
@@ -14,6 +15,7 @@
 #include <set>
 #include <string>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 using namespace gta20;
@@ -785,4 +787,595 @@ TEST_CASE("WorldMesh: a batch of more than 65535 vertices keeps full u32 indices
     REQUIRE(mesh.append_face(BlockFace::lid, {255, 255, 7}, {991, Rotation::R270, true}, kStyleTiles).ok());
     check_appended_face(mesh, 4 * kFacesInBatch, BlockFace::lid, {255, 255, 7}, 991);
     CHECK(mesh.vertices()[4 * kFacesInBatch - 1] == last);
+}
+
+// Map mesh builder. SYNTHETIC GmpWriter fixtures; expectations follow the partial, provisional builder
+// contract in docs/specs/world-mesh.md (cell x,y,z = block origin, every drawable face of an unsloped
+// block emitted, no collision-bit or neighbour gating). Local convention only: none of these counts
+// is evidence of which faces, heights or textures the original game draws.
+namespace {
+
+using scene::MapMesh;
+using scene::MapMeshCoverage;
+using scene::MapMeshStats;
+
+constexpr u32 kMapCells = 256u * 256u * 8u;
+
+constexpr u16 side_word(u16 tile, Rotation rotation = Rotation::R0, bool flip = false, bool wall = false,
+                        bool bullet_wall = false, bool flat = false) {
+    return static_cast<u16>(tile | (wall ? 1u << 10 : 0u) | (bullet_wall ? 1u << 11 : 0u) | (flat ? 1u << 12 : 0u) |
+                            (flip ? 1u << 13 : 0u) | (static_cast<unsigned>(rotation) << 14));
+}
+
+constexpr u16 lid_word(u16 tile, Rotation rotation = Rotation::R0, bool flip = false, unsigned lighting = 0,
+                       bool flat = false) {
+    return static_cast<u16>(tile | ((lighting & 3u) << 10) | (flat ? 1u << 12 : 0u) | (flip ? 1u << 13 : 0u) |
+                            (static_cast<unsigned>(rotation) << 14));
+}
+
+constexpr u8 slope_type(unsigned slope, unsigned ground) {
+    return static_cast<u8>((slope << 2) | ground);
+}
+
+// Unsloped block whose five faces all show `tile` with R0, no flip and no flags.
+assets::BlockInfo full_block(u16 tile) {
+    assets::BlockInfo block;
+    block.left = block.right = block.top = block.bottom = block.lid = tile;
+    return block;
+}
+
+// Block with only a slope_type byte (ground type and/or slope code) and five blank face words.
+assets::BlockInfo bare_block(u8 slope_type_byte) {
+    assets::BlockInfo block;
+    block.slope_type = slope_type_byte;
+    return block;
+}
+
+assets::BlockInfo faces(u16 left, u16 right, u16 top, u16 bottom, u16 lid) {
+    assets::BlockInfo block;
+    block.left = left;
+    block.right = right;
+    block.top = top;
+    block.bottom = bottom;
+    block.lid = lid;
+    return block;
+}
+
+MapMesh build_map(const assets::GmpWriter& writer, u16 tile_count) {
+    auto map = assets::parse_gmp(writer.build_dmap());
+    REQUIRE(map);
+    auto built = scene::build_unsloped_map_mesh(map.value(), tile_count);
+    REQUIRE(built);
+    return std::move(built).value();
+}
+
+template <std::size_t N>
+u32 sum(const std::array<u32, N>& values) {
+    u32 total = 0;
+    for (const u32 v : values) {
+        total += v;
+    }
+    return total;
+}
+
+// Contract invariants of every build: the counters add up, the mesh has four vertices and six rebased
+// indices per emitted face, every vertex is finite and inside [0, 256] x [0, 256] x [0, 8], and each
+// face's UVs are corners of exactly one drawable atlas slot (never the white slot 1023).
+void check_map_mesh(const MapMesh& built, u16 tile_count) {
+    const MapMeshStats& s = built.stats;
+    CHECK(s.cells_visited == kMapCells);
+    CHECK(s.empty_cells + s.sloped_blocks + s.unsloped_blocks == kMapCells);
+    CHECK(5 * s.unsloped_blocks ==
+          s.emitted_faces + s.flat_faces + s.blank_faces + s.reserved_faces + s.out_of_style_faces);
+    CHECK(sum(s.emitted_by_face) == s.emitted_faces);
+    CHECK(sum(s.flat_by_face) == s.flat_faces);
+    CHECK(sum(s.sloped_blocks_by_code) == s.sloped_blocks);
+    CHECK(s.sloped_blocks_by_code[0] == 0);
+    const bool unsupported =
+        s.sloped_blocks != 0 || s.flat_faces != 0 || s.reserved_faces != 0 || s.out_of_style_faces != 0;
+    CHECK(s.has_unsupported() == unsupported);
+    CHECK(s.coverage() == (unsupported ? MapMeshCoverage::partial : MapMeshCoverage::provisional));
+
+    const auto& vertices = built.mesh.vertices();
+    const auto& indices = built.mesh.indices();
+    REQUIRE(vertices.size() == 4u * s.emitted_faces);
+    REQUIRE(indices.size() == 6u * s.emitted_faces);
+    std::size_t wrong_index = 0;
+    std::size_t bad_vertex = 0;
+    std::size_t bad_uv = 0;
+    for (std::size_t f = 0; f < s.emitted_faces; ++f) {
+        for (std::size_t k = 0; k < 6; ++k) {
+            const u32 index = indices[6 * f + k];
+            if (index != static_cast<u32>(4 * f) + kQuadPattern[k] || index >= vertices.size()) {
+                ++wrong_index;
+            }
+        }
+        // The slot is identified from the first corner; all four must be corners of that slot.
+        const WorldVertex& first = vertices[4 * f];
+        const auto tile = static_cast<u16>(static_cast<int>(first.v * 32.0f) * 32 + static_cast<int>(first.u * 32.0f));
+        if (!scene::is_drawable_tile(tile, tile_count) || tile == scene::TileAtlas::kWhiteSlot) {
+            ++bad_uv;
+        }
+        const ExpectedSlot slot = expected_slot(tile);
+        for (std::size_t i = 0; i < 4; ++i) {
+            const WorldVertex& v = vertices[4 * f + i];
+            const Position3f& p = v.position;
+            if (!finite(v) || p.x < 0 || p.x > 256 || p.y < 0 || p.y > 256 || p.z < 0 || p.z > 8) {
+                ++bad_vertex;
+            }
+            if ((v.u != slot.u0 && v.u != slot.u1) || (v.v != slot.v0 && v.v != slot.v1)) {
+                ++bad_uv;
+            }
+        }
+    }
+    CHECK(wrong_index == 0);
+    CHECK(bad_vertex == 0);
+    CHECK(bad_uv == 0);
+}
+
+// Emitted faces whose p0..p3 are exactly `face` of the block at `origin` (kExpectedCorners).
+std::vector<std::size_t> find_faces(const MapMesh& built, BlockFace face, Position3f origin) {
+    const auto& corners = kExpectedCorners[static_cast<std::size_t>(face)];
+    const auto& vertices = built.mesh.vertices();
+    std::vector<std::size_t> found;
+    for (std::size_t f = 0; 4 * f < vertices.size(); ++f) {
+        bool same = true;
+        for (std::size_t i = 0; i < 4; ++i) {
+            same = same && vertices[4 * f + i].position == origin + corners[i];
+        }
+        if (same) {
+            found.push_back(f);
+        }
+    }
+    return found;
+}
+
+// The UVs of emitted face `f` are the image corners `labels` (p0..p3, copied by hand from
+// kMappingCases) of `tile`'s atlas slot.
+void check_face_uv(const MapMesh& built, std::size_t f, u16 tile, const char* labels) {
+    CAPTURE(f);
+    CAPTURE(labels);
+    for (std::size_t i = 0; i < 4; ++i) {
+        CAPTURE(i);
+        const auto uv = expected_uv(tile, labels[i]);
+        CHECK(built.mesh.vertices()[4 * f + i].u == uv[0]);
+        CHECK(built.mesh.vertices()[4 * f + i].v == uv[1]);
+    }
+}
+
+// The block at `origin` contributes exactly one copy of `face`, textured with `labels` of `tile`.
+void check_single_face(const MapMesh& built, BlockFace face, Position3f origin, u16 tile, const char* labels) {
+    const auto found = find_faces(built, face, origin);
+    REQUIRE(found.size() == 1);
+    check_face_uv(built, found.front(), tile, labels);
+}
+
+Position3f origin_of(int x, int y, int z) {
+    return {static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)};
+}
+
+} // namespace
+
+TEST_CASE("WorldMeshMap: an empty map visits all 256x256x8 cells and emits nothing") {
+    const MapMesh built = build_map(assets::GmpWriter{}, kStyleTiles);
+    check_map_mesh(built, kStyleTiles);
+    MapMeshStats expected;
+    expected.cells_visited = kMapCells;
+    expected.empty_cells = kMapCells;
+    CHECK(built.stats == expected);
+    CHECK(built.mesh.vertices().empty());
+    CHECK(built.mesh.indices().empty());
+    CHECK(built.stats.coverage() == MapMeshCoverage::provisional);
+}
+
+TEST_CASE("WorldMeshMap: one block emits its lid and all four walls with transformed UVs") {
+    assets::GmpWriter writer;
+    writer.set_block(10, 20, 3,
+                     faces(side_word(6), side_word(7, Rotation::R180, true), side_word(8, Rotation::R270),
+                           side_word(9, Rotation::R90, true), lid_word(5, Rotation::R90, true, 3)));
+    const MapMesh built = build_map(writer, kStyleTiles);
+    check_map_mesh(built, kStyleTiles);
+
+    const MapMeshStats& s = built.stats;
+    CHECK(s.empty_cells == kMapCells - 1);
+    CHECK(s.unsloped_blocks == 1);
+    CHECK(s.emitted_faces == 5);
+    CHECK(s.emitted_by_face == std::array<u32, 5>{1, 1, 1, 1, 1});
+    CHECK(s.blank_faces + s.flat_faces + s.reserved_faces + s.out_of_style_faces + s.sloped_blocks == 0);
+    CHECK(s.coverage() == MapMeshCoverage::provisional);
+
+    // Faces follow BlockFace order; cell 10,20,3 is the block origin, so the lid lies at height 4.
+    const Position3f origin{10, 20, 3};
+    for (const auto face : {BlockFace::lid, BlockFace::left, BlockFace::right, BlockFace::top, BlockFace::bottom}) {
+        CHECK(find_faces(built, face, origin) == std::vector<std::size_t>{static_cast<std::size_t>(face)});
+    }
+    const auto& v = built.mesh.vertices();
+    CHECK(v[0].position == Position3f{10, 20, 4});  // lid p0
+    CHECK(v[2].position == Position3f{11, 21, 4});  // lid p2
+    CHECK(v[4].position == Position3f{10, 21, 3});  // left p0
+    CHECK(v[8].position == Position3f{11, 20, 3});  // right p0
+    CHECK(v[12].position == Position3f{10, 20, 3}); // top p0
+    CHECK(v[18].position == Position3f{10, 21, 4}); // bottom p2
+    check_face_uv(built, 0, 5, "CBAD");             // lid R90 flip (lighting bits ignored)
+    check_face_uv(built, 1, 6, "CDAB");             // left R0
+    check_face_uv(built, 2, 7, "BADC");             // right R180 flip
+    check_face_uv(built, 3, 8, "DABC");             // top R270
+    check_face_uv(built, 4, 9, "ADCB");             // bottom R90 flip
+}
+
+TEST_CASE("WorldMeshMap: stacked blocks, gaps between levels and touching neighbours keep every face") {
+    assets::GmpWriter writer;
+    for (const int z : {0, 1, 2, 5}) { // levels 3 and 4 of the column stay empty
+        writer.set_block(100, 100, z, full_block(12));
+    }
+    writer.set_block(60, 60, 4, full_block(13));
+    writer.set_block(61, 60, 4, full_block(13));
+    const MapMesh built = build_map(writer, kStyleTiles);
+    check_map_mesh(built, kStyleTiles);
+
+    const MapMeshStats& s = built.stats;
+    CHECK(s.unsloped_blocks == 6);
+    CHECK(s.emitted_faces == 30);
+    CHECK(s.emitted_by_face == std::array<u32, 5>{6, 6, 6, 6, 6});
+    CHECK(s.blank_faces == 0);
+    CHECK(s.coverage() == MapMeshCoverage::provisional);
+
+    // No neighbour elimination: covered lids and touching walls are emitted once each.
+    for (const int z : {0, 1, 2, 5}) {
+        CAPTURE(z);
+        const Position3f origin = origin_of(100, 100, z);
+        check_single_face(built, BlockFace::lid, origin, 12, "ABCD");
+        check_single_face(built, BlockFace::right, origin, 12, "CDAB");
+        const auto lid = find_faces(built, BlockFace::lid, origin);
+        CHECK(built.mesh.vertices()[4 * lid.front()].position.z == static_cast<float>(z + 1));
+    }
+    for (const int z : {3, 4}) {
+        CAPTURE(z);
+        for (const auto& spec : kFaces) {
+            CHECK(find_faces(built, spec.face, origin_of(100, 100, z)).empty());
+        }
+    }
+    check_single_face(built, BlockFace::right, {60, 60, 4}, 13, "CDAB"); // plane x = 61
+    check_single_face(built, BlockFace::left, {61, 60, 4}, 13, "CDAB");  // the same plane, facing -X
+    // Nothing of the column lies strictly between the lid of level 2 (z = 3) and the base of level 5.
+    std::size_t in_gap = 0;
+    for (const auto& vertex : built.mesh.vertices()) {
+        const Position3f& p = vertex.position;
+        if (p.x >= 100 && p.x <= 101 && p.y >= 100 && p.y <= 101 && p.z > 3 && p.z < 5) {
+            ++in_gap;
+        }
+    }
+    CHECK(in_gap == 0);
+}
+
+TEST_CASE("WorldMeshMap: blocks at the map corners on levels 0 and 7 span heights 0..8") {
+    struct Corner {
+        int x, y, z;
+        u16 tile;
+    };
+    constexpr std::array<Corner, 6> kCorners{{
+        {0, 0, 0, 21},
+        {255, 0, 7, 22},
+        {0, 255, 7, 23},
+        {255, 255, 0, 24},
+        {255, 255, 7, 25},
+        {0, 0, 7, 26},
+    }};
+    assets::GmpWriter writer;
+    for (const Corner& c : kCorners) {
+        writer.set_block(c.x, c.y, c.z, full_block(c.tile));
+    }
+    const MapMesh built = build_map(writer, kStyleTiles);
+    check_map_mesh(built, kStyleTiles);
+    CHECK(built.stats.unsloped_blocks == 6);
+    CHECK(built.stats.emitted_faces == 30);
+    CHECK(built.stats.emitted_by_face == std::array<u32, 5>{6, 6, 6, 6, 6});
+
+    Position3f low{1000, 1000, 1000};
+    Position3f high{-1, -1, -1};
+    for (const auto& vertex : built.mesh.vertices()) {
+        const Position3f& p = vertex.position;
+        low = {std::min(low.x, p.x), std::min(low.y, p.y), std::min(low.z, p.z)};
+        high = {std::max(high.x, p.x), std::max(high.y, p.y), std::max(high.z, p.z)};
+    }
+    CHECK(low == Position3f{0, 0, 0});
+    CHECK(high == Position3f{256, 256, 8});
+
+    for (const Corner& c : kCorners) {
+        CAPTURE(c.x);
+        CAPTURE(c.y);
+        CAPTURE(c.z);
+        const Position3f origin = origin_of(c.x, c.y, c.z);
+        check_single_face(built, BlockFace::lid, origin, c.tile, "ABCD");
+        for (const auto face : {BlockFace::left, BlockFace::right, BlockFace::top, BlockFace::bottom}) {
+            check_single_face(built, face, origin, c.tile, "CDAB");
+        }
+    }
+    const auto corner = [&built](BlockFace face, Position3f origin, std::size_t i) {
+        const auto found = find_faces(built, face, origin);
+        REQUIRE(found.size() == 1);
+        return built.mesh.vertices()[4 * found.front() + i].position;
+    };
+    CHECK(corner(BlockFace::lid, {255, 255, 7}, 2) == Position3f{256, 256, 8});
+    CHECK(corner(BlockFace::lid, {0, 0, 0}, 0) == Position3f{0, 0, 1});
+    CHECK(corner(BlockFace::left, {0, 0, 0}, 1) == Position3f{0, 0, 0});
+    CHECK(corner(BlockFace::bottom, {0, 255, 7}, 0) == Position3f{1, 256, 7});
+    CHECK(corner(BlockFace::right, {255, 0, 7}, 1) == Position3f{256, 1, 7});
+}
+
+TEST_CASE("WorldMeshMap: wall and bullet_wall bits are not visibility gates") {
+    struct Bits {
+        bool wall, bullet_wall;
+    };
+    constexpr std::array<Bits, 4> kBits{{{false, false}, {true, false}, {false, true}, {true, true}}};
+    assets::GmpWriter with_bits;
+    assets::GmpWriter without_bits;
+    for (std::size_t i = 0; i < kBits.size(); ++i) {
+        const auto tile = static_cast<u16>(40 + i);
+        const bool flip = i % 2 == 0;
+        const u16 collide = side_word(tile, Rotation::R90, flip, kBits[i].wall, kBits[i].bullet_wall);
+        const u16 plain = side_word(tile, Rotation::R90, flip);
+        with_bits.set_block(30 + static_cast<int>(i), 30, 2, faces(collide, collide, collide, collide, lid_word(50)));
+        without_bits.set_block(30 + static_cast<int>(i), 30, 2, faces(plain, plain, plain, plain, lid_word(50)));
+    }
+    // Collision bits on blank side faces do not make them drawable.
+    const u16 blank_wall = side_word(0, Rotation::R0, false, true, true);
+    with_bits.set_block(40, 30, 2, faces(blank_wall, blank_wall, blank_wall, blank_wall, 0));
+    without_bits.set_block(40, 30, 2, bare_block(slope_type(0, 1)));
+
+    const MapMesh collide = build_map(with_bits, kStyleTiles);
+    const MapMesh plain = build_map(without_bits, kStyleTiles);
+    check_map_mesh(collide, kStyleTiles);
+    check_map_mesh(plain, kStyleTiles);
+    CHECK(collide.stats.unsloped_blocks == 5);
+    CHECK(collide.stats.emitted_faces == 20);
+    CHECK(collide.stats.emitted_by_face == std::array<u32, 5>{4, 4, 4, 4, 4});
+    CHECK(collide.stats.blank_faces == 5);
+    CHECK(collide.stats.coverage() == MapMeshCoverage::provisional);
+    CHECK(collide.stats == plain.stats);
+    CHECK(collide.mesh.vertices() == plain.mesh.vertices());
+    CHECK(collide.mesh.indices() == plain.mesh.indices());
+    check_single_face(collide, BlockFace::right, {31, 30, 2}, 41, "BCDA");  // wall bit, R90
+    check_single_face(collide, BlockFace::top, {32, 30, 2}, 42, "ADCB");    // bullet_wall bit, R90 flip
+    check_single_face(collide, BlockFace::bottom, {33, 30, 2}, 43, "BCDA"); // both bits, R90
+}
+
+TEST_CASE("WorldMeshMap: flat faces are skipped and counted, which makes the coverage partial") {
+    assets::GmpWriter writer;
+    writer.set_block(70, 70, 1,
+                     faces(side_word(51, Rotation::R0, false, true, false, true), // flat + wall
+                           side_word(0, Rotation::R0, false, false, false, true), // flat, blank tile
+                           side_word(52, Rotation::R180),
+                           side_word(1023, Rotation::R0, false, false, false, true), // flat, reserved tile
+                           lid_word(50, Rotation::R0, false, 0, true)));
+    writer.set_block(71, 70, 1, full_block(53));
+    const MapMesh built = build_map(writer, kStyleTiles);
+    check_map_mesh(built, kStyleTiles);
+
+    const MapMeshStats& s = built.stats;
+    CHECK(s.unsloped_blocks == 2);
+    CHECK(s.flat_faces == 4);
+    CHECK(s.flat_by_face == std::array<u32, 5>{1, 1, 1, 0, 1});
+    CHECK(s.emitted_faces == 6);
+    CHECK(s.emitted_by_face == std::array<u32, 5>{1, 1, 1, 2, 1});
+    CHECK(s.blank_faces == 0);
+    CHECK(s.reserved_faces == 0);
+    CHECK(s.out_of_style_faces == 0);
+    CHECK(s.coverage() == MapMeshCoverage::partial);
+    check_single_face(built, BlockFace::top, {70, 70, 1}, 52, "ABCD");
+    for (const auto face : {BlockFace::lid, BlockFace::left, BlockFace::right, BlockFace::bottom}) {
+        CHECK(find_faces(built, face, {70, 70, 1}).empty());
+    }
+
+    // A single flat lid next to fully supported content is enough for a partial verdict.
+    assets::GmpWriter one_flat;
+    one_flat.set_block(5, 5, 0, full_block(53));
+    one_flat.set_block(6, 5, 0, faces(0, 0, 0, 0, lid_word(54, Rotation::R0, false, 0, true)));
+    const MapMesh single = build_map(one_flat, kStyleTiles);
+    check_map_mesh(single, kStyleTiles);
+    CHECK(single.stats.emitted_faces == 5);
+    CHECK(single.stats.flat_faces == 1);
+    CHECK(single.stats.blank_faces == 4);
+    CHECK(single.stats.coverage() == MapMeshCoverage::partial);
+}
+
+TEST_CASE("WorldMeshMap: sloped blocks are skipped whole and counted by slope code") {
+    struct Sloped {
+        int x, y, z;
+        unsigned slope, ground;
+    };
+    constexpr std::array<Sloped, 6> kSloped{{
+        {80, 80, 0, 1, 0},
+        {81, 80, 0, 1, 1},
+        {82, 80, 0, 8, 2},
+        {83, 80, 1, 41, 3},
+        {84, 80, 2, 49, 1},
+        {85, 80, 7, 63, 0},
+    }};
+    assets::GmpWriter writer;
+    for (const Sloped& b : kSloped) {
+        assets::BlockInfo block = full_block(60);
+        block.slope_type = slope_type(b.slope, b.ground);
+        if (b.slope == 49) {
+            block.lid = 1023; // three-sided slope marker: part of the skipped sloped block only
+        }
+        writer.set_block(b.x, b.y, b.z, block);
+    }
+    writer.set_block(86, 80, 0, bare_block(slope_type(1, 0))); // slope code without any face
+    assets::BlockInfo pavement = full_block(61);
+    pavement.slope_type = slope_type(0, 2); // ground type only: unsloped
+    writer.set_block(87, 80, 0, pavement);
+    const MapMesh built = build_map(writer, kStyleTiles);
+    check_map_mesh(built, kStyleTiles);
+
+    const MapMeshStats& s = built.stats;
+    std::array<u32, 64> by_code{};
+    by_code[1] = 3;
+    by_code[8] = 1;
+    by_code[41] = 1;
+    by_code[49] = 1;
+    by_code[63] = 1;
+    CHECK(s.sloped_blocks == 7);
+    CHECK(s.sloped_blocks_by_code == by_code);
+    CHECK(s.unsloped_blocks == 1);
+    CHECK(s.emitted_faces == 5);
+    CHECK(s.reserved_faces == 0);
+    CHECK(s.blank_faces == 0);
+    CHECK(s.flat_faces == 0);
+    CHECK(s.coverage() == MapMeshCoverage::partial);
+    for (const Sloped& b : kSloped) {
+        CAPTURE(b.slope);
+        for (const auto& spec : kFaces) {
+            CHECK(find_faces(built, spec.face, origin_of(b.x, b.y, b.z)).empty()); // no flattened slope
+        }
+    }
+    check_single_face(built, BlockFace::lid, {87, 80, 0}, 61, "ABCD");
+}
+
+TEST_CASE("WorldMeshMap: blank, reserved and out-of-style tiles are counted separately") {
+    constexpr u16 kTiles = 40;
+    assets::GmpWriter writer;
+    writer.set_block(
+        90, 90, 3, faces(side_word(992), side_word(1022), side_word(40), side_word(39), lid_word(1023, Rotation::R90)));
+    writer.set_block(91, 90, 3, bare_block(slope_type(0, 1))); // road without faces
+    writer.set_block(92, 90, 3,
+                     faces(side_word(41), side_word(991), side_word(1, Rotation::R0, true),
+                           side_word(1023, Rotation::R0, false, true), 0));
+    const MapMesh built = build_map(writer, kTiles);
+    check_map_mesh(built, kTiles);
+
+    const MapMeshStats& s = built.stats;
+    CHECK(s.unsloped_blocks == 3);
+    CHECK(s.emitted_faces == 2);
+    CHECK(s.emitted_by_face == std::array<u32, 5>{0, 0, 0, 1, 1});
+    CHECK(s.blank_faces == 6);
+    CHECK(s.reserved_faces == 4);     // 992, 1022, lid 1023, wall 1023
+    CHECK(s.out_of_style_faces == 3); // 40, 41, 991
+    CHECK(s.flat_faces == 0);
+    CHECK(s.coverage() == MapMeshCoverage::partial);
+    check_single_face(built, BlockFace::bottom, {90, 90, 3}, 39, "CDAB");
+    check_single_face(built, BlockFace::top, {92, 90, 3}, 1, "DCBA");
+    // The reserved marker 1023 is not drawn as the atlas' white debug slot.
+    const ExpectedSlot white = expected_slot(scene::TileAtlas::kWhiteSlot);
+    std::size_t white_vertices = 0;
+    for (const auto& vertex : built.mesh.vertices()) {
+        if (vertex.u >= white.u0 && vertex.u <= white.u1 && vertex.v >= white.v0 && vertex.v <= white.v1) {
+            ++white_vertices;
+        }
+    }
+    CHECK(white_vertices == 0);
+
+    // Blank faces alone are not unsupported content; a single reserved lid is.
+    assets::GmpWriter blank_only;
+    blank_only.set_block(1, 1, 1, bare_block(slope_type(0, 3)));
+    const MapMesh blank = build_map(blank_only, kTiles);
+    check_map_mesh(blank, kTiles);
+    CHECK(blank.stats.blank_faces == 5);
+    CHECK(blank.stats.emitted_faces == 0);
+    CHECK(blank.stats.coverage() == MapMeshCoverage::provisional);
+    assets::GmpWriter reserved_only;
+    reserved_only.set_block(1, 1, 1, faces(0, 0, 0, 0, 1023));
+    const MapMesh reserved = build_map(reserved_only, kTiles);
+    check_map_mesh(reserved, kTiles);
+    CHECK(reserved.stats.reserved_faces == 1);
+    CHECK(reserved.stats.blank_faces == 4);
+    CHECK(reserved.stats.coverage() == MapMeshCoverage::partial);
+}
+
+TEST_CASE("WorldMeshMap: tile_count 0 emits no face and reports every style tile as out of style") {
+    assets::GmpWriter writer;
+    writer.set_block(3, 3, 3, full_block(5));
+    writer.set_block(4, 3, 3, faces(side_word(7), side_word(7), side_word(7), side_word(7), 1023));
+    writer.set_block(5, 3, 3, faces(side_word(991), side_word(1), side_word(2), side_word(3), 0));
+    const MapMesh built = build_map(writer, 0);
+    check_map_mesh(built, 0);
+
+    const MapMeshStats& s = built.stats;
+    CHECK(s.unsloped_blocks == 3);
+    CHECK(s.emitted_faces == 0);
+    CHECK(s.out_of_style_faces == 13);
+    CHECK(s.reserved_faces == 1);
+    CHECK(s.blank_faces == 1);
+    CHECK(built.mesh.vertices().empty());
+    CHECK(built.mesh.indices().empty());
+    CHECK(s.coverage() == MapMeshCoverage::partial);
+
+    // The same map with a full style emits the 13 style tiles; the reserved lid stays partial.
+    const MapMesh full = build_map(writer, kStyleTiles);
+    check_map_mesh(full, kStyleTiles);
+    CHECK(full.stats.emitted_faces == 13);
+    CHECK(full.stats.out_of_style_faces == 0);
+    CHECK(full.stats.reserved_faces == 1);
+    CHECK(full.stats.coverage() == MapMeshCoverage::partial);
+}
+
+namespace {
+
+// Mixed SYNTHETIC content for the determinism test: 40 blocks with every kind of face word, written in
+// either order (which changes the unique-block table but not the cells).
+void add_mixed_content(assets::GmpWriter& writer, bool reverse) {
+    struct Cell {
+        int x, y, z;
+        assets::BlockInfo block;
+    };
+    std::vector<Cell> cells;
+    for (int i = 0; i < 40; ++i) {
+        const auto tile = static_cast<u16>(1 + 23 * i);
+        const auto turn = [i](int k) { return static_cast<Rotation>((i + k) % 4); };
+        assets::BlockInfo block =
+            faces(side_word(static_cast<u16>(tile + 1), turn(1), i % 2 == 0, i % 5 == 0),
+                  side_word(static_cast<u16>(i % 7 == 0 ? 0 : tile + 2), turn(2), false, true, true),
+                  side_word(static_cast<u16>(i % 9 == 0 ? 1000 : tile + 3), turn(3), true),
+                  side_word(static_cast<u16>(tile + 4), turn(0), i % 4 == 1, false, false, i % 13 == 0),
+                  lid_word(tile, turn(0), i % 3 == 0, static_cast<unsigned>(i), i % 11 == 5));
+        block.slope_type = slope_type(i % 6 == 0 ? static_cast<unsigned>(i) : 0u, static_cast<unsigned>(i % 4));
+        cells.push_back({(i * 37) % 256, (i * 91) % 256, i % 8, block});
+    }
+    if (reverse) {
+        std::reverse(cells.begin(), cells.end());
+    }
+    for (const Cell& c : cells) {
+        writer.set_block(c.x, c.y, c.z, c.block);
+    }
+}
+
+} // namespace
+
+TEST_CASE("WorldMeshMap: repeated builds give identical vertices, indices and statistics") {
+    assets::GmpWriter forward;
+    assets::GmpWriter backward;
+    add_mixed_content(forward, false);
+    add_mixed_content(backward, true);
+    const auto bytes = forward.build_dmap();
+    CHECK(bytes != backward.build_dmap()); // different unique-block tables, same cells
+
+    auto map = assets::parse_gmp(bytes);
+    REQUIRE(map);
+    auto first = scene::build_unsloped_map_mesh(map.value(), kStyleTiles);
+    auto second = scene::build_unsloped_map_mesh(map.value(), kStyleTiles);
+    REQUIRE(first);
+    REQUIRE(second);
+    const MapMesh reordered = build_map(backward, kStyleTiles);
+    check_map_mesh(first.value(), kStyleTiles);
+
+    // Blocks i = 6, 12, ..., 36 are sloped (i = 0 has slope code 0). Of the 34 unsloped blocks: flat
+    // lids i = 5, 16, 27, 38 and bottoms i = 0, 13, 26, 39; reserved tops i = 0, 9, 27 (18 and 36 are
+    // sloped); blank rights i = 0, 7, 14, 21, 28, 35. Everything else is drawable.
+    const MapMeshStats& s = first.value().stats;
+    CHECK(s.sloped_blocks == 6);
+    CHECK(s.unsloped_blocks == 34);
+    CHECK(s.flat_faces == 8);
+    CHECK(s.flat_by_face == std::array<u32, 5>{4, 0, 0, 0, 4});
+    CHECK(s.reserved_faces == 3);
+    CHECK(s.blank_faces == 6);
+    CHECK(s.out_of_style_faces == 0);
+    CHECK(s.emitted_faces == 153);
+    CHECK(s.emitted_by_face == std::array<u32, 5>{30, 34, 28, 31, 30});
+    CHECK(s.coverage() == MapMeshCoverage::partial);
+    const std::array<const MapMesh*, 2> others{&second.value(), &reordered};
+    for (const MapMesh* other : others) {
+        CHECK(other->stats == s);
+        CHECK(other->mesh.vertices() == first.value().mesh.vertices());
+        CHECK(other->mesh.indices() == first.value().mesh.indices());
+    }
 }

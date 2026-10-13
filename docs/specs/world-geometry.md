@@ -387,3 +387,5 @@ Dlaczego to: jest niezależne od nierozstrzygniętej projekcji i wysokości, prz
   wywoływania funkcji pomocniczych), kilka ścian w różnych miejscach (w tym 255,255,7) z kontrolą
   indeksów, nawinięcia na zewnątrz, skończoności, zakresu UV i niezmienności wcześniejszej zawartości,
   odrzucanie kafli oraz paczka 16 400 ścian (65 600 wierzchołków, indeksy > 65535).
+
+Wybór ścian z mapy (T0014, częściowy i tymczasowy, tylko bloki bez skosów): [world-mesh.md](world-mesh.md).
