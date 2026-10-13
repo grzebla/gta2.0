@@ -28,6 +28,12 @@ Add-Type -Namespace Gta20 -Name Native -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool IsWindowVisible(System.IntPtr hWnd);
 [DllImport("user32.dll")] public static extern System.IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+public delegate bool EnumProc(System.IntPtr hWnd, System.IntPtr lParam);
+[DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, System.IntPtr lParam);
+[DllImport("user32.dll")] public static extern bool EnumChildWindows(System.IntPtr parent, EnumProc cb, System.IntPtr lParam);
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr hWnd, out uint pid);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(System.IntPtr hWnd, System.Text.StringBuilder s, int n);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(System.IntPtr hWnd, System.Text.StringBuilder s, int n);
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
 public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 '@
@@ -64,9 +70,42 @@ $result = [ordered]@{
     startedAt  = (Get-Date).ToString('o')
     frames     = @()
     window     = $null
+    dialogs    = @()
     alive      = $false
     exitCode   = $null
     error      = $null
+}
+
+# Visible dialog boxes (class #32770) owned by a process, with their static texts.
+# A game that stops at its own message box must not count as rendered.
+function Get-ProcessDialogs([int] $ProcessId) {
+    $found = [System.Collections.Generic.List[object]]::new()
+    $cb = [Gta20.Native+EnumProc] {
+        param($h, $l)
+        $owner = [uint32]0
+        [Gta20.Native]::GetWindowThreadProcessId($h, [ref] $owner) | Out-Null
+        if ($owner -eq $ProcessId -and [Gta20.Native]::IsWindowVisible($h)) {
+            $cls = New-Object System.Text.StringBuilder 64
+            [Gta20.Native]::GetClassName($h, $cls, 64) | Out-Null
+            if ($cls.ToString() -eq '#32770') {
+                $title = New-Object System.Text.StringBuilder 256
+                [Gta20.Native]::GetWindowText($h, $title, 256) | Out-Null
+                $texts = [System.Collections.Generic.List[string]]::new()
+                $child = [Gta20.Native+EnumProc] {
+                    param($c, $l2)
+                    $t = New-Object System.Text.StringBuilder 512
+                    [Gta20.Native]::GetWindowText($c, $t, 512) | Out-Null
+                    if ($t.Length -gt 0) { $texts.Add($t.ToString()) }
+                    return $true
+                }
+                [Gta20.Native]::EnumChildWindows($h, $child, [IntPtr]::Zero) | Out-Null
+                $found.Add([ordered]@{ title = $title.ToString(); texts = @($texts) })
+            }
+        }
+        return $true
+    }
+    [Gta20.Native]::EnumWindows($cb, [IntPtr]::Zero) | Out-Null
+    return @($found)
 }
 
 $proc = $null
@@ -105,6 +144,7 @@ try {
 
     $proc.Refresh()
     $result.alive = -not $proc.HasExited
+    $result.dialogs = if ($result.alive) { @(Get-ProcessDialogs -ProcessId $proc.Id) } else { @() }
     if ($proc.HasExited) {
         $result.exitCode = $proc.ExitCode
     } elseif ($proc.MainWindowHandle -ne [IntPtr]::Zero) {

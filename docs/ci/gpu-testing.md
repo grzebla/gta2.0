@@ -181,3 +181,26 @@ Sprzątanie: `aws cloudformation delete-stack` dla obu stosów; bucket artefakt�
 - `nvidia-smi` zwraca 0 także wtedy, gdy odmawia zmiany modelu sterownika. Bootstrap ufa tylko
   odczytanemu potem `driver_model.pending`.
 - Zimny start z sesją autologowania `gta2runner` działa (SSM online po ok. 2 min).
+
+### Stan środowiska po weryfikacji 2026-10-13: **GTA 2 renderuje się na T4**
+
+- Konfiguracja działająca: GTA 2 **9.6** (samodzielne `gta2.exe`) z wrapperem **DDrawCompat 0.7.1**
+  (`ddrawcompat-window` i `ddrawcompat-fullscreen` = PASS). Recenzja zrzutu potwierdziła
+  oryginalne menu główne: logo GTA2, „PLAY / OPTIONS / QUIT”, „GTA2 V9.6”, logo Rockstar;
+  kolory i proporcje poprawne.
+- Bez wrappera gra zgłasza „Videomode 16x16x16 is not available”: sterownik nie wystawia
+  16-bitowych trybów DirectDraw, które DDrawCompat emuluje. dgVoodoo2: brak obrazu (do zbadania).
+- Warunki konieczne, ustawiane przez bootstrap:
+  1. sterownik GRID (WDDM);
+  2. **DirectPlay** włączony (gta2.exe importuje `DPLAYX.dll`; bez niego loader kończy start
+     błędem 0xc0000022);
+  3. **jeden ekran**: Basic Display Adapter wyłączony, gdy T4 działa w WDDM (przy dwóch
+     adapterach `dmavideo.dll` padał z 0xc0000005);
+  4. katalog `player\` (zapisy; rozpakowane archiwum nie zawiera pustych katalogów);
+  5. tryb nienadzorowany (`ErrorMode=2`, WER bez UI).
+- Wydanie **10.5 z dystrybucji Freeloader** (`freeloader.dat` uruchamiany jako `gta2.exe`) nie
+  startuje (0xc0000022), bo oczekuje swojego launchera. Do testów służy 9.6.
+- Harness: każdy przypadek zaczyna od pustego katalogu i świeżych ustawień ekranu. Okno
+  dialogowe gry daje werdykt `FAIL_GAME_DIALOG` z treścią (wcześniej czarny ekran z oknem
+  błędu potrafił dać fałszywy PASS).
+- Koszt dnia testów: ok. 3,5 h pracy instancji (ok. 2,6 USD) i ok. 5 USD/mies. za dysk.

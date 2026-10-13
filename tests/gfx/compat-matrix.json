@@ -1,5 +1,5 @@
 {
-  "$comment": "DirectDraw/Direct3D compatibility matrix for original GTA2 10.5 on EC2 G4dn. Registry semantics verified against CriminalRETeam/gta2_re Source/winmain.cpp: start_mode 0=windowed, 1=fullscreen (windowed silently falls back to fullscreen and rewrites start_mode=1); fullscreen is 640x480 by default at 16 bpp; render/video DLLs are hard-coded to d3ddll.dll + dmavideo.dll in 10.5.",
+  "$comment": "DirectDraw/Direct3D compatibility matrix for original GTA2 10.5 on EC2 G4dn. Registry semantics verified against CriminalRETeam/gta2_re Source/winmain.cpp: start_mode 0=windowed, 1=fullscreen (windowed silently falls back to fullscreen and rewrites start_mode=1); fullscreen is 640x480 by default at 16 bpp; render/video DLLs are hard-coded to d3ddll.dll + dmavideo.dll in 10.5. Verified 2026-10-13 on g4dn.xlarge with GRID 596.86 (WDDM): 9.6 renders the frontend with ddrawcompat-* (PASS); native fails with Videomode 16x16x16 is not available.",
   "schemaVersion": 1,
   "game": {
     "$comment": "GTA 2 9.6 (Rockstar Classics) - standalone gta2.exe. The 10.5 Freeloader binary (freeloader.dat as gta2.exe, sha256 2443197...ccb3 archive) fails to start on Windows Server 2022 with 0xc0000022 (seen 2026-10-13), it expects its Freeloader launcher.",

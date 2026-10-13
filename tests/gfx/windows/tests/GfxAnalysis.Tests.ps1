@@ -88,6 +88,12 @@ Describe 'Get-CaseVerdict' {
         Get-CaseVerdict -Result (Result @($f)) -Observe $Observe -StartModeRequested 0 -StartModeAfter 1 |
             Should -Be 'PASS_FELL_BACK_TO_FULLSCREEN'
     }
+    It 'FAIL_GAME_DIALOG when the game shows its own message box, even over a changed screen' {
+        $f = Frame $Game $Desktop
+        $r = Result @($f, $f, $f)
+        $r | Add-Member -NotePropertyName dialogs -NotePropertyValue @([pscustomobject]@{ title = 'Error!'; texts = @('Videomode 16x16x16 is not available') })
+        Get-CaseVerdict -Result $r -Observe $Observe | Should -Be 'FAIL_GAME_DIALOG'
+    }
     It 'ERROR variants for missing or failed results' {
         Get-CaseVerdict -Result $null -Observe $Observe | Should -Be 'ERROR_NO_RESULT'
         Get-CaseVerdict -Result ([pscustomobject]@{ error = 'boom'; alive = $true; frames = @() }) -Observe $Observe | Should -Be 'ERROR'
