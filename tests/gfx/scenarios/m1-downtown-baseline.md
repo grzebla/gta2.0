@@ -8,8 +8,9 @@ oznaczenie jest w tym dokumencie. Zrzuty zostają w lokalnym katalogu wyników o
 w repozytorium, w artefaktach CI ani w miejscach publicznych.
 
 Statusy jak w [world-geometry.md](../../../docs/specs/world-geometry.md) (sekcja 0): **[D]** pomiar
-lokalny na plikach danych, **[H]** hipoteza, **[I]** fakt o naszym kodzie. Żadne stwierdzenie
-poniżej nie ma jeszcze statusu **[O]** — przebieg nie został wykonany.
+lokalny na plikach danych, **[H]** hipoteza, **[I]** fakt o naszym kodzie, **[O]** obserwacja z
+przebiegu oryginału. Przebieg odkrywczy `local-20261013-084136` się odbył — jego wynik jest w
+sekcji 8; sekcje 1–7 opisują plan sprzed przebiegu.
 
 ## 1. Cel i zakres
 
@@ -177,6 +178,37 @@ do prostokąta strefy — tylko jako kontrola, nie jako dowód położenia.
 * Do repo trafiają: etykiety klatek (sekcja 5), czasy przejść menu → świat, wyniki lokalizacji
   (sekcja 6, liczby) i ewentualna wersja v2 scenariusza. Bez zrzutów, bez danych gry.
 * Jeśli świat nie pojawi się przed 64 s: poprawić `inputs` na podstawie zrzutów `MENU` (nowy
-  commit tego samego `id`) i dopiero wtedy prosić o kolejny przebieg.
+  commit tego samego `id`) i dopiero wtedy prosić o kolejny przebieg. **Po przebiegu z sekcji 8:**
+  zrzuty `MENU` nie pokazały żadnej reakcji na ENTER, więc nie dają podstawy do innej sekwencji —
+  najpierw potrzebna jest diagnostyka wejścia po stronie właściciela (sekcja 8).
 * Dopiero po potwierdzeniu stabilnej kamery w spoczynku można planować scenariusze w zadanych
   miejscach mapy.
+
+## 8. Przebieg odkrywczy `local-20261013-084136` (2026-10-13)
+
+Pełna analiza: [m1-downtown-discovery.md](../../../docs/reports/m1-downtown-discovery.md).
+Zrzuty zostają lokalnie; tutaj tylko wnioski.
+
+* **Klatki:** wszystkie 20 zaplanowanych istnieje i jest czytelnych; **wszystkie 20 = `MENU`**
+  (menu główne, podświetlone „PLAY”). Żadna klatka `WORLD` — **brak użytecznej referencji `WORLD`**;
+  sekcja 6 (lokalizacja) i WG-PROJ nie mają materiału. [O]
+* **Wejścia:** powierzchnia gry jest identyczna co do piksela od 6 s do 118 s, także po ENTER w 15,
+  25 i 65 s; zmienia się tylko zegar pulpitu. Runner zgłasza po 2 zdarzenia `SendInput` na ENTER,
+  ale czy gra je odebrała — nieustalone. `foreground: true` runner mierzy tylko w chwilach zrzutów,
+  więc fokus w chwili wstrzyknięcia też jest nieustalony. [O] / [R]
+* **Założenia z sekcji 3:** wersja gry na hoście to **9.6** (napis w menu) [O]; menu główne jest
+  widoczne przed 6 s [O] (czy frontend był już gotowy przyjmować klawisze — nieustalone); domyślnie podświetlone „PLAY” [O]. Pełny ekran działa (DDrawCompat), ale
+  zrzut ma 2304×800 z dwiema powierzchniami: gra zajmuje x 0–1279 (1280×800, obraz 4:3 ze
+  skalowaniem ≈ 1,667), pulpit x 1280–2303 [O]. Przebieg ekranu 2 frontendu i dalsze punkty sekcji
+  3 pozostają [H].
+* **Werdykt hosta** `FAIL_GAME_DIALOG` nie jest dowodem okna dialogowego (`dialogs=null`, brak okna na
+  zrzutach, okno gry na pierwszym planie w chwilach zrzutów [R]); prawdopodobny defekt werdyktu w
+  runnerze — raport, sekcja 5, D1.
+* **Następny warunek wstępny (po stronie właściciela):** przegląd podejrzewanego defektu werdyktu D1
+  i przygotowanie ograniczonej diagnostyki wejścia w runnerze, identyfikowanej rewizją (SHA-256
+  wdrożonych skryptów): wynik `SetForegroundWindow` i stan pierwszego planu tuż przed i po każdym
+  wstrzyknięciu, błędy `SendInput`, pomocniczo stan procesu gry. To dane diagnostyczne, **nie dowód**
+  dostarczenia ani obsłużenia klawisza — konsumpcja wejścia może pozostać nierozstrzygnięta. Zmiana
+  dotyczy chronionej ścieżki `tests/gfx/windows/` — **do przekazania właścicielowi przez Astrę**
+  (raport, sekcja 7). O kolejnym przebiegu decyduje się dopiero po przejrzeniu tej zmiany i
+  zebranych danych. Harmonogram `inputs` tego scenariusza pozostaje bez zmian.
