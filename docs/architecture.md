@@ -68,7 +68,10 @@ może zmienić dowolny cel. Krawędź należy do modułu, **którego cel jest pi
 (`gta20_<moduł>`, alias `gta20::<moduł>`, cel aplikacji = nazwa jej katalogu), a nie do katalogu
 pliku: `target_link_libraries(gta20_scene PRIVATE gta20::sim)` w `apps/gta2/CMakeLists.txt` czy w
 głównym `CMakeLists.txt` to krawędź `scene → sim`. Cele spoza modułów (np. `gta20_unit_tests`)
-nie mają reguł; nieznany cel w katalogu modułu podlega regułom tego modułu. Pliki czyta mały lekser
+nie mają reguł; nieznany cel w katalogu modułu podlega regułom tego modułu. Biblioteki pomocnicze
+testów z prefiksem `gta20_` (lista `TEST_HELPERS` w skrypcie, dziś `gta20_synthetic_install` z
+`tests/inventory/`) mogą linkować tylko cele testowe; moduł ani aplikacja nie może od nich zależeć,
+a każdy inny nieznany cel `gta20_*`/`gta20::*` jest błędem. Pliki czyta mały lekser
 języka CMake: argumenty w cudzysłowie (ze znakami ucieczki), zagnieżdżone nawiasy, argumenty
 nawiasowe `[[…]]` / `[=[…]=]` (treść czytana dosłownie), komentarze wierszowe i nawiasowe
 `#[[…]]`. Argumenty są dzielone na elementy list CMake (`a;b`, także w cudzysłowie i w argumencie

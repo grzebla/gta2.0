@@ -216,6 +216,7 @@ accept root-links-scene-to-assets cmake "$TOP" 'target_link_libraries(gta20_scen
 accept gta2-dir-links-render-to-scene cmake "$APP" 'target_link_libraries(gta20_render PRIVATE gta20::scene)'
 accept gta2-links-testing-genex cmake "$APP" 'target_link_libraries(gta2 PRIVATE $<LINK_ONLY:gta20::testing>)'
 accept test-target-links-anything cmake tests/unit/CMakeLists.txt 'target_link_libraries(gta20_unit_tests PRIVATE gta20::render gta20::platform)'
+accept test-target-links-test-helper cmake tests/unit/CMakeLists.txt 'target_link_libraries(gta20_unit_tests PRIVATE $<BUILD_INTERFACE:gta20_synthetic_install>)'
 # shellcheck disable=SC2016
 accept render-include-dir-own-vars cmake "$R" 'target_include_directories(gta20_render PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${PROJECT_SOURCE_DIR}/engine/scene/include)'
 accept scene-include-dir-own-subdir cmake "$S" 'target_include_directories(gta20_scene PRIVATE ../scene/src)'
@@ -259,6 +260,9 @@ echo "== unknown targets and unsupported expressions"
 reject scene-link-unknown-gta20-target cmake "$S" 'target_link_libraries(gta20_scene PRIVATE gta20_sim_helpers)' 'engine/scene -> gta20_sim_helpers (link): unknown gta20 target'
 reject scene-link-unknown-alias cmake "$S" 'target_link_libraries(gta20_scene PRIVATE gta20::physics)' 'engine/scene -> gta20::physics (link): unknown gta20 target'
 reject scene-link-unknown-in-genex cmake "$S" 'target_link_libraries(gta20_scene PRIVATE $<BUILD_INTERFACE:gta20_extra>)' 'unknown gta20 target'
+reject scene-link-test-helper cmake "$S" 'target_link_libraries(gta20_scene PRIVATE gta20_synthetic_install)' 'engine/scene -> gta20_synthetic_install (link): test helper target'
+reject root-links-headless-to-test-helper cmake "$TOP" 'target_link_libraries(gta20-headless PRIVATE gta20_synthetic_install)' 'apps/gta20-headless -> gta20_synthetic_install (link): test helper target'
+reject scene-option-test-helper cmake "$S" 'target_link_options(gta20_scene PRIVATE -lgta20_synthetic_install)' 'engine/scene -> gta20_synthetic_install (options'
 # shellcheck disable=SC2016
 reject scene-link-variable cmake "$S" 'target_link_libraries(gta20_scene PRIVATE ${SCENE_DEPS})' 'engine/scene -> ${SCENE_DEPS} (link): unsupported dependency expression'
 # shellcheck disable=SC2016
