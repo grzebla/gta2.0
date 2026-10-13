@@ -5,6 +5,7 @@
 | Jednostkowe (doctest) | `tests/unit/` | `ctest --preset <p>` | nic |
 | Determinizm scenariuszy | `tests/conformance/` | CTest `conformance.determinism.*` | nic |
 | Regresja scenariuszy | `tests/conformance/golden/` | CTest `conformance.regression.*` | nic |
+| Wrapper `cmake/RunConformance.cmake` | `tests/conformance/wrapper/` (atrapa `gta20-headless`) | CTest `conformance.wrapper.*` | nic |
 | Dane oryginalnej gry | testy oznaczone `[gamedata]` | `GTA20_GAME_DIR=… ctest` | własna instalacja GTA 2 |
 | Benchmark CPU/pamięci | `gta20-headless bench` | CI (Release) → podsumowanie zadania | nic |
 | Czas klatki | `gta2 --frames N` | lokalnie | okno/GPU |

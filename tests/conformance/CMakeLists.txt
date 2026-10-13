@@ -15,6 +15,15 @@ foreach(scenario ${GTA20_SCENARIOS})
                 -P ${PROJECT_SOURCE_DIR}/cmake/RunConformance.cmake)
 endforeach()
 
+# Asset-free checks of RunConformance.cmake itself: a CMake-script stand-in replaces gta20-headless.
+foreach(case deterministic first-run-fails second-run-fails missing-output differing-output unknown-mode)
+    add_test(NAME conformance.wrapper.${case}
+        COMMAND ${CMAKE_COMMAND} -DCASE=${case} -DWRAPPER=${PROJECT_SOURCE_DIR}/cmake/RunConformance.cmake
+                -DFAKE_HEADLESS=${CMAKE_CURRENT_SOURCE_DIR}/wrapper/FakeHeadless.cmake
+                -DWORK_ROOT=${CMAKE_CURRENT_BINARY_DIR}/wrapper-${case}
+                -P ${CMAKE_CURRENT_SOURCE_DIR}/wrapper/WrapperTest.cmake)
+endforeach()
+
 # Real-data render check (needs GTA20_GAME_DIR and a GPU device; otherwise reported as skipped).
 # Smoke test only: it does not establish M1 fidelity. Screenshots of original data go to a fresh
 # run directory under GTA20_RENDER_CAPTURE_DIR, which must be outside the checkout and build tree.
