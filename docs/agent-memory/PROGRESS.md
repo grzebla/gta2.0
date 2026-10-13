@@ -49,3 +49,7 @@ Approved T0012 at 1584314. Independently confirmed all 20 discovery frames show 
 ## 2026-10-13T14:05:47Z — T0008 Enforce the dependency graph and refresh architecture contracts
 
 Approved T0008 at 1e5cef7. Dependency checks and 141 synthetic fixtures enforce the documented graph and resolve the owner's three specified CMake gaps. Architecture and world-geometry contracts are corrected. Local read-only checks passed; inspected verification logs confirm shellcheck, offline shell tests, 123/123 headless and 126/126 Debug tests passed. Awaiting Gatekeeper integration; M1 remains incomplete.
+
+## 2026-10-13T16:16:37Z — T0019 Document slope families and unresolved face semantics
+
+Approved T0019 at 486d30d. The slope specification covers all 64 codes, distinguishes observations from hypotheses, and defines ordered tasks with explicit evidence prerequisites. All unresolved slope implementations remain blocked. Independent inventory/table checks and orchestrator verification pass. Awaiting Gatekeeper integration; M1 remains incomplete.
