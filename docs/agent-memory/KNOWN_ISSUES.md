@@ -1,3 +1,3 @@
 # Known Issues
 
-T0007 trace-integrity defects are resolved by its approved changes; remove the stale instruction to resolve them. Retain other architecture-review issues. T0009 startup navigation, host version and baseScreen merging remain unverified; landmark localization tooling is pending. Successful orchestrator Debug verification supersedes developer capture-directory permission failures. Earlier sanitizer render captures remain unverified.
+T0008 review found dependency-checker bypasses through generator expressions, semicolon lists, ignored unknown gta20_* targets and file-directory-based target ownership. Root/shared CMake target mutations are outside its scan. These require correction before approval; retain existing unrelated issues.
