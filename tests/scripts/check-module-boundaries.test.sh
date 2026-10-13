@@ -274,6 +274,7 @@ reject scene-dir-links-platform-to-render cmake "$S" 'target_link_libraries(gta2
 # shellcheck disable=SC2016
 reject gta2-dir-include-dir-scene-to-sim cmake "$APP" 'target_include_directories(gta20_scene PRIVATE ${PROJECT_SOURCE_DIR}/engine/sim/include)' 'engine/scene -> sim (include path'
 reject root-include-dir-render-to-sim cmake "$TOP" 'target_include_directories(gta20_render PUBLIC engine/sim/include)' 'engine/render -> sim (include path engine/sim/include)'
+# shellcheck disable=SC2016
 reject gta2-dir-sources-scene-from-sim cmake "$APP" 'target_sources(gta20_scene PRIVATE ${PROJECT_SOURCE_DIR}/engine/sim/src/world.cpp)' 'engine/scene -> sim (sources'
 reject scene-sources-from-sim cmake "$S" 'target_sources(gta20_scene PRIVATE ../sim/src/world.cpp)' 'engine/scene -> sim (sources ../sim/src/world.cpp)'
 # shellcheck disable=SC2016
@@ -350,11 +351,40 @@ reject root-add-subdirectory-binary cmake "$TOP" 'add_subdirectory(${CMAKE_BINAR
 reject root-add-subdirectory-outside cmake "$TOP" 'add_subdirectory(../synthetic-outside outside)' 'unsupported add_subdirectory(../synthetic-outside)'
 # shellcheck disable=SC2016
 reject doctest-allowance-only-in-tests-unit cmake "$TOP" 'include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)' 'unsupported include'
-accept root-include-cmake-module cmake "$TOP" 'include(CMakeParseArguments)'
+accept root-include-cmake-module cmake "$TOP" 'include(FetchContent)'
+accept root-include-project-module cmake "$TOP" 'include(EmbedBinary)'
+accept tests-include-relative-inside-repo cmake tests/unit/CMakeLists.txt 'include(../../cmake/EmbedBinary.cmake)'
+accept tests-add-subdirectory-relative-inside-repo cmake tests/unit/CMakeLists.txt 'add_subdirectory(../scripts synthetic-scripts)'
+reject root-include-unknown-builtin-module cmake "$TOP" 'include(CMakeParseArguments)' 'unsupported include(CMakeParseArguments)'
+# shellcheck disable=SC2016
+reject root-include-variable-dir cmake "$TOP" 'include(${SYNTHETIC_DIR}/EmbedBinary.cmake)' 'unsupported include(${SYNTHETIC_DIR}/EmbedBinary.cmake)'
+# shellcheck disable=SC2016
+reject root-include-outside-repo cmake "$TOP" 'include(${PROJECT_SOURCE_DIR}/../synthetic-outside.cmake)' 'unsupported include(${PROJECT_SOURCE_DIR}/../synthetic-outside.cmake)'
+# shellcheck disable=SC2016
+reject cmake-file-include-current-source-dir cmake cmake/CompilerOptions.cmake 'include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedBinary.cmake)' 'unsupported include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedBinary.cmake)'
+reject root-include-non-cmake-file cmake "$TOP" 'include(docs/architecture.md)' 'unsupported include(docs/architecture.md)'
+reject root-include-absolute cmake "$TOP" "include($ROOT/cmake/EmbedBinary.cmake)" 'unsupported include(/'
+reject root-add-subdirectory-without-cmakelists cmake "$TOP" 'add_subdirectory(docs)' 'unsupported add_subdirectory(docs)'
+# shellcheck disable=SC2016
+reject capture-dir-exception-only-in-its-script cmake "$TOP" 'include(${cmake_dir}/RenderCapture.cmake)' 'unsupported include(${cmake_dir}/RenderCapture.cmake)'
 # shellcheck disable=SC2016
 accept root-include-project-file cmake "$TOP" 'include(${CMAKE_CURRENT_LIST_DIR}/cmake/EmbedBinary.cmake)'
 # shellcheck disable=SC2016
 accept root-add-subdirectory-source cmake "$TOP" 'add_subdirectory(${PROJECT_SOURCE_DIR}/tests/scripts synthetic-scripts)'
+
+echo "== CMake escapes"
+reject link-dependency-escape cmake "$R" 'target_link_libraries(gta20_render PRIVATE gta20\_sim)' 'unsupported CMake escape (\) in target_link_libraries arguments'
+reject link-target-escape cmake "$TOP" 'target_link_libraries(gta20\_scene PRIVATE gta20::sim)' 'unsupported CMake escape (\) in target_link_libraries arguments'
+reject link-quoted-escape cmake "$S" 'target_link_libraries(gta20_scene PRIVATE "gta20\:\:sim")' 'unsupported CMake escape (\) in target_link_libraries arguments'
+reject include-dir-escape cmake "$S" 'target_include_directories(gta20_scene PRIVATE ..\/sim/include)' 'unsupported CMake escape (\) in target_include_directories arguments'
+reject include-escape cmake "$TOP" 'include(cmake\/EmbedBinary.cmake)' 'unsupported CMake escape (\) in include arguments'
+
+echo "== ALIAS targets"
+reject root-alias-other-name cmake "$TOP" 'add_library(synthetic_sim ALIAS gta20_sim)' 'unsupported add_library(synthetic_sim ALIAS gta20_sim)'
+reject scene-alias-wrong-target cmake "$S" 'add_library(gta20::sim ALIAS gta20_scene)' 'unsupported add_library(gta20::sim ALIAS gta20_scene)'
+reject root-canonical-alias-outside-module cmake "$TOP" 'add_library(gta20::sim ALIAS gta20_sim)' 'unsupported add_library(gta20::sim ALIAS gta20_sim)'
+reject gta2-executable-alias cmake "$APP" 'add_executable(synthetic_app ALIAS gta2)' 'unsupported add_executable(synthetic_app ALIAS gta2)'
+reject json-alias-outside-dependencies cmake "$TOP" 'add_library(gta20::json ALIAS gta20_nlohmann_json)' 'unsupported add_library(gta20::json ALIAS gta20_nlohmann_json)'
 
 echo "== units without rules"
 reject unknown-engine-module unit engine/audio '' 'engine/audio: no dependency rules'

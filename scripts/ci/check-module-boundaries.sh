@@ -27,11 +27,14 @@
 # dependency properties set with set_property/set_target_properties on unit targets, and, for a
 # target that is only a variable (a CMake function argument), any gta20/SDL/json dependency and ANY
 # variable dependency - the single exception is target_sources(${target} PRIVATE ${output}) in
-# cmake/EmbedBinary.cmake (a generated file in the binary directory). CMake code this script cannot
-# read is rejected: cmake_language(...), include() of anything but a module name or a scanned
-# project file, add_subdirectory() of a build-tree, absolute or ../ directory (single allowance:
-# the pinned doctest helper included by tests/unit/CMakeLists.txt). Out of scope: pinned
-# third-party CMake code fetched into .deps/ (cmake/Dependencies.cmake, URL + SHA-256).
+# cmake/EmbedBinary.cmake (a generated file in the binary directory). What this script cannot
+# classify reliably is rejected, not resolved: CMake escapes (\) in the arguments of any checked
+# command; ALIAS targets other than the canonical add_library(gta20::<m> ALIAS gta20_<m>) in
+# engine/<m>/ (and gta20::json in cmake/Dependencies.cmake); cmake_language(...); include() and
+# add_subdirectory() whose path does not resolve to a scanned CMake file inside the repository
+# (exceptions for existing helpers: FetchContent, the pinned doctest helper in tests/unit, and
+# ${cmake_dir}/RenderCapture.cmake in tests/conformance/rendercheck/CaptureDirTest.cmake). Out of
+# scope: pinned third-party CMake code fetched into .deps/ (cmake/Dependencies.cmake, URL + SHA-256).
 #
 # Usage: check-module-boundaries.sh [ROOT]
 #   ROOT defaults to the repository root; tests/scripts/check-module-boundaries.test.sh passes
@@ -39,7 +42,7 @@
 set -euo pipefail
 
 ROOT="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-ROOT="${ROOT%/}"
+ROOT="$(cd "$ROOT" && pwd)" # absolute: include()/add_subdirectory() paths are resolved against it
 MODULES="core assets sim scene testing render platform"
 
 # gta20 modules a unit may depend on, besides itself. Keep in sync with docs/architecture.md.
@@ -364,31 +367,77 @@ check_sdl_edge() { # owner label file line target
   fi
 }
 
-# include()/add_subdirectory() may only bring in CMake code this script also scans: a CMake or
-# project module by name, a project file (its name exists among the scanned files) or a source
-# directory - never a file or directory under a build tree or an absolute path. Single allowance:
-# the pinned doctest helper in tests/unit (third-party, SHA-256 pinned in cmake/Dependencies.cmake).
+normalize_path() { # absolute path -> the path without ., .. and repeated slashes
+  local part out=""
+  local -a parts stack=()
+  IFS='/' read -ra parts <<<"$1"
+  for part in ${parts[@]+"${parts[@]}"}; do
+    case "$part" in
+      "" | .) ;;
+      ..) if [[ ${#stack[@]} -gt 0 ]]; then unset 'stack[${#stack[@]}-1]'; fi ;;
+      *) stack+=("$part") ;;
+    esac
+  done
+  for part in ${stack[@]+"${stack[@]}"}; do out="$out/$part"; done
+  printf '%s\n' "${out:-/}"
+}
+
+# Resolves an include()/add_subdirectory() path argument of `file` to an absolute path, or fails
+# when it depends on anything but CMAKE_CURRENT_LIST_DIR, CMAKE_CURRENT_SOURCE_DIR (CMakeLists.txt
+# only), PROJECT_SOURCE_DIR and CMAKE_SOURCE_DIR, or is a literal absolute path.
+resolve_path() { # argument file
+  local arg="$1" dir="${2%/*}"
+  [[ $arg == /* || $arg =~ ^[A-Za-z]: ]] && return 1
+  arg="${arg//\$\{CMAKE_CURRENT_LIST_DIR\}/$dir}"
+  if [[ ${2##*/} == CMakeLists.txt ]]; then arg="${arg//\$\{CMAKE_CURRENT_SOURCE_DIR\}/$dir}"; fi
+  arg="${arg//\$\{PROJECT_SOURCE_DIR\}/$ROOT}"
+  arg="${arg//\$\{CMAKE_SOURCE_DIR\}/$ROOT}"
+  [[ $arg == *'$'* ]] && return 1
+  [[ $arg == /* ]] || arg="$dir/$arg"
+  normalize_path "$arg"
+}
+
+# include()/add_subdirectory() may only bring in CMake code this script also scans: include() of a
+# module name that is a file in cmake/ (CMAKE_MODULE_PATH) or of a path resolving to a scanned
+# *.cmake file; add_subdirectory() of a directory resolving to one with a scanned CMakeLists.txt.
+# Anything else is rejected. Narrow exceptions for existing helpers: the CMake module FetchContent,
+# the pinned doctest helper included by tests/unit/CMakeLists.txt, and RenderCapture.cmake included
+# by the -P script tests/conformance/rendercheck/CaptureDirTest.cmake through ${cmake_dir}.
 check_code_source() { # command argument file line
-  local cmd="$1" arg="$2" file="$3" line="$4" ok=0 rel="${3#"$ROOT"/}"
-  if [[ $arg == *BINARY_DIR* || $arg == /* || $arg =~ ^[A-Za-z]:[/\\] ]]; then
-    ok=0
-  elif [[ $cmd == include ]]; then
-    if [[ $arg =~ ^[A-Za-z0-9_]+$ ]] || contains "${arg##*/}" ${cmake_basenames[@]+"${cmake_basenames[@]}"}; then
-      ok=1
-    elif [[ $rel == tests/unit/CMakeLists.txt && $arg == "\${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake" ]]; then
+  local cmd="$1" arg="$2" file="$3" line="$4" ok=0 rel="${3#"$ROOT"/}" path
+  if [[ $cmd == include && $arg =~ ^[A-Za-z0-9_]+$ ]]; then
+    if [[ $arg == FetchContent ]] || contains "$ROOT/cmake/$arg.cmake" ${cmake_list[@]+"${cmake_list[@]}"}; then ok=1; fi
+  elif [[ $cmd == include && $rel == tests/unit/CMakeLists.txt &&
+    $arg == "\${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake" ]]; then
+    ok=1
+  elif [[ $cmd == include && $rel == tests/conformance/rendercheck/CaptureDirTest.cmake &&
+    $arg == "\${cmake_dir}/RenderCapture.cmake" ]]; then
+    ok=1
+  elif path="$(resolve_path "$arg" "$file")"; then
+    if [[ $cmd == include ]]; then
+      if [[ $path == *.cmake ]] && contains "$path" ${cmake_list[@]+"${cmake_list[@]}"}; then ok=1; fi
+    elif contains "$path/CMakeLists.txt" ${cmake_list[@]+"${cmake_list[@]}"}; then
       ok=1
     fi
-  elif [[ $arg != *..* ]]; then # add_subdirectory: a relative directory or one under the source tree
-    case "$arg" in
-      \$\{CMAKE_CURRENT_SOURCE_DIR\}/* | \$\{PROJECT_SOURCE_DIR\}/* | \$\{CMAKE_SOURCE_DIR\}/*)
-        if [[ ${arg#*\}} != *'$'* ]]; then ok=1; fi ;;
-      *)
-        if [[ $arg != *'$'* ]]; then ok=1; fi ;;
-    esac
   fi
   if [[ $ok -eq 0 ]]; then
-    violation "$file" "$line" "unsupported $cmd($arg): it can bring in CMake code the boundary checker does not scan"
+    violation "$file" "$line" "unsupported $cmd($arg): it does not resolve to CMake code inside the repository that the boundary checker scans"
   fi
+}
+
+# Only the canonical module aliases add_library(gta20::<m> ALIAS gta20_<m>) in engine/<m>/, and
+# gta20::json in cmake/Dependencies.cmake, are allowed: any other alias would let a dependency
+# appear under a name this script does not know.
+check_alias() { # command name aliased file line scope
+  local cmd="$1" name="$2" aliased="$3" file="$4" line="$5" scope="$6" module="${2#gta20::}"
+  if [[ $cmd == add_library && $name == "gta20::$module" && $aliased == "gta20_$module" && $scope == "engine/$module" ]]; then
+    return 0
+  fi
+  if [[ $cmd == add_library && $name == gta20::json && $aliased == gta20_nlohmann_json &&
+    ${file#"$ROOT"/} == cmake/Dependencies.cmake ]]; then
+    return 0
+  fi
+  violation "$file" "$line" "unsupported $cmd($name ALIAS $aliased): only the canonical gta20::<module> aliases in engine/<module>/ are allowed"
 }
 
 check_cmake_file() { # file
@@ -400,10 +449,21 @@ check_cmake_file() { # file
     [[ ${#toks[@]} -gt 0 ]] || continue
     target=""
     first=1
+    if [[ $args == *\\* ]]; then
+      # An escape can spell a target or path this script would not recognise (gta20\_sim).
+      violation "$file" "$line" "unsupported CMake escape (\\) in $cmd arguments: write targets and paths without escapes"
+      continue
+    fi
     case "$cmd" in
-      target_link_libraries | add_dependencies) kind=link ;;
+      target_link_libraries | add_dependencies) kind="link" ;;
       target_include_directories) kind="include path" ;;
-      target_sources | add_library | add_executable) kind=sources ;;
+      add_library | add_executable)
+        if [[ ${#toks[@]} -ge 2 && ${toks[1]} == ALIAS ]]; then
+          check_alias "$cmd" "${toks[0]}" "${toks[2]:-}" "$file" "$line" "$scope"
+          continue
+        fi
+        kind=sources ;;
+      target_sources) kind=sources ;;
       target_compile_options | target_link_options | target_precompile_headers) kind=options ;;
       cmake_language)
         violation "$file" "$line" "unsupported command cmake_language: it can call or evaluate commands the boundary checker cannot see"
@@ -414,7 +474,7 @@ check_cmake_file() { # file
       link_libraries | include_directories)
         first=0
         kind="include path"
-        if [[ $cmd == link_libraries ]]; then kind=link; fi
+        if [[ $cmd == link_libraries ]]; then kind="link"; fi
         if [[ $scope == shared ]]; then
           violation "$file" "$line" "directory-scoped $cmd in a shared CMake file affects every module; use the target_* command on the target"
           continue
@@ -478,10 +538,6 @@ while IFS= read -r file; do
 done < <(find "$ROOT" \( -name .git -o -name .deps -o -name _deps -o -name CMakeFiles -o -name node_modules \
   -o -path "$ROOT/build" -o -path "$ROOT/build-*" -o -path "$ROOT/out" -o -path "$ROOT/.orchestrator" \
   -o -path "$ROOT/.claude" \) -prune -o -type f \( -name CMakeLists.txt -o -name '*.cmake' \) -print | LC_ALL=C sort)
-cmake_basenames=()
-for file in ${cmake_list[@]+"${cmake_list[@]}"}; do
-  if [[ $file == *.cmake ]]; then cmake_basenames+=("${file##*/}"); fi
-done
 for file in ${cmake_list[@]+"${cmake_list[@]}"}; do
   cmake_files=$((cmake_files + 1))
   check_cmake_file "$file"

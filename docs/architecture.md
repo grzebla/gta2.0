@@ -90,10 +90,16 @@ Formy, których skrypt nie potrafi przypisać albo przeczytać, są **odrzucane*
 * właściwości zależności (`LINK_LIBRARIES`, `INCLUDE_DIRECTORIES`, `SOURCES`…) ustawiane przez
   `set_property` / `set_target_properties` na celu modułu — zależności deklaruje się wyłącznie
   poleceniami `target_*`;
-* kod CMake, którego skrypt nie widzi: `cmake_language(...)`, `include()` czegokolwiek poza nazwą
-  modułu CMake/projektu albo plikiem projektu objętym skanowaniem, `add_subdirectory()` katalogu
-  w buildzie, ścieżki bezwzględnej lub z `..`. Jedyny wyjątek: przypięty pomocnik doctest
-  dołączany w `tests/unit/CMakeLists.txt`.
+* znaki ucieczki CMake (`\`) w argumentach sprawdzanych poleceń (np. `gta20\_sim` to `gta20_sim`);
+* cele `ALIAS` inne niż kanoniczne `add_library(gta20::<moduł> ALIAS gta20_<moduł>)` w
+  `engine/<moduł>/` (oraz `gta20::json` w `cmake/Dependencies.cmake`), także `add_executable(… ALIAS …)`;
+* kod CMake, którego skrypt nie widzi: `cmake_language(...)`; `include()` i `add_subdirectory()`,
+  których ścieżka nie rozwiązuje się do skanowanego pliku CMake **w repozytorium**. Rozwiązywane są
+  tylko ścieżki względne i `${CMAKE_CURRENT_LIST_DIR}`, `${CMAKE_CURRENT_SOURCE_DIR}` (tylko w
+  `CMakeLists.txt`), `${PROJECT_SOURCE_DIR}`, `${CMAKE_SOURCE_DIR}`; nazwa modułu musi być plikiem w
+  `cmake/`. Wyjątki dla istniejących pomocników: moduł CMake `FetchContent`, przypięty pomocnik
+  doctest w `tests/unit/CMakeLists.txt` i `${cmake_dir}/RenderCapture.cmake` w skrypcie `-P`
+  `tests/conformance/rendercheck/CaptureDirTest.cmake`.
 
 Poza zakresem: kod CMake bibliotek zewnętrznych pobieranych do `.deps/` (przypięte URL + SHA-256 w
 `cmake/Dependencies.cmake`).
