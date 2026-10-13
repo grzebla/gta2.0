@@ -39,7 +39,10 @@ bloków, nie po komórkach mapy). Test CMAP
 unikalnych bloków niż CMAP — komórek nie porównuje. Przyleganie kolumn (pkt 1), 98,8 %,
 „992–1022 tylko w `mike1*`” to pomiary jednorazowe, a pkt 5 to ocena zrzutów **naszego** silnika,
 nie porównanie z oryginałem. Znaczenie flag ścian, obrót/odbicie i wysokość bloków:
-[../specs/world-geometry.md](../specs/world-geometry.md).
+[../specs/world-geometry.md](../specs/world-geometry.md). Kody skosów 0–63, ich występowanie
+(liczone po komórkach: 99,80 % pokryw 1023 na skosach 49–52 w 17 mapach) i stan dowodów:
+[../specs/world-slopes.md](../specs/world-slopes.md). Tabela znaczeń kodów z dokumentu DMA nie
+jest jeszcze przepisana.
 
 Oświetlenie pokrywy (bity 10–11): dokument mówi tylko „0 normalnie, 1–3 coraz ciemniej”.
 Renderer na razie go **nie stosuje** — zgadywane współczynniki wyraźnie zniekształcały dachy;
