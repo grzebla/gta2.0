@@ -2,8 +2,9 @@
   "$comment": "DirectDraw/Direct3D compatibility matrix for original GTA2 10.5 on EC2 G4dn. Registry semantics verified against CriminalRETeam/gta2_re Source/winmain.cpp: start_mode 0=windowed, 1=fullscreen (windowed silently falls back to fullscreen and rewrites start_mode=1); fullscreen is 640x480 by default at 16 bpp; render/video DLLs are hard-coded to d3ddll.dll + dmavideo.dll in 10.5.",
   "schemaVersion": 1,
   "game": {
-    "s3Key": "game/gta2-10.5.zip",
-    "sha256": "244319741dd8e55723d7eaa1e49babff3f57347b181e5342cce2feac0821ccb3",
+    "$comment": "GTA 2 9.6 (Rockstar Classics) - standalone gta2.exe. The 10.5 Freeloader binary (freeloader.dat as gta2.exe, sha256 2443197...ccb3 archive) fails to start on Windows Server 2022 with 0xc0000022 (seen 2026-10-13), it expects its Freeloader launcher.",
+    "s3Key": "game/gta2-9.6.zip",
+    "sha256": "eb36e582beda9bc84b2d90c162e168d68164a562a82f3567d1cb910065f60c10",
     "exe": "gta2.exe",
     "registryKey": "SOFTWARE\\DMA Design Ltd\\GTA2",
     "registryView": "Registry32"
