@@ -1,3 +1,3 @@
 # Known Issues
 
-Resolve the M1-006 issue concerning unchecked second-run status and stale conformance outputs, fixed by T0006 at 3b9d895. Retain all other known issues, including trace-integrity defects. The developer's Debug capture permission failures were superseded by successful orchestrator verification.
+Resolve the T0007 defects involving header-only false passes, duplicate ticks/entities/properties and unknown provenance fallback. Retain other architecture-review issues. Developer Debug capture permission failures were superseded by successful orchestrator Debug verification. Sanitizer render captures remain unverified because directory creation was denied; required sanitizer testing unit tests passed.

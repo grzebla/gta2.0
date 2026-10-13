@@ -29,3 +29,7 @@ Approved T0005 at e41b6ae: added GPU-independent texture-corner mapping for five
 ## 2026-10-13T06:16:04Z — T0006 Reject failed or stale conformance executions
 
 Approved T0006 at 3b9d895. The conformance wrapper now validates both execution statuses, rejects unsupported modes and clears prior outputs. Six synthetic wrapper tests cover failure, stale-output, missing-output and success cases. Inspected logs confirm 12/12 focused conformance, 78/78 headless and 81/81 Debug passes. Existing goldens remain unchanged; M1 remains incomplete.
+
+## 2026-10-13T06:23:20Z — T0007 Validate trace integrity before comparison
+
+Approved T0007 at 2fca90f. Trace parsing and comparison now reject empty or structurally invalid traces and unknown provenance with explicit diagnostics. Regression tests reproduce the former false passes and verify rejection while preserving sparse schedules, cross-adapter comparisons, tolerances and goldens. Inspected logs confirm 83/83 headless, 86/86 Debug and required ASan/UBSan testing unit passes. M1 remains incomplete.
