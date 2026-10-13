@@ -45,7 +45,7 @@ Describe 'Game prerequisites' {
 
 Describe 'Unattended host settings' {
     BeforeAll { $script:init = Get-Content -Raw -Path (Join-Path $script:hostDir 'Initialize-GfxHost.ps1') }
-    It 'creates the player folder the game saves into' { $script:init | Should -Match "Join-Path \$gameDir 'player'" }
+    It 'creates the player folder the game saves into' { $script:init | Should -Match 'Join-Path \$gameDir ''player''' }
     It 'suppresses blocking hard-error dialogs' { $script:init | Should -Match 'ErrorMode -Value 2' }
     It 'suppresses WER dialogs' { $script:init | Should -Match 'DontShowUI -Value 1' }
     It 'disables the Basic Display Adapter only once the T4 runs WDDM' { $script:init | Should -Match "modelNow -eq 'WDDM'" }

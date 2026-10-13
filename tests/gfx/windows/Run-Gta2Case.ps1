@@ -78,10 +78,11 @@ $result = [ordered]@{
 
 # Visible dialog boxes (class #32770) owned by a process, with their static texts.
 # A game that stops at its own message box must not count as rendered.
-function Get-ProcessDialogs([int] $ProcessId) {
+function Get-ProcessDialog([int] $ProcessId) {
     $found = [System.Collections.Generic.List[object]]::new()
     $cb = [Gta20.Native+EnumProc] {
         param($h, $l)
+        $null = $l
         $owner = [uint32]0
         [Gta20.Native]::GetWindowThreadProcessId($h, [ref] $owner) | Out-Null
         if ($owner -eq $ProcessId -and [Gta20.Native]::IsWindowVisible($h)) {
@@ -93,6 +94,7 @@ function Get-ProcessDialogs([int] $ProcessId) {
                 $texts = [System.Collections.Generic.List[string]]::new()
                 $child = [Gta20.Native+EnumProc] {
                     param($c, $l2)
+                    $null = $l2
                     $t = New-Object System.Text.StringBuilder 512
                     [Gta20.Native]::GetWindowText($c, $t, 512) | Out-Null
                     if ($t.Length -gt 0) { $texts.Add($t.ToString()) }
@@ -144,7 +146,7 @@ try {
 
     $proc.Refresh()
     $result.alive = -not $proc.HasExited
-    $result.dialogs = if ($result.alive) { @(Get-ProcessDialogs -ProcessId $proc.Id) } else { @() }
+    $result.dialogs = if ($result.alive) { @(Get-ProcessDialog -ProcessId $proc.Id) } else { @() }
     if ($proc.HasExited) {
         $result.exitCode = $proc.ExitCode
     } elseif ($proc.MainWindowHandle -ne [IntPtr]::Zero) {
