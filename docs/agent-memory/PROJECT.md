@@ -1,3 +1,3 @@
 # Project
 
-T0008 is approved at 1e5cef78971f42a256e140ebbfe7ba53908e9576, pending Gatekeeper integration. Dependency enforcement and architecture-documentation work is complete on this branch. M1 remains active.
+T0013 approved at 83fb43f37ee865cff502326a41f7f9313edb621c, awaiting Gatekeeper integration. T0008 approval remains unchanged. M1 remains incomplete.
