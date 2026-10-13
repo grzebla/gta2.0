@@ -1,3 +1,3 @@
 # Roadmap
 
-T0004 / M1-004 approved at d78585ca8fd0a30054f936ef525a5028c2495fca. M1-005 CPU texture-corner mapping is next. M1 remains incomplete.
+T0005 / M1-005 approved at e41b6ae0169e682589a572b885f4e45fcf298fc7, following approved T0004 / M1-004. Both bounded tasks are complete. M1 remains incomplete; runtime world geometry and original-game fidelity remain outstanding.

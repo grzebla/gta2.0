@@ -21,3 +21,7 @@ Approved T0003 at a16ba67: district render smoke tests now retain original-data 
 ## 2026-10-13T05:54:14Z — T0004 Isolate offline shell-test outputs and cleanup
 
 Approved T0004 at d78585c: offline shell tests now use disposable repository copies with validated external temporary paths and guarded cleanup. All 33 original assertions remain unchanged. Inspected execution logs confirm 60/60 isolation self-tests, 68/68 headless tests and 71/71 Debug tests passed. The full mock suite was not run under fixed policy. M1 remains incomplete.
+
+## 2026-10-13T06:01:47Z — T0005 Add CPU face texture-corner mapping
+
+Approved T0005 at e41b6ae: added GPU-independent texture-corner mapping for five block faces, with 40 explicit synthetic expectations and eight regressions against existing lid drawing. Inspected logs confirm 72/72 headless and 75/75 Debug tests passing, including external district captures. Runtime rendering is unchanged; wall orientation and original-game fidelity remain unverified. M1 remains incomplete.
