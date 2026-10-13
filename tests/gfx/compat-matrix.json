@@ -10,12 +10,21 @@
     "registryView": "Registry32"
   },
   "input": {
-    "$comment": "How capture mode injects keys: scancode (SendInput + KEYEVENTF_SCANCODE), vk (SendInput virtual key + scan code), postmessage (WM_KEYDOWN/UP to the game window), activate-scancode (attach to the game's input thread, focus, then scancode) or cycle (key i uses method i mod 4, for diagnosis). 2026-10-13: scancode did not change the 9.6 frontend under DDrawCompat (run local-20261013-084136); cycle is set TEMPORARILY for one diagnosis run, then the working method becomes the default.",
-    "method": "cycle"
+    "$comment": "How capture mode delivers keys. dinput-proxy (default): our DirectInput 8 proxy (tests/gfx/windows/inject/dinput8_proxy.c, built on the host with the pinned zig below) is placed next to gta2.exe and merges the scripted keys into what the game reads, frame-exact and independent of window focus. Verified 2026-10-13: menu navigation and walking in Downtown work; the real DirectInput on the EC2 host never reports any key, so every Windows-level method (scancode, vk, postmessage, activate-scancode, focusmsg-scancode, cycle) has no effect there - they stay for diagnosis only.",
+    "method": "dinput-proxy",
+    "proxy": {
+      "zigVersion": "0.14.1",
+      "zigUrl": "https://ziglang.org/download/0.14.1/zig-x86_64-windows-0.14.1.zip",
+      "zigSha256": "554f5378228923ffd558eac35e21af020c73789d87afeabf4bfd16f2e6feed2c"
+    }
   },
   "observe": {
     "warmupSeconds": 12,
-    "screenshotsAtSeconds": [12, 20, 30],
+    "screenshotsAtSeconds": [
+      12,
+      20,
+      30
+    ],
     "minUniqueColors": 24,
     "maxBlackRatio": 0.97,
     "minChangedRatio": 0.25,
@@ -23,7 +32,11 @@
   },
   "driver": {
     "$comment": "Tried in order. grid-public = AWS GRID driver for G4dn (WDDM + Direct3D on the T4; licensed for AWS instances), anonymous HTTPS download of the public object in s3://ec2-windows-nvidia-drivers/latest (SCP-free: no signed API call), pinned key + SHA-256 + NVIDIA Authenticode. Verified 2026-10-13: 596.86 installs and the T4 runs in WDDM. url = NVIDIA data center driver 581.80 - installs but REFUSES WDDM (nvidia-smi -dm 0: Not Supported), so Direct3D falls back to the Basic Display Adapter; kept as fallback. grid-s3 = signed S3 access, denied by the project SCP.",
-    "strategies": ["grid-public", "url", "none"],
+    "strategies": [
+      "grid-public",
+      "url",
+      "none"
+    ],
     "grid": {
       "url": "https://ec2-windows-nvidia-drivers.s3.amazonaws.com/latest/596.86__grid_win10_win11_server2022_server2025_dch_64bit_international_aws_swl.exe",
       "sha256": "e847099942f9e17e859fc151e725aeab9d23639c54d976a651732691b5fca6a1",
@@ -35,19 +48,51 @@
     "disableBasicDisplay": true
   },
   "wrappers": {
-    "native": { "files": [] },
+    "native": {
+      "files": []
+    },
     "ddrawcompat": {
       "url": "https://github.com/narzoul/DDrawCompat/releases/download/v0.7.1/DDrawCompat-v0.7.1.zip",
       "sha256": "0c33ecb1c01c1c779063b490a2e818f6d9227b3b4ee827c51790fb0fd59b17c5",
-      "files": [{ "from": "ddraw.dll", "to": "ddraw.dll" }]
+      "files": [
+        {
+          "from": "ddraw.dll",
+          "to": "ddraw.dll"
+        }
+      ]
+    },
+    "ddrawcompat-exclusive": {
+      "$comment": "DDrawCompat with real exclusive fullscreen instead of its borderless presentation window (input focus diagnosis 2026-10-13).",
+      "url": "https://github.com/narzoul/DDrawCompat/releases/download/v0.7.1/DDrawCompat-v0.7.1.zip",
+      "sha256": "0c33ecb1c01c1c779063b490a2e818f6d9227b3b4ee827c51790fb0fd59b17c5",
+      "files": [
+        {
+          "from": "ddraw.dll",
+          "to": "ddraw.dll"
+        }
+      ],
+      "config": {
+        "DDrawCompat.ini": [
+          "FullscreenMode = exclusive"
+        ]
+      }
     },
     "dgvoodoo2": {
       "url": "https://github.com/dege-diosg/dgVoodoo2/releases/download/v2.87.5/dgVoodoo2_87_5.zip",
       "sha256": "5ffde6927f7355ca3fdd5d785b581256a8e6539fa13e395a891ade6ba1040850",
       "files": [
-        { "from": "MS/x86/DDraw.dll", "to": "DDraw.dll" },
-        { "from": "MS/x86/D3DImm.dll", "to": "D3DImm.dll" },
-        { "from": "dgVoodoo.conf", "to": "dgVoodoo.conf" }
+        {
+          "from": "MS/x86/DDraw.dll",
+          "to": "DDraw.dll"
+        },
+        {
+          "from": "MS/x86/D3DImm.dll",
+          "to": "D3DImm.dll"
+        },
+        {
+          "from": "dgVoodoo.conf",
+          "to": "dgVoodoo.conf"
+        }
       ]
     }
   },
@@ -60,14 +105,66 @@
     "window_height": 480
   },
   "cases": [
-    { "id": "native-window",          "wrapper": "native",      "screen": { "start_mode": 0 } },
-    { "id": "native-fullscreen",      "wrapper": "native",      "screen": { "start_mode": 1 } },
-    { "id": "native-fullscreen-dev2", "wrapper": "native",      "screen": { "start_mode": 1, "renderdevice": 2, "videodevice": 2 },
-      "$comment": "Hypothesis: with Basic Display + T4 present, device index 2 may select the NVIDIA adapter." },
-    { "id": "native-window-1024",     "wrapper": "native",      "screen": { "start_mode": 0, "window_width": 1024, "window_height": 768 } },
-    { "id": "ddrawcompat-window",     "wrapper": "ddrawcompat", "screen": { "start_mode": 0 } },
-    { "id": "ddrawcompat-fullscreen", "wrapper": "ddrawcompat", "screen": { "start_mode": 1 } },
-    { "id": "dgvoodoo2-window",       "wrapper": "dgvoodoo2",   "screen": { "start_mode": 0 } },
-    { "id": "dgvoodoo2-fullscreen",   "wrapper": "dgvoodoo2",   "screen": { "start_mode": 1 } }
+    {
+      "id": "native-window",
+      "wrapper": "native",
+      "screen": {
+        "start_mode": 0
+      }
+    },
+    {
+      "id": "native-fullscreen",
+      "wrapper": "native",
+      "screen": {
+        "start_mode": 1
+      }
+    },
+    {
+      "id": "native-fullscreen-dev2",
+      "wrapper": "native",
+      "screen": {
+        "start_mode": 1,
+        "renderdevice": 2,
+        "videodevice": 2
+      },
+      "$comment": "Hypothesis: with Basic Display + T4 present, device index 2 may select the NVIDIA adapter."
+    },
+    {
+      "id": "native-window-1024",
+      "wrapper": "native",
+      "screen": {
+        "start_mode": 0,
+        "window_width": 1024,
+        "window_height": 768
+      }
+    },
+    {
+      "id": "ddrawcompat-window",
+      "wrapper": "ddrawcompat",
+      "screen": {
+        "start_mode": 0
+      }
+    },
+    {
+      "id": "ddrawcompat-fullscreen",
+      "wrapper": "ddrawcompat",
+      "screen": {
+        "start_mode": 1
+      }
+    },
+    {
+      "id": "dgvoodoo2-window",
+      "wrapper": "dgvoodoo2",
+      "screen": {
+        "start_mode": 0
+      }
+    },
+    {
+      "id": "dgvoodoo2-fullscreen",
+      "wrapper": "dgvoodoo2",
+      "screen": {
+        "start_mode": 1
+      }
+    }
   ]
 }

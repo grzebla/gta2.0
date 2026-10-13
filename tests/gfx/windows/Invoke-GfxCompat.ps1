@@ -110,7 +110,8 @@ function Get-Wrapper([string] $Name) {
         Remove-Item -Force $zip
         Set-Content -Path $marker -Value $w.sha256
     }
-    return [pscustomobject]@{ Dir = $dir; Files = @($w.files) }
+    $config = if ($w.PSObject.Properties.Name -contains 'config') { $w.config } else { $null }
+    return [pscustomobject]@{ Dir = $dir; Files = @($w.files); Config = $config }
 }
 
 function Set-ScreenSetting($Settings) {
@@ -128,6 +129,28 @@ function Reset-ScreenSetting {
     try { $base.DeleteSubKeyTree("$($matrix.game.registryKey)\Screen", $false) } finally { $base.Close() }
 }
 
+# GTA 2 developer options (registry subkey Debug). A flag is ON when its value exists, whatever
+# the number, so only flags that should be on are written; names are allowlisted by the caller.
+$script:DebugStrings = @('mapname', 'stylename', 'scriptname')
+function Set-DebugSetting($Settings) {
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry32')
+    $key = $base.CreateSubKey("$($matrix.game.registryKey)\Debug")
+    try {
+        foreach ($p in $Settings.PSObject.Properties) {
+            if ($script:DebugStrings -contains $p.Name) {
+                $key.SetValue($p.Name, [string]$p.Value, [Microsoft.Win32.RegistryValueKind]::String)
+            } else {
+                $key.SetValue($p.Name, 1, [Microsoft.Win32.RegistryValueKind]::DWord)
+            }
+        }
+    } finally { $key.Close(); $base.Close() }
+}
+
+function Reset-DebugSetting {
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry32')
+    try { $base.DeleteSubKeyTree("$($matrix.game.registryKey)\Debug", $false) } finally { $base.Close() }
+}
+
 function Get-ScreenSetting([string] $Name) {
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry32')
     $key = $base.OpenSubKey("$($matrix.game.registryKey)\Screen")
@@ -142,16 +165,49 @@ function Merge-Setting($A, $B) {
     return [pscustomobject]$merged
 }
 
+# Builds our DirectInput 8 proxy (inject\dinput8_proxy.c) with a pinned zig compiler and puts it
+# at inject\dinput8.dll for Run-Gta2Case.ps1. Cached by source hash; no binary lives in git.
+function Initialize-InputProxy {
+    $p = $matrix.input.proxy
+    $src = Join-Path $scriptDir 'inject\dinput8_proxy.c'
+    $def = Join-Path $scriptDir 'inject\dinput8_proxy.def'
+    $srcHash = ((Get-FileHash $src).Hash + (Get-FileHash $def).Hash + $p.zigSha256).Substring(0, 16).ToLowerInvariant()
+    $cached = Join-Path $cacheDir "dinput8-proxy-$srcHash.dll"
+    if (-not (Test-Path $cached)) {
+        $zigDir = Join-Path $cacheDir "zig-$($p.zigVersion)"
+        $zigExe = Get-ChildItem -Path $zigDir -Filter 'zig.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $zigExe) {
+            $zip = Join-Path $cacheDir "zig-$($p.zigVersion).zip"
+            Invoke-WebRequest -UseBasicParsing -Uri $p.zigUrl -OutFile $zip
+            $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+            if ($sha -ne $p.zigSha256) { Remove-Item -Force $zip; throw "zig SHA-256 mismatch: $sha" }
+            Expand-Archive -Path $zip -DestinationPath $zigDir -Force
+            Remove-Item -Force $zip
+            $zigExe = Get-ChildItem -Path $zigDir -Filter 'zig.exe' -Recurse | Select-Object -First 1
+        }
+        $out = Join-Path $cacheDir 'dinput8-build'
+        New-Item -ItemType Directory -Force -Path $out | Out-Null
+        $env:ZIG_GLOBAL_CACHE_DIR = Join-Path $cacheDir 'zig-cache'
+        & $zigExe.FullName cc -target x86-windows-gnu -shared -O2 -o (Join-Path $out 'dinput8.dll') $src $def
+        if ($LASTEXITCODE -ne 0) { throw "building the input proxy failed ($LASTEXITCODE)" }
+        Copy-Item -Path (Join-Path $out 'dinput8.dll') -Destination $cached -Force
+    }
+    Copy-Item -Path $cached -Destination (Join-Path $scriptDir 'inject\dinput8.dll') -Force
+    return $srcHash
+}
+
 # ---------------------------------------------------------------- case loop
 # Key injection method (owner setting in the matrix; scenarios cannot choose it).
 $inputMethod = 'scancode'
 if (($matrix.PSObject.Properties.Name -contains 'input') -and $matrix.input.method) { $inputMethod = [string]$matrix.input.method }
+$inputProxy = $null
+if ($inputMethod -eq 'dinput-proxy' -and $Mode -eq 'capture') { $inputProxy = Initialize-InputProxy }
 # Which harness revision actually ran here (written by ec2-gpu-session.sh at upload).
 $revisionFile = Join-Path $scriptDir 'harness-revision.txt'
 $harnessRevision = if (Test-Path $revisionFile) { (Get-Content -Raw -Path $revisionFile).Trim() } else { 'unknown' }
 $summary = [ordered]@{
     runId = $RunId; mode = $Mode; startedAt = (Get-Date).ToString('o')
-    harnessRevision = $harnessRevision; inputMethod = $inputMethod
+    harnessRevision = $harnessRevision; inputMethod = $inputMethod; inputProxy = $inputProxy
     gpu = @($envReport.adapters | Where-Object { $_.Name -like '*NVIDIA*' } | ForEach-Object { $_.Name }) -join '; '
     driverStrategy = $boot.Driver.strategy
     interactiveSession = [bool]$session
@@ -171,7 +227,8 @@ if ($Mode -ne 'probe') {
         $scenario = Get-Content -Raw -Path $scenarioPath | ConvertFrom-Json
         $names = $scenario.PSObject.Properties.Name
         $scenarioScreen = if ($names -contains 'screen') { $scenario.screen } else { [pscustomobject]@{} }
-        $selected = @([pscustomobject]@{ id = "capture-$($scenario.id)"; wrapper = $scenario.wrapper; screen = $scenarioScreen })
+        $scenarioDebug = if ($names -contains 'debug') { $scenario.debug } else { $null }
+        $selected = @([pscustomobject]@{ id = "capture-$($scenario.id)"; wrapper = $scenario.wrapper; screen = $scenarioScreen; debug = $scenarioDebug })
         $observe = [pscustomobject]@{
             warmupSeconds        = $matrix.observe.warmupSeconds
             screenshotsAtSeconds = @($scenario.screenshotsAtSeconds)
@@ -213,13 +270,25 @@ if ($Mode -ne 'probe') {
                     Copy-Item -Path $src -Destination $dst
                     $installed += $dst
                 }
+                # Wrapper configuration files from the matrix (e.g. DDrawCompat.ini), one line each.
+                if ($wrapper.Config) {
+                    foreach ($cfgFile in $wrapper.Config.PSObject.Properties) {
+                        if ($cfgFile.Name -notmatch '^[A-Za-z0-9_.-]{1,64}\.(ini|conf)$') { throw "bad wrapper config name '$($cfgFile.Name)'" }
+                        $dst = Join-Path $gameDir $cfgFile.Name
+                        if (Test-Path $dst) { throw "refusing to overwrite existing game file '$($cfgFile.Name)'" }
+                        Set-Content -Path $dst -Value @($cfgFile.Value) -Encoding ASCII
+                        $installed += $dst
+                    }
+                }
             }
 
             # Each case starts from the base settings only: values a previous case wrote
             # (e.g. renderdevice=2) or the game itself rewrote must not leak into the next case.
             Reset-ScreenSetting
+            Reset-DebugSetting
             $screen = Merge-Setting $matrix.baseScreen $c.screen
             Set-ScreenSetting $screen
+            if (($c.PSObject.Properties.Name -contains 'debug') -and $c.debug) { Set-DebugSetting $c.debug }
 
             $caseFile = Join-Path $caseDir 'case.json'
             [ordered]@{
