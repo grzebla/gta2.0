@@ -149,7 +149,8 @@ if ($Mode -ne 'probe') {
     if ($Cases -ne 'all') {
         $wanted = $Cases.Split(',')
         $selected = @($selected | Where-Object { $wanted -contains $_.id })
-        $missing = @($wanted | Where-Object { $_ -notin @($selected.id) })
+        $selectedIds = @($selected | ForEach-Object { $_.id })
+        $missing = @($wanted | Where-Object { $_ -notin $selectedIds })
         if ($missing) { throw "unknown case id(s): $($missing -join ', ')" }
     }
 
@@ -244,7 +245,8 @@ if ($Mode -ne 'probe') {
 $passing = @($summary.cases | Where-Object { $_.verdict -like 'PASS*' })
 $summary.finishedAt = (Get-Date).ToString('o')
 $summary.overall = Get-OverallVerdict -Mode $Mode -Cases @($summary.cases)
-$summary.passingCases = @($passing.id)
+# StrictMode 3: no member enumeration on a possibly empty array.
+$summary.passingCases = @($passing | ForEach-Object { $_.id })
 $summary | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 (Join-Path $resultsDir 'summary.json')
 
 # ---------------------------------------------------------------- upload
