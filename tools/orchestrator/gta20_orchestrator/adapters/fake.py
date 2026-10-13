@@ -268,6 +268,10 @@ class FakeGitHub:
     def checks(self, number: int) -> List[Dict[str, Any]]:
         return self.checks_by_pr.get(number, [])
 
+    def failure_excerpts(self, checks: List[Dict[str, Any]]) -> str:
+        return "\n".join("--- %s ---\nsimulated error: expected X, got Y" % c["name"]
+                         for c in checks if c.get("bucket") == "fail")
+
     def mark_ready(self, number: int) -> bool:
         self.prs[number]["isDraft"] = False
         return True
