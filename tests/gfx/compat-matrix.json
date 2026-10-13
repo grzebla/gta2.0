@@ -3,7 +3,7 @@
   "schemaVersion": 1,
   "game": {
     "s3Key": "game/gta2-10.5.zip",
-    "sha256": "",
+    "sha256": "244319741dd8e55723d7eaa1e49babff3f57347b181e5342cce2feac0821ccb3",
     "exe": "gta2.exe",
     "registryKey": "SOFTWARE\\DMA Design Ltd\\GTA2",
     "registryView": "Registry32"

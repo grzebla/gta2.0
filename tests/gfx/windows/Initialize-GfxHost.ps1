@@ -88,7 +88,7 @@ if (-not $user -or -not $autologonOk) {
     $secure = ConvertTo-SecureString $plain -AsPlainText -Force
     if (-not $user) {
         New-LocalUser -Name $TestUser -Password $secure -PasswordNeverExpires -AccountNeverExpires `
-            -Description 'GTA20 graphics test (interactive console session)' | Out-Null
+            -Description 'GTA20 graphics test (interactive console)' | Out-Null
         Add-LocalGroupMember -Group 'Users' -Member $TestUser -ErrorAction SilentlyContinue
         Write-Step "created local user $TestUser"
     } else {
