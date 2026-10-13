@@ -58,7 +58,9 @@ widziany przez `render`) nie dają prawa do własnego `#include` ani linkowania.
 * **link** — `gta20::<moduł>` albo `gta20_<moduł>` w `target_link_libraries` lub `add_dependencies`;
 * **ścieżka nagłówków** — `engine/<moduł>`, `../<moduł>` albo cel modułu (np.
   `$<TARGET_PROPERTY:gta20_sim,…>`) w `target_include_directories`;
-* **źródła** — katalog innego modułu w `target_sources`, `add_library`, `add_executable`.
+* **źródła** — katalog innego modułu w `target_sources`, `add_library`, `add_executable`;
+* **opcje** — katalog lub cel innego modułu w `target_compile_options`, `target_link_options`,
+  `target_precompile_headers` (np. `-I../sim/include`, `-lgta20_sim`).
 
 Polecenia CMake są sprawdzane we **wszystkich** plikach `CMakeLists.txt` i `*.cmake` projektu
 (korzeń, `cmake/`, `engine/`, `apps/`, `tests/`…; bez katalogów builda i `.deps/`), bo każdy z nich
@@ -66,17 +68,35 @@ może zmienić dowolny cel. Krawędź należy do modułu, **którego cel jest pi
 (`gta20_<moduł>`, alias `gta20::<moduł>`, cel aplikacji = nazwa jej katalogu), a nie do katalogu
 pliku: `target_link_libraries(gta20_scene PRIVATE gta20::sim)` w `apps/gta2/CMakeLists.txt` czy w
 głównym `CMakeLists.txt` to krawędź `scene → sim`. Cele spoza modułów (np. `gta20_unit_tests`)
-nie mają reguł; nieznany cel w katalogu modułu podlega regułom tego modułu. Argumenty są dzielone na
-elementy list CMake (`a;b`, także w cudzysłowie) i atomy wyrażeń generatora (`$<BUILD_INTERFACE:…>`,
-zagnieżdżone `$<$<CONFIG:…>:…>`), więc żadna z tych form nie ukrywa zależności.
+nie mają reguł; nieznany cel w katalogu modułu podlega regułom tego modułu. Pliki czyta mały lekser
+języka CMake: argumenty w cudzysłowie (ze znakami ucieczki), zagnieżdżone nawiasy, argumenty
+nawiasowe `[[…]]` / `[=[…]=]` (treść czytana dosłownie), komentarze wierszowe i nawiasowe
+`#[[…]]`. Argumenty są dzielone na elementy list CMake (`a;b`, także w cudzysłowie i w argumencie
+nawiasowym) i atomy wyrażeń generatora (`$<BUILD_INTERFACE:…>`, zagnieżdżone `$<$<CONFIG:…>:…>`),
+więc żadna z tych form nie ukrywa zależności.
 
-Odrzucane są też formy, których skrypt nie potrafi przypisać: nieznany cel `gta20_*`/`gta20::*`
-jako zależność; zmienna w argumentach zależności celu modułu (poza `${GTA20_SDL_TARGET}`, a w
-ścieżkach poza katalogami `CMAKE_`/`PROJECT_` źródeł i builda); zależność od gta20/SDL/json celu
-podanego zmienną (argument funkcji CMake); aplikacja jako zależność; `link_libraries` i
-`include_directories` (zakres katalogu) w plikach wspólnych poza modułami i `tests/`; właściwości
-zależności (`LINK_LIBRARIES`, `INCLUDE_DIRECTORIES`, `SOURCES`…) ustawiane przez `set_property` /
-`set_target_properties` na celu modułu — zależności deklaruje się wyłącznie poleceniami `target_*`.
+Formy, których skrypt nie potrafi przypisać albo przeczytać, są **odrzucane**, nie pomijane:
+
+* nieznany cel `gta20_*`/`gta20::*` jako zależność; aplikacja jako zależność;
+* zmienna w argumentach zależności celu modułu (poza `${GTA20_SDL_TARGET}`, a w ścieżkach i opcjach
+  poza katalogami `CMAKE_`/`PROJECT_` źródeł i builda);
+* cel podany zmienną (argument funkcji lub makra CMake): każda zależność od gta20/SDL/json i
+  **każda** zależność podana zmienną, np. `function(link_module target dep)` z
+  `target_link_libraries(${target} PRIVATE ${dep})`. Jedyny wyjątek:
+  `target_sources(${target} PRIVATE ${output})` w `cmake/EmbedBinary.cmake` (wygenerowany plik
+  `.cpp` w katalogu builda);
+* `link_libraries` i `include_directories` (zakres katalogu) w plikach wspólnych poza modułami i
+  `tests/`;
+* właściwości zależności (`LINK_LIBRARIES`, `INCLUDE_DIRECTORIES`, `SOURCES`…) ustawiane przez
+  `set_property` / `set_target_properties` na celu modułu — zależności deklaruje się wyłącznie
+  poleceniami `target_*`;
+* kod CMake, którego skrypt nie widzi: `cmake_language(...)`, `include()` czegokolwiek poza nazwą
+  modułu CMake/projektu albo plikiem projektu objętym skanowaniem, `add_subdirectory()` katalogu
+  w buildzie, ścieżki bezwzględnej lub z `..`. Jedyny wyjątek: przypięty pomocnik doctest
+  dołączany w `tests/unit/CMakeLists.txt`.
+
+Poza zakresem: kod CMake bibliotek zewnętrznych pobieranych do `.deps/` (przypięte URL + SHA-256 w
+`cmake/Dependencies.cmake`).
 
 Osobne listy obejmują SDL (`SDL3/…`, `SDL_*.h`, `SDL3::…`, `${GTA20_SDL_TARGET}`), nagłówki API GPU
 (`vulkan/`, `d3d12*.h`, `dxgi*.h`, `Metal/`, `GL/`…), nlohmann/json (`nlohmann/…`, `gta20::json`)
@@ -90,7 +110,8 @@ Testy skryptu: `tests/scripts/check-module-boundaries.test.sh` (CTest
 `cmake/`, `engine/`, `apps/` i `tests/` do katalogu tymczasowego, dodaje jedną oznaczoną krawędź
 **SYNTHETIC** i wymaga dokładnie jednego błędu wskazującego plik i wiersz; obecny graf, minimalne
 syntetyczne drzewo z każdą dozwoloną krawędzią, zakomentowane krawędzie i dozwolone odpowiedniki
-każdej formy CMake (listy, wyrażenia generatora, polecenia na cudzym celu) muszą przejść. Pliki
+każdej formy CMake (listy, wyrażenia generatora, argumenty nawiasowe, polecenia na cudzym celu,
+opcje) muszą przejść. Pliki
 repozytorium nie są modyfikowane (test to sprawdza).
 
 CMake linkuje SDL wyłącznie do `render`, `platform` i `gta2`. Preset `headless` buduje wszystko bez SDL.

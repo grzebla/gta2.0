@@ -14,14 +14,24 @@
 # app target = its directory name), not to the directory of the file:
 #   - link:         target_link_libraries, add_dependencies;
 #   - include path: target_include_directories (engine/<module>, ../<module>, module targets);
-#   - sources:      target_sources, add_library, add_executable (another module's directory).
-# Arguments are split into CMake list items (;) and generator-expression atoms ($<...:...>), so
-# neither hides a dependency. In commands on a unit's target, an unknown gta20_*/gta20:: target, a
-# variable other than ${GTA20_SDL_TARGET} in link arguments, and a variable other than the
-# CMAKE_/PROJECT_ source and binary directories in path arguments are rejected. Rejected
-# everywhere: directory-scoped link_libraries/include_directories in shared files (outside units
-# and tests/), dependency properties set with set_property/set_target_properties on unit targets,
-# and gta20 dependencies of a target that is only a variable (a CMake function argument).
+#   - sources:      target_sources, add_library, add_executable (another module's directory);
+#   - options:      target_compile_options, target_link_options, target_precompile_headers
+#                   (-I../<module>, -lgta20_<module>, module targets, module directories).
+# Files are read with a small CMake lexer: quoted arguments (with escapes), nested parentheses,
+# bracket arguments [[...]] / [=[...]=] (content read literally) and line/bracket comments. Arguments
+# are split into CMake list items (;) and generator-expression atoms ($<...:...>), so none of these
+# hides a dependency. In commands on a unit's target, an unknown gta20_*/gta20:: target, a variable
+# other than ${GTA20_SDL_TARGET} in link arguments, and a variable other than the CMAKE_/PROJECT_
+# source and binary directories in path/option arguments are rejected. Rejected everywhere:
+# directory-scoped link_libraries/include_directories in shared files (outside units and tests/),
+# dependency properties set with set_property/set_target_properties on unit targets, and, for a
+# target that is only a variable (a CMake function argument), any gta20/SDL/json dependency and ANY
+# variable dependency - the single exception is target_sources(${target} PRIVATE ${output}) in
+# cmake/EmbedBinary.cmake (a generated file in the binary directory). CMake code this script cannot
+# read is rejected: cmake_language(...), include() of anything but a module name or a scanned
+# project file, add_subdirectory() of a build-tree, absolute or ../ directory (single allowance:
+# the pinned doctest helper included by tests/unit/CMakeLists.txt). Out of scope: pinned
+# third-party CMake code fetched into .deps/ (cmake/Dependencies.cmake, URL + SHA-256).
 #
 # Usage: check-module-boundaries.sh [ROOT]
 #   ROOT defaults to the repository root; tests/scripts/check-module-boundaries.test.sh passes
@@ -138,36 +148,75 @@ check_includes() { # unit dir
 
 engine_dir_re='(^|[/}])engine/([A-Za-z0-9_-]+)(/|$)'
 sibling_dir_re='(^|[/}])\.\./([A-Za-z0-9_-]+)(/|$)'
+option_dir_re="(engine|\\.\\.)/(${MODULES// /|})(/|\$)"
+embedded_target_re='gta20(_|::)([A-Za-z0-9_-]+)'
 variable_re='\$\{([A-Za-z0-9_]*)\}'
+atom_others=0
 genex_operator_re='^[A-Z][A-Z0-9_]*$'
 dependency_property_re='[[:space:]](INTERFACE_)?(LINK_LIBRARIES|INCLUDE_DIRECTORIES|SOURCES|MANUALLY_ADDED_DEPENDENCIES|LINK_DEPENDS)[[:space:]]'
 
-# Prints "<command><TAB><line><TAB><arguments>" for every dependency-relevant command (comments
-# stripped, multi-line calls joined, command names lower-cased).
+# Prints "<command><TAB><line><TAB><arguments>" for every dependency-relevant command. A small
+# lexer for the CMake language: every command invocation is scanned (so strings, comments and
+# brackets of other commands cannot desynchronise it); quoted arguments keep their quotes and
+# escapes; nested parentheses are kept; bracket arguments [=*[ ... ]=*] contribute their literal
+# content; line comments and bracket comments #[=*[ ... ]=*] are dropped; newlines become spaces.
 cmake_calls() {
   awk '
-    FNR == 1 { cmd = "" }
+    function eqs(k,   s) { s = ""; while (k-- > 0) s = s "="; return s }
+    function emit() {
+      if (cmd in tracked) { gsub(/[\t\r]/, " ", args); print cmd "\t" start "\t" args }
+    }
+    BEGIN {
+      k = split("target_link_libraries link_libraries target_include_directories include_directories " \
+                "target_sources add_library add_executable add_dependencies set_property " \
+                "set_target_properties target_compile_options target_link_options " \
+                "target_precompile_headers include add_subdirectory cmake_language", names, " ")
+      for (j = 1; j <= k; j++) tracked[names[j]] = 1
+    }
+    FNR == 1 { cmd = ""; depth = 0; inq = 0; brc = -1; bra = -1 }
     {
-      text = $0
-      sub(/#.*/, "", text)
-      while (length(text) > 0) {
-        if (cmd == "") {
-          lower = tolower(text)
-          if (!match(lower, /(^|[^a-z0-9_])(target_link_libraries|link_libraries|target_include_directories|include_directories|target_sources|add_library|add_executable|add_dependencies|set_property|set_target_properties)[ \t]*\(/)) break
-          cmd = substr(lower, RSTART, RLENGTH)
-          if (substr(cmd, 1, 1) !~ /[a-z]/) cmd = substr(cmd, 2)
-          sub(/[ \t]*\($/, "", cmd)
-          start = FNR
-          args = ""
-          text = substr(text, RSTART + RLENGTH)
+      line = $0; n = length(line); i = 1
+      while (i <= n) {
+        rest = substr(line, i)
+        if (brc >= 0) { # bracket comment
+          endb = "]" eqs(brc) "]"; p = index(rest, endb)
+          if (p == 0) { i = n + 1; continue }
+          i += p - 1 + length(endb); brc = -1; continue
         }
-        p = index(text, ")")
-        if (p == 0) { args = args " " text; break }
-        args = args " " substr(text, 1, p - 1)
-        print cmd "\t" start "\t" args
-        cmd = ""
-        text = substr(text, p + 1)
+        if (bra >= 0) { # bracket argument: literal content
+          endb = "]" eqs(bra) "]"; p = index(rest, endb)
+          if (p == 0) { args = args rest " "; i = n + 1; continue }
+          args = args substr(rest, 1, p - 1) " "; i += p - 1 + length(endb); bra = -1; continue
+        }
+        c = substr(line, i, 1)
+        if (inq) { # quoted argument
+          if (c == "\\") { args = args substr(line, i, 2); i += 2; continue }
+          if (c == "\"") inq = 0
+          args = args c; i++; continue
+        }
+        if (c == "#") {
+          if (match(rest, /^#\[=*\[/)) { brc = RLENGTH - 3; i += RLENGTH; continue }
+          break # line comment
+        }
+        if (cmd != "") { # inside a command invocation
+          if (c == "\\") { args = args substr(line, i, 2); i += 2; continue }
+          if (c == "\"") { inq = 1; args = args c; i++; continue }
+          if (match(rest, /^\[=*\[/)) { bra = RLENGTH - 2; args = args " "; i += RLENGTH; continue }
+          if (c == "(") { depth++; args = args c; i++; continue }
+          if (c == ")") {
+            if (--depth == 0) { emit(); cmd = "" } else args = args c
+            i++; continue
+          }
+          args = args c; i++; continue
+        }
+        if (match(rest, /^[A-Za-z_][A-Za-z0-9_]*[ \t]*\(/)) {
+          cmd = tolower(substr(rest, 1, RLENGTH)); sub(/[ \t]*\($/, "", cmd)
+          depth = 1; args = ""; start = FNR; i += RLENGTH; continue
+        }
+        if (match(rest, /^[A-Za-z0-9_]+/)) { i += RLENGTH; continue }
+        i++
       }
+      if (cmd != "") args = args " "
     }' "$1"
 }
 
@@ -204,20 +253,23 @@ unit_of_target() { # target -> prints the unit owning it, or nothing
   fi
 }
 
-# One dependency argument item (a CMake list element) of a command whose target belongs to
+# One dependency argument item (a CMake list element) of command `cmd` whose target belongs to
 # `owner`: a unit, "" (a non-production target, e.g. a test executable) or "?" (target is a
-# variable). kind: link | include path | sources.
-check_item() { # owner kind item file line target
-  local owner="$1" kind="$2" item="$3" file="$4" line="$5" target="$6"
-  local rest var name atom label others=0
+# variable). kind: link | include path | sources | options.
+check_item() { # owner kind item file line target cmd
+  local owner="$1" kind="$2" item="$3" file="$4" line="$5" target="$6" cmd="$7"
+  local rest var name atom label
   local -a atoms
   label="$kind"
   [[ $kind != link ]] && label="$kind $item"
+  atom_others=0
 
-  # Paths into another module's directory: .../engine/<name>/... or ../<module>/...
+  # Paths into another module's directory: .../engine/<name>/... or ../<module>/... (in options
+  # also glued to a flag, e.g. -I../sim/include).
   if [[ $kind != link ]]; then
     rest="$item"
-    while [[ $rest =~ $engine_dir_re || $rest =~ $sibling_dir_re ]]; do
+    while [[ $rest =~ $engine_dir_re || $rest =~ $sibling_dir_re ||
+      ($kind == options && $rest =~ $option_dir_re) ]]; do
       name="${BASH_REMATCH[2]}"
       rest="${rest#*"${BASH_REMATCH[0]}"}"
       # shellcheck disable=SC2086
@@ -240,6 +292,12 @@ check_item() { # owner kind item file line target
     rest="${rest/"${BASH_REMATCH[0]}"/ }"
     if [[ $var == GTA20_SDL_TARGET ]]; then
       check_sdl_edge "$owner" "$label" "$file" "$line" "$target"
+    elif [[ $owner == "?" ]]; then
+      # A variable target with a variable dependency (e.g. a function forwarding both) cannot be
+      # attributed. Single allowance: gta20_embed_binary adds its generated file to the target.
+      if [[ ${file#"$ROOT"/} != cmake/EmbedBinary.cmake || $cmd != target_sources || $item != "\${output}" ]]; then
+        violation "$file" "$line" "$target -> \${$var} ($label): unresolved dependency of a variable target; name the target and its dependencies literally"
+      fi
     elif is_unit "$owner" && { [[ $kind == link ]] || ! is_path_var "$var"; }; then
       violation "$file" "$line" "$owner -> \${$var} ($label): unsupported dependency expression; name targets and paths literally"
     fi
@@ -252,40 +310,49 @@ check_item() { # owner kind item file line target
     atom="${atom//@@/::}"
     atom="${atom#"${atom%%[![:space:]]*}"}"
     atom="${atom%"${atom##*[![:space:]]}"}"
-    case "$atom" in
-      "" | PUBLIC | PRIVATE | INTERFACE | LINK_PUBLIC | LINK_PRIVATE | LINK_INTERFACE_LIBRARIES | debug | optimized | general) ;;
-      gta20::json | gta20_nlohmann_json | nlohmann_json | nlohmann_json::*)
-        [[ $kind == link ]] && link_edges=$((link_edges + 1))
-        if [[ $owner == "?" ]]; then
-          violation "$file" "$line" "$target -> nlohmann/json ($label): cannot attribute a variable target to a module; name the module target"
-        elif is_unit "$owner" && ! may_use_json "$owner"; then
-          violation "$file" "$line" "$owner -> nlohmann/json ($label $atom): only engine/testing may use nlohmann/json"
-        fi ;;
-      *SDL*)
-        check_sdl_edge "$owner" "$label $atom" "$file" "$line" "$target" ;;
-      gta20::* | gta20_*)
-        name="${atom#gta20::}"
-        name="${name#gta20_}"
-        [[ $kind == link ]] && link_edges=$((link_edges + 1))
-        # shellcheck disable=SC2086
-        if ! contains "$name" $MODULES; then
-          violation "$file" "$line" "${owner:-$target} -> $atom ($label): unknown gta20 target"
-        elif [[ $owner == "?" ]]; then
-          violation "$file" "$line" "$target -> $name ($label): cannot attribute a variable target to a module; name the module target"
-        elif [[ -n $owner ]]; then
-          check_module_edge "$owner" "$name" "$label" "$file" "$line"
-        fi ;;
-      *)
-        if [[ $kind == link ]] && is_unit "$owner" && allowed_modules "apps/$atom" >/dev/null; then
-          violation "$file" "$line" "$owner -> apps/$atom (link): an application is not a dependency"
-        elif [[ $kind == link && ! ($item == *'$<'* && $atom =~ $genex_operator_re) ]]; then
-          others=1
-        fi ;;
-    esac
+    check_atom "$owner" "$kind" "$label" "$atom" "$item" "$file" "$line" "$target"
   done
-  if [[ $others -eq 1 ]] && is_pure "$owner"; then
+  if [[ $atom_others -eq 1 ]] && is_pure "$owner"; then
     violation "$file" "$line" "$owner -> $item (link): the simulation may link only gta20 modules"
   fi
+}
+
+check_atom() { # owner kind label atom item file line target
+  local owner="$1" kind="$2" label="$3" atom="$4" item="$5" file="$6" line="$7" target="$8" name
+  case "$atom" in
+    "" | PUBLIC | PRIVATE | INTERFACE | LINK_PUBLIC | LINK_PRIVATE | LINK_INTERFACE_LIBRARIES | debug | optimized | general) ;;
+    gta20::json | gta20_nlohmann_json | nlohmann_json | nlohmann_json::*)
+      [[ $kind == link ]] && link_edges=$((link_edges + 1))
+      if [[ $owner == "?" ]]; then
+        violation "$file" "$line" "$target -> nlohmann/json ($label): cannot attribute a variable target to a module; name the module target"
+      elif is_unit "$owner" && ! may_use_json "$owner"; then
+        violation "$file" "$line" "$owner -> nlohmann/json ($label $atom): only engine/testing may use nlohmann/json"
+      fi ;;
+    *SDL*)
+      check_sdl_edge "$owner" "$label $atom" "$file" "$line" "$target" ;;
+    gta20::* | gta20_*)
+      name="${atom#gta20::}"
+      name="${name#gta20_}"
+      [[ $kind == link ]] && link_edges=$((link_edges + 1))
+      # shellcheck disable=SC2086
+      if ! contains "$name" $MODULES; then
+        violation "$file" "$line" "${owner:-$target} -> $atom ($label): unknown gta20 target"
+      elif [[ $owner == "?" ]]; then
+        violation "$file" "$line" "$target -> $name ($label): cannot attribute a variable target to a module; name the module target"
+      elif [[ -n $owner ]]; then
+        check_module_edge "$owner" "$name" "$label" "$file" "$line"
+      fi ;;
+    *)
+      if [[ ($kind == link || $kind == options) && $atom =~ $embedded_target_re ]]; then
+        # A target name inside a flag or path, e.g. -lgta20_sim.
+        check_atom "$owner" "$kind" "$label" "gta20${BASH_REMATCH[1]}${BASH_REMATCH[2]}" "$item" "$file" "$line" "$target"
+        if [[ $kind == link ]]; then atom_others=1; fi
+      elif [[ $kind == link ]] && is_unit "$owner" && allowed_modules "apps/$atom" >/dev/null; then
+        violation "$file" "$line" "$owner -> apps/$atom (link): an application is not a dependency"
+      elif [[ $kind == link && ! ($item == *'$<'* && $atom =~ $genex_operator_re) ]]; then
+        atom_others=1
+      fi ;;
+  esac
 }
 
 check_sdl_edge() { # owner label file line target
@@ -294,6 +361,33 @@ check_sdl_edge() { # owner label file line target
     violation "$3" "$4" "$5 -> SDL ($2): cannot attribute a variable target to a module; name the module target"
   elif is_unit "$1" && ! may_use_sdl "$1"; then
     violation "$3" "$4" "$1 -> SDL ($2): only engine/render, engine/platform and apps/gta2 may use SDL"
+  fi
+}
+
+# include()/add_subdirectory() may only bring in CMake code this script also scans: a CMake or
+# project module by name, a project file (its name exists among the scanned files) or a source
+# directory - never a file or directory under a build tree or an absolute path. Single allowance:
+# the pinned doctest helper in tests/unit (third-party, SHA-256 pinned in cmake/Dependencies.cmake).
+check_code_source() { # command argument file line
+  local cmd="$1" arg="$2" file="$3" line="$4" ok=0 rel="${3#"$ROOT"/}"
+  if [[ $arg == *BINARY_DIR* || $arg == /* || $arg =~ ^[A-Za-z]:[/\\] ]]; then
+    ok=0
+  elif [[ $cmd == include ]]; then
+    if [[ $arg =~ ^[A-Za-z0-9_]+$ ]] || contains "${arg##*/}" ${cmake_basenames[@]+"${cmake_basenames[@]}"}; then
+      ok=1
+    elif [[ $rel == tests/unit/CMakeLists.txt && $arg == "\${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake" ]]; then
+      ok=1
+    fi
+  elif [[ $arg != *..* ]]; then # add_subdirectory: a relative directory or one under the source tree
+    case "$arg" in
+      \$\{CMAKE_CURRENT_SOURCE_DIR\}/* | \$\{PROJECT_SOURCE_DIR\}/* | \$\{CMAKE_SOURCE_DIR\}/*)
+        if [[ ${arg#*\}} != *'$'* ]]; then ok=1; fi ;;
+      *)
+        if [[ $arg != *'$'* ]]; then ok=1; fi ;;
+    esac
+  fi
+  if [[ $ok -eq 0 ]]; then
+    violation "$file" "$line" "unsupported $cmd($arg): it can bring in CMake code the boundary checker does not scan"
   fi
 }
 
@@ -310,6 +404,13 @@ check_cmake_file() { # file
       target_link_libraries | add_dependencies) kind=link ;;
       target_include_directories) kind="include path" ;;
       target_sources | add_library | add_executable) kind=sources ;;
+      target_compile_options | target_link_options | target_precompile_headers) kind=options ;;
+      cmake_language)
+        violation "$file" "$line" "unsupported command cmake_language: it can call or evaluate commands the boundary checker cannot see"
+        continue ;;
+      include | add_subdirectory)
+        check_code_source "$cmd" "${toks[0]}" "$file" "$line"
+        continue ;;
       link_libraries | include_directories)
         first=0
         kind="include path"
@@ -348,7 +449,7 @@ check_cmake_file() { # file
     for ((i = first; i < ${#toks[@]}; i++)); do
       IFS=';' read -ra items <<<"${toks[i]}"
       for item in ${items[@]+"${items[@]}"}; do
-        if [[ -n $item ]]; then check_item "$owner" "$kind" "$item" "$file" "$line" "$target"; fi
+        if [[ -n $item ]]; then check_item "$owner" "$kind" "$item" "$file" "$line" "$target" "$cmd"; fi
       done
     done
   done < <(cmake_calls "$file")
@@ -371,12 +472,20 @@ for dir in "$ROOT"/engine/*/ "$ROOT"/apps/*/; do
   units=$((units + 1))
   check_includes "$unit" "$dir"
 done
+cmake_list=()
 while IFS= read -r file; do
-  cmake_files=$((cmake_files + 1))
-  check_cmake_file "$file"
+  cmake_list+=("$file")
 done < <(find "$ROOT" \( -name .git -o -name .deps -o -name _deps -o -name CMakeFiles -o -name node_modules \
   -o -path "$ROOT/build" -o -path "$ROOT/build-*" -o -path "$ROOT/out" -o -path "$ROOT/.orchestrator" \
   -o -path "$ROOT/.claude" \) -prune -o -type f \( -name CMakeLists.txt -o -name '*.cmake' \) -print | LC_ALL=C sort)
+cmake_basenames=()
+for file in ${cmake_list[@]+"${cmake_list[@]}"}; do
+  if [[ $file == *.cmake ]]; then cmake_basenames+=("${file##*/}"); fi
+done
+for file in ${cmake_list[@]+"${cmake_list[@]}"}; do
+  cmake_files=$((cmake_files + 1))
+  check_cmake_file "$file"
+done
 
 if [[ $status -eq 0 ]]; then
   echo "module boundaries OK ($units units, $cmake_files CMake files, $include_edges include edges, $link_edges link edges checked)"

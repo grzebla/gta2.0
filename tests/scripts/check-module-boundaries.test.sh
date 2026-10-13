@@ -302,6 +302,60 @@ reject scene-link-json cmake "$S" 'target_link_libraries(gta20_scene PRIVATE gta
 reject sim-include-os src engine/sim '#include <windows.h>' 'engine/sim -> OS (include windows.h)'
 reject sim-link-os cmake engine/sim/CMakeLists.txt 'target_link_libraries(gta20_sim PRIVATE psapi)' 'engine/sim -> psapi (link)'
 
+echo "== CMake lexer: bracket arguments, quotes, parentheses, comments"
+reject scene-link-bracket-arg cmake "$S" 'target_link_libraries(gta20_scene PRIVATE [[gta20::sim]])' 'engine/scene -> sim (link)'
+reject render-link-bracket-arg-eq cmake "$R" 'target_link_libraries(gta20_render PRIVATE [=[gta20::sim]=])' 'engine/render -> sim (link)'
+reject scene-link-bracket-arg-multiline cmake "$S" $'target_link_libraries(gta20_scene PRIVATE [==[\ngta20::core ]] gta20::testing\n]==])' 'engine/scene -> testing (link)'
+reject scene-link-bracket-list cmake "$S" 'target_link_libraries(gta20_scene PRIVATE [[gta20::core;gta20_sim]])' 'engine/scene -> sim (link)'
+reject scene-link-after-quoted-hash cmake "$S" 'target_link_libraries(gta20_scene PRIVATE "#" gta20::sim)' 'engine/scene -> sim (link)'
+reject scene-link-after-quoted-paren cmake "$S" 'target_link_libraries(gta20_scene PRIVATE ")" gta20::sim)' 'engine/scene -> sim (link)'
+reject scene-link-after-nested-parens cmake "$S" 'target_link_libraries(gta20_scene PRIVATE (gta20::core) gta20::sim)' 'engine/scene -> sim (link)'
+reject scene-link-after-bracket-comment cmake "$S" 'target_link_libraries(gta20_scene PRIVATE #[[ ) ]] gta20::sim)' 'engine/scene -> sim (link)'
+accept scene-link-bracket-allowed cmake "$S" 'target_link_libraries(gta20_scene PRIVATE [[gta20::core]] [=[gta20::assets]=])'
+accept bracket-comment-ignored cmake "$S" $'#[[\ntarget_link_libraries(gta20_scene PRIVATE gta20::sim)\n]]'
+accept quoted-command-text-ignored cmake "$S" 'message(STATUS "target_link_libraries(gta20_scene PRIVATE gta20::sim)")'
+accept bracket-string-ignored cmake "$S" 'set(synthetic_text [=[ target_link_libraries(gta20_scene PRIVATE gta20::sim) ]=])'
+
+echo "== variable targets (CMake function arguments)"
+# shellcheck disable=SC2016
+reject function-forwards-target-and-dep cmake cmake/CompilerOptions.cmake $'function(link_module target dep)\n    target_link_libraries(${target} PRIVATE ${dep})\nendfunction()\nlink_module(gta20_scene gta20::sim)' '${target} -> ${dep} (link): unresolved dependency of a variable target' 1
+# shellcheck disable=SC2016
+reject function-forwards-include-dir cmake cmake/CompilerOptions.cmake $'function(include_module target dir)\n    target_include_directories(${target} PRIVATE ${dir})\nendfunction()' '${target} -> ${dir} (include path ${dir}): unresolved dependency of a variable target' 1
+# shellcheck disable=SC2016
+reject embed-allowance-other-variable cmake cmake/EmbedBinary.cmake $'function(synthetic_embed target)\n    target_sources(${target} PRIVATE ${extra_sources})\nendfunction()' '${target} -> ${extra_sources} (sources ${extra_sources}): unresolved dependency' 1
+# shellcheck disable=SC2016
+reject embed-allowance-not-for-link cmake cmake/EmbedBinary.cmake $'function(synthetic_embed target)\n    target_link_libraries(${target} PRIVATE ${output})\nendfunction()' '${target} -> ${output} (link): unresolved dependency' 1
+# shellcheck disable=SC2016
+reject embed-allowance-only-in-embedbinary cmake cmake/CompilerOptions.cmake $'function(synthetic_embed target)\n    target_sources(${target} PRIVATE ${output})\nendfunction()' '${target} -> ${output} (sources ${output}): unresolved dependency' 1
+# shellcheck disable=SC2016
+accept function-literal-options cmake cmake/CompilerOptions.cmake $'function(synthetic_defaults target)\n    target_compile_options(${target} PRIVATE -Wall)\nendfunction()'
+
+echo "== compile and link options"
+reject scene-compile-option-include-sim cmake "$S" 'target_compile_options(gta20_scene PRIVATE -I../sim/include)' 'engine/scene -> sim (options -I../sim/include)'
+reject render-link-option-lib-sim cmake "$R" 'target_link_options(gta20_render PRIVATE -lgta20_sim)' 'engine/render -> sim (options -lgta20_sim)'
+reject scene-link-flag-lib-sim cmake "$S" 'target_link_libraries(gta20_scene PRIVATE -lgta20_sim)' 'engine/scene -> sim (link)'
+# shellcheck disable=SC2016
+reject scene-pch-from-sim cmake "$S" 'target_precompile_headers(gta20_scene PRIVATE ${PROJECT_SOURCE_DIR}/engine/sim/include/gta20/sim/world.hpp)' 'engine/scene -> sim (options'
+# shellcheck disable=SC2016
+accept render-compile-option-scene cmake "$R" 'target_compile_options(gta20_render PRIVATE -I${PROJECT_SOURCE_DIR}/engine/scene/include -Wall)'
+
+echo "== CMake code the checker cannot see"
+reject root-cmake-language-call cmake "$TOP" 'cmake_language(CALL target_link_libraries gta20_scene PRIVATE gta20::core)' 'unsupported command cmake_language'
+reject root-cmake-language-eval cmake "$TOP" 'cmake_language(EVAL CODE "message(STATUS synthetic)")' 'unsupported command cmake_language'
+# shellcheck disable=SC2016
+reject root-include-generated cmake "$TOP" 'include(${CMAKE_BINARY_DIR}/synthetic-deps.cmake)' 'unsupported include(${CMAKE_BINARY_DIR}/synthetic-deps.cmake)'
+reject root-include-unscanned-file cmake "$TOP" 'include(cmake/synthetic-not-in-tree.cmake)' 'unsupported include(cmake/synthetic-not-in-tree.cmake)'
+# shellcheck disable=SC2016
+reject root-add-subdirectory-binary cmake "$TOP" 'add_subdirectory(${CMAKE_BINARY_DIR}/generated generated)' 'unsupported add_subdirectory'
+reject root-add-subdirectory-outside cmake "$TOP" 'add_subdirectory(../synthetic-outside outside)' 'unsupported add_subdirectory(../synthetic-outside)'
+# shellcheck disable=SC2016
+reject doctest-allowance-only-in-tests-unit cmake "$TOP" 'include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)' 'unsupported include'
+accept root-include-cmake-module cmake "$TOP" 'include(CMakeParseArguments)'
+# shellcheck disable=SC2016
+accept root-include-project-file cmake "$TOP" 'include(${CMAKE_CURRENT_LIST_DIR}/cmake/EmbedBinary.cmake)'
+# shellcheck disable=SC2016
+accept root-add-subdirectory-source cmake "$TOP" 'add_subdirectory(${PROJECT_SOURCE_DIR}/tests/scripts synthetic-scripts)'
+
 echo "== units without rules"
 reject unknown-engine-module unit engine/audio '' 'engine/audio: no dependency rules'
 reject unknown-app unit apps/editor '' 'apps/editor: no dependency rules'
