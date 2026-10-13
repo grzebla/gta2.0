@@ -1,30 +1,3 @@
-# Test status
+# Test Status
 
-Architecture review at integration a2e5232497124cc7784a80019ee42cdab725b14f.
-
-## Checks run in this review
-
-- git status showed no worktree changes.
-- git diff --check passed.
-- bash scripts/ci/check-module-boundaries.sh passed. This is the older, incomplete checker; its pass does not establish complete dependency enforcement.
-- cmake -DSCENARIO=tests/gfx/scenarios/m1-downtown-baseline.json -P cmake/ValidateGfxScenario.cmake passed.
-- Inspected module CMake links, scene/core/render/app code, shader variants, test registration and native-ci.yml.
-
-No build, GPU run or full test suite was rerun in the read-only sandbox. Git printed sandbox warnings about unavailable temporary cache files; diagnostic commands still returned results.
-
-## Existing evidence inspected
-
-T0012 verification directory 20261013-112129-T0012-verify records formatting, boundary check, headless configure/build/tests and Debug configure/build/tests passing. Actual test logs show 150/150 headless and 153/153 Debug passes. Developer checkout is 1584314f88657e231088d1e40c8d5bdd2232071f. Diff inspection shows engine/apps/build/test/script/workflow sources unchanged between that revision and reviewed integration HEAD.
-
-Developer LastTest.log records successful wil/ste/bil render smoke executions with captures outside the checkout. These establish smoke coverage only. Prior T0012 review independently classified 20 original discovery frames as MENU; this architecture review did not repeat image decoding.
-
-## Missing acceptance evidence
-
-- Full native CI on current integration HEAD. Supplied latest green CI is older f2579ad2a.
-- Current-revision sanitizer, tidy, shader freshness and complete dependency-enforcement results.
-- Indexed-world, depth, transparent-texel and occlusion pixel assertions on Metal/D3D12/Vulkan.
-- Complete geometry construction and validation on all 17 original maps.
-- Original WORLD comparisons with reviewed tolerances and calibrated camera/elevation assumptions.
-- Required district geometry screenshots, cache replacement regressions and reviewed performance thresholds.
-
-No M1 acceptance or release-candidate decision is supported.
+T0008 at 1e5cef7: independently passed the boundary checker under Bash 5.3, syntax checks for all three affected shell scripts, and whitespace checks. System Bash could not create a temporary here-string file in the read-only sandbox. Inspected 20261013-160101-T0008-verify logs confirm formatting, boundaries, shellcheck, 33/33 offline shell checks, configure/build, 123/123 headless and 126/126 Debug tests passed. Matching-checkout LastTest.log files confirm 141/141 boundary fixtures and unchanged checkout fingerprints. Fixture/build suites were not rerun in this sandbox. No new GPU fidelity evidence.

@@ -45,3 +45,7 @@ Approved T0010 at c4c0c8b. The strict local inventory validates all 17 maps and 
 ## 2026-10-13T09:24:47Z — T0012 Classify the discovery capture and document the blocked world entry
 
 Approved T0012 at 1584314. Independently confirmed all 20 discovery frames show an unchanged MENU region, with no usable WORLD reference. The report separates observed pixels, runner values and unresolved input behavior, and hands protected runner diagnostics to the owner. Required checks and inspected 150/150 headless and 153/153 Debug results pass. No further capture requested; M1 remains incomplete.
+
+## 2026-10-13T14:05:47Z — T0008 Enforce the dependency graph and refresh architecture contracts
+
+Approved T0008 at 1e5cef7. Dependency checks and 141 synthetic fixtures enforce the documented graph and resolve the owner's three specified CMake gaps. Architecture and world-geometry contracts are corrected. Local read-only checks passed; inspected verification logs confirm shellcheck, offline shell tests, 123/123 headless and 126/126 Debug tests passed. Awaiting Gatekeeper integration; M1 remains incomplete.
