@@ -33,3 +33,7 @@ Approved T0006 at 3b9d895. The conformance wrapper now validates both execution 
 ## 2026-10-13T06:23:20Z — T0007 Validate trace integrity before comparison
 
 Approved T0007 at 2fca90f. Trace parsing and comparison now reject empty or structurally invalid traces and unknown provenance with explicit diagnostics. Regression tests reproduce the former false passes and verify rejection while preserving sparse schedules, cross-adapter comparisons, tolerances and goldens. Inspected logs confirm 83/83 headless, 86/86 Debug and required ASan/UBSan testing unit passes. M1 remains incomplete.
+
+## 2026-10-13T06:34:54Z — T0009 Prepare the first original-game geometry capture scenario
+
+Approved T0009 at 519e9aa: committed the first bounded original-game discovery scenario, companion interpretation and camera-localization procedure, and offline validation with 37 synthetic cases. Local checks passed; inspected logs confirm 121/121 headless and 124/124 Debug passes. Requested one discovery capture. M1 remains incomplete.

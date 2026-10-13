@@ -1,3 +1,3 @@
 # Architecture
 
-T0007 adds shared Trace integrity validation at parsing and comparison boundaries. Invalid comparisons have explicit diagnostics and cannot pass. Sparse schedules and differing adapter identities/provenance remain supported. Snapshot ticks use the existing scenario-relative completed-tick range 0..header.ticks.
+T0009 adds offline original-game capture scenario validation and synthetic CTest coverage. Host requests remain orchestrator-only; scenario provenance and interpretation are documented separately from host JSON. Runtime architecture is unchanged.

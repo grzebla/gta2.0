@@ -1,3 +1,3 @@
 # Known Issues
 
-Resolve the T0007 defects involving header-only false passes, duplicate ticks/entities/properties and unknown provenance fallback. Retain other architecture-review issues. Developer Debug capture permission failures were superseded by successful orchestrator Debug verification. Sanitizer render captures remain unverified because directory creation was denied; required sanitizer testing unit tests passed.
+T0007 trace-integrity defects are resolved by its approved changes; remove the stale instruction to resolve them. Retain other architecture-review issues. T0009 startup navigation, host version and baseScreen merging remain unverified; landmark localization tooling is pending. Successful orchestrator Debug verification supersedes developer capture-directory permission failures. Earlier sanitizer render captures remain unverified.
