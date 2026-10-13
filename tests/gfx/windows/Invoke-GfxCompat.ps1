@@ -39,10 +39,12 @@ Import-Module (Join-Path $scriptDir 'GfxAnalysis.psm1') -Force
 $boot = & (Join-Path $scriptDir 'Initialize-GfxHost.ps1') -Bucket $Bucket -Region $Region `
     -MatrixPath $matrixPath -Root $Root -TestUser $TestUser | Select-Object -Last 1
 if ($boot.RebootRequired) {
-    # SSM reboots on 3010 and re-runs this whole command; the counter stops an endless loop.
+    # Not SSM's exit 3010: on this host the agent-initiated reboot hangs (seen 2026-10-13, twice).
+    # Exit 194 tells the caller to reboot through the EC2 API and send the command again;
+    # the counter stops an endless loop.
     $attempt = Register-RebootAttempt -StateDir (Join-Path $Root 'state') -RunId $RunId -MaxReboots 3
-    Write-Host "Bootstrap changed drivers/autologon/WDDM - requesting reboot $attempt/3 (SSM exit 3010)."
-    exit 3010
+    Write-Host "REBOOT_REQUIRED: bootstrap changed drivers/autologon/WDDM - reboot $attempt/3 (exit 194)."
+    exit 194
 }
 
 function Get-InteractiveSession([string] $User) {

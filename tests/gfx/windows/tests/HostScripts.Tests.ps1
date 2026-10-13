@@ -27,3 +27,11 @@ Describe 'StrictMode-safe member access in host scripts' {
         $violations | Should -BeNullOrEmpty
     }
 }
+
+Describe 'Reboot handling' {
+    It 'never relies on the SSM agent reboot (exit 3010 hangs on this host)' {
+        $text = Get-Content -Raw -Path (Join-Path $script:hostDir 'Invoke-GfxCompat.ps1')
+        $text | Should -Not -Match '(?m)^\s*exit\s+3010'
+        $text | Should -Match '(?m)^\s*exit\s+194'
+    }
+}

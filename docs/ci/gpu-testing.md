@@ -95,7 +95,7 @@ pierwszy bootstrap (sterownik + restarty) może dodać 10–15 min.
 | SCP projektu (Free i Paid) zawiera `Deny iam:*Provider*` | nie da się utworzyć dostawcy GitHub OIDC | aktywować advanced features w AWS Settings (decyzja właściciela) |
 | Limit „Running On-Demand G and VT instances” w eu-north-1 = **0 vCPU** | G4dn się nie uruchomi | wniosek o limit ≥ 4 vCPU (Service Quotas, kod `L-DB2E81BA`) |
 | Plan projektu: **FREE** (100 USD kredytów, wygasa 2027-04-12) | koszty G4dn zużywają kredyty; wniosek o limit GPU może zostać odrzucony | ewentualnie przejście na plan Paid |
-| Sterowniki GRID/gaming leżą w bucketach S3 w us-east-1; SCP `RegionFloor`/`UsEast1Partitional` nie przepuszcza `s3:GetObject` w us-east-1 | instalacja GRID prawdopodobnie się nie powiedzie | strategia `url`: publiczny sterownik NVIDIA 581.80 (R580) dla Windows Server 2022/2025 z SHA-256 i weryfikacją podpisu Authenticode; sterowniki Tesla startują w TCC, więc bootstrap jednorazowo przełącza T4 na WDDM (skuteczność potwierdzi `probe`) |
+| Sterowniki GRID/gaming leżą w bucketach S3 w us-east-1; SCP blokuje podpisane `s3:GetObject` w us-east-1 | podpisane pobranie GRID się nie powiedzie | **Rozwiązane 2026-10-13.** Strategia `grid-public`: anonimowe pobranie przez HTTPS publicznego obiektu `ec2-windows-nvidia-drivers/latest/…_aws_swl.exe` (bez podpisanego wywołania API, więc SCP go nie dotyczy). Plik jest przypięty kluczem, SHA-256 i podpisem Authenticode NVIDIA. GRID 596.86 uruchamia T4 w **WDDM** (Direct3D na GPU). Sterownik data center 581.80 (strategia `url`) instaluje się, ale **odmawia WDDM** (`nvidia-smi -dm 0`: Not Supported), więc zostaje tylko jako fallback. |
 | `CloudFormation` w us-east-1 zablokowane, `AWS::Budgets::Budget` niedostępny w eu-north-1 | budżetu nie da się utworzyć szablonem | `infra/aws/create-budget.sh` (API Budgets) |
 | Spot zablokowany przez SCP | tylko on-demand | — |
 
@@ -168,3 +168,16 @@ Kroki oznaczone 💰 tworzą płatne zasoby — wykonuj je dopiero po świadomej
 
 Sprzątanie: `aws cloudformation delete-stack` dla obu stosów; bucket artefaktów ma
 `DeletionPolicy: Retain` (usuń go ręcznie, gdy nie będzie potrzebny).
+
+## Lekcje z pierwszych przebiegów na EC2 (2026-10-13)
+
+- **Restart przez agenta SSM (`exit 3010`) zawiesza się na tym hoście** (powtórzone dwukrotnie; w
+  dzienniku zdarzeń nie ma nawet początku zamykania). Bootstrap kończy się więc kodem **194**
+  („wymagany restart”), a `ec2-gpu-session.sh run` restartuje instancję przez `ec2 reboot-instances`,
+  czeka na ponowny ping agenta SSM i wysyła polecenie jeszcze raz (maksymalnie 3 restarty).
+- **Zatrzymanie może zawisnąć w stanie `stopping`** (sterownik data center w TCC; zawieszenie już po
+  przejściu jądra w tryb zamykania). `ec2-gpu-session.sh stop` po `STOP_FORCE_AFTER_S` (240 s)
+  wymusza zatrzymanie (`--force`).
+- `nvidia-smi` zwraca 0 także wtedy, gdy odmawia zmiany modelu sterownika. Bootstrap ufa tylko
+  odczytanemu potem `driver_model.pending`.
+- Zimny start z sesją autologowania `gta2runner` działa (SSM online po ok. 2 min).

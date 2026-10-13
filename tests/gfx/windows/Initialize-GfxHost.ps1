@@ -53,6 +53,19 @@ function Get-FileSha256([string] $Path) {
     (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLowerInvariant()
 }
 
+# Downloads a pinned NVIDIA installer over HTTPS and refuses it unless both the SHA-256 and the
+# NVIDIA Authenticode signature match.
+function Get-PinnedNvidiaInstaller([string] $Url, [string] $Sha256, [string] $Signer, [string] $OutFile) {
+    if (-not $Url -or -not $Sha256) { throw 'installer url/sha256 not configured' }
+    Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $OutFile
+    $sha = Get-FileSha256 $OutFile
+    if ($sha -ne $Sha256.ToLowerInvariant()) { throw "installer SHA-256 mismatch ($sha)" }
+    $sig = Get-AuthenticodeSignature -FilePath $OutFile
+    if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch [regex]::Escape($Signer)) {
+        throw "installer Authenticode check failed: $($sig.Status) / $($sig.SignerCertificate.Subject)"
+    }
+}
+
 function New-RandomPassword {
     $bytes = New-Object byte[] 24
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
@@ -163,19 +176,30 @@ function Test-NvidiaDriverActive {
 $driverConfig = ($matrix.driver | ConvertTo-Json -Compress -Depth 3)
 $driverConfigHash = [BitConverter]::ToString(
     [System.Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($driverConfig))).Replace('-', '')
+$forceInstall = $false
 if (Test-Path $driverMarker) {
     $previous = Get-Content -Raw $driverMarker | ConvertFrom-Json
-    # Retry only when nothing got installed and the driver config changed since.
-    if ($previous.strategy -eq 'none' -and $previous.configHash -ne $driverConfigHash) {
-        Write-Step 'driver config changed since last "none" outcome - retrying installation'
+    # A changed driver config (e.g. a new pinned driver) is installed once over the old one.
+    if ($previous.configHash -ne $driverConfigHash) {
+        Write-Step "driver config changed since the '$($previous.strategy)' install - reinstalling"
         Remove-Item -Force $driverMarker
+        Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $stateDir 'wddm-switch-attempted')
+        $forceInstall = $true
     }
 }
 
 if (-not (Test-Path $driverMarker)) {
     $outcome = [ordered]@{ strategy = 'none'; attempts = @(); configHash = $driverConfigHash }
-    if (Test-NvidiaDriverActive) {
+    $smiExe = @("$env:SystemRoot\System32\nvidia-smi.exe", "$env:ProgramFiles\NVIDIA Corporation\NVSMI\nvidia-smi.exe") |
+        Where-Object { Test-Path $_ } | Select-Object -First 1
+    $activeVersion = if ($smiExe) { ((& $smiExe --query-gpu=driver_version --format=csv,noheader 2>$null) -join '').Trim() } else { '' }
+    $gridVersion = if ($matrix.driver.PSObject.Properties.Name -contains 'grid') { [string] $matrix.driver.grid.version } else { '' }
+    if (-not $forceInstall -and (Test-NvidiaDriverActive)) {
         $outcome.strategy = 'preinstalled'
+    } elseif ($gridVersion -and $activeVersion -eq $gridVersion -and (Test-NvidiaDriverActive)) {
+        # The pinned GRID driver is already the active one: record it, do not reinstall.
+        $outcome.strategy = 'grid-public'
+        $outcome.note = "already installed ($activeVersion)"
     } else {
         foreach ($strategy in $matrix.driver.strategies) {
             try {
@@ -188,16 +212,17 @@ if (-not (Test-Path $driverMarker)) {
                         $exe = Join-Path $cacheDir 'nvidia-grid.exe'
                         Read-S3Object -BucketName 'ec2-windows-nvidia-drivers' -Key $obj.Key -File $exe -Region 'us-east-1' | Out-Null
                     }
+                    'grid-public' {
+                        # AWS GRID driver (WDDM/Direct3D on T4), anonymous HTTPS download of the public
+                        # object; pinned key + SHA-256 + NVIDIA signature.
+                        $exe = Join-Path $cacheDir 'nvidia-grid.exe'
+                        Get-PinnedNvidiaInstaller -Url $matrix.driver.grid.url -Sha256 $matrix.driver.grid.sha256 `
+                            -Signer $matrix.driver.signer -OutFile $exe
+                    }
                     'url' {
-                        if (-not $matrix.driver.url -or -not $matrix.driver.sha256) { throw 'driver.url/sha256 not configured' }
                         $exe = Join-Path $cacheDir 'nvidia-datacenter.exe'
-                        Invoke-WebRequest -UseBasicParsing -Uri $matrix.driver.url -OutFile $exe
-                        $sha = Get-FileSha256 $exe
-                        if ($sha -ne $matrix.driver.sha256.ToLowerInvariant()) { throw "driver SHA-256 mismatch ($sha)" }
-                        $sig = Get-AuthenticodeSignature -FilePath $exe
-                        if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch [regex]::Escape($matrix.driver.signer)) {
-                            throw "driver Authenticode check failed: $($sig.Status) / $($sig.SignerCertificate.Subject)"
-                        }
+                        Get-PinnedNvidiaInstaller -Url $matrix.driver.url -Sha256 $matrix.driver.sha256 `
+                            -Signer $matrix.driver.signer -OutFile $exe
                     }
                     'none' { $outcome.strategy = 'none'; break }
                     default { throw "unknown driver strategy '$strategy'" }
@@ -235,10 +260,19 @@ $wddmMarker = Join-Path $stateDir 'wddm-switch-attempted'
 if ($smi -and -not (Test-Path $wddmMarker)) {
     $model = ((& $smi --query-gpu=driver_model.current --format=csv,noheader 2>$null) -join '').Trim()
     if ($model -eq 'TCC') {
-        & $smi -g 0 -dm 0 | Out-Null    # 0 = WDDM, applied after reboot
-        Set-Content -Path $wddmMarker -Value (Get-Date).ToString('o')
-        Write-Step 'GPU was in TCC mode - switched to WDDM, reboot required'
-        $rebootRequired = $true
+        # nvidia-smi exits 0 even when the switch is refused ("Not Supported", e.g. data center
+        # drivers), so trust only the pending model it reports afterwards.
+        $answer = (& $smi -i 0 -dm 0 2>&1) -join ' '    # 0 = WDDM, applied after reboot
+        $pending = ((& $smi --query-gpu=driver_model.pending --format=csv,noheader 2>$null) -join '').Trim()
+        Set-Content -Path $wddmMarker -Value (@{ at = (Get-Date).ToString('o'); pending = $pending; answer = $answer } | ConvertTo-Json)
+        if ($pending -eq 'WDDM') {
+            Write-Step 'GPU was in TCC mode - WDDM pending, reboot required'
+            $rebootRequired = $true
+        } else {
+            Write-Step "GPU stays in TCC: this driver refuses WDDM ($answer). Direct3D will not use the T4."
+        }
+    } else {
+        Write-Step "GPU driver model: $model"
     }
 }
 
