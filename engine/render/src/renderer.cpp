@@ -4,6 +4,11 @@
 
 #include <array>
 #include <cstring>
+#include <optional>
+#include <string_view>
+#include <utility>
+
+#include "gta20/render/transfer_size.hpp"
 
 extern const unsigned char gta20_quad_vert_spv[];
 extern const std::size_t gta20_quad_vert_spv_size;
@@ -21,7 +26,7 @@ extern const std::size_t gta20_quad_ps_d3d_size;
 namespace gta20::render {
 namespace {
 
-std::string sdl_error(const char* what) {
+std::string sdl_error(std::string_view what) {
     return std::string(what) + ": " + SDL_GetError();
 }
 
@@ -48,6 +53,74 @@ const char* default_driver() {
 constexpr std::array<float, 12> kQuadCorners = {-0.5f, -0.5f, 0.5f, -0.5f, 0.5f,  0.5f,
                                                 -0.5f, -0.5f, 0.5f, 0.5f,  -0.5f, 0.5f};
 
+void release(SDL_GPUDevice* device, SDL_GPUTexture* texture) {
+    SDL_ReleaseGPUTexture(device, texture);
+}
+void release(SDL_GPUDevice* device, SDL_GPUBuffer* buffer) {
+    SDL_ReleaseGPUBuffer(device, buffer);
+}
+void release(SDL_GPUDevice* device, SDL_GPUTransferBuffer* transfer) {
+    SDL_ReleaseGPUTransferBuffer(device, transfer);
+}
+
+/// One GPU object released on scope exit unless take() hands it over. SDL defers the release
+/// until command buffers that still use the object have completed.
+template <class T>
+class Owned {
+public:
+    Owned(SDL_GPUDevice* device, T* object) : device_(device), object_(object) {}
+    ~Owned() {
+        if (object_ != nullptr) {
+            release(device_, object_);
+        }
+    }
+    Owned(const Owned&) = delete;
+    Owned& operator=(const Owned&) = delete;
+    Owned(Owned&&) = delete;
+    Owned& operator=(Owned&&) = delete;
+
+    explicit operator bool() const { return object_ != nullptr; }
+    [[nodiscard]] T* get() const { return object_; }
+    [[nodiscard]] T* take() { return std::exchange(object_, nullptr); }
+
+private:
+    SDL_GPUDevice* device_;
+    T* object_;
+};
+
+/// A command buffer cancelled on scope exit unless it was submitted. Once a swapchain texture has
+/// been acquired SDL forbids cancelling, so submit_on_exit() makes the exit submit it instead.
+class PendingCommands {
+public:
+    explicit PendingCommands(SDL_GPUCommandBuffer* cmd) : cmd_(cmd) {}
+    ~PendingCommands() {
+        if (cmd_ == nullptr) {
+            return;
+        }
+        if (submit_on_exit_) {
+            SDL_SubmitGPUCommandBuffer(cmd_);
+        } else {
+            SDL_CancelGPUCommandBuffer(cmd_);
+        }
+    }
+    PendingCommands(const PendingCommands&) = delete;
+    PendingCommands& operator=(const PendingCommands&) = delete;
+    PendingCommands(PendingCommands&&) = delete;
+    PendingCommands& operator=(PendingCommands&&) = delete;
+
+    explicit operator bool() const { return cmd_ != nullptr; }
+    [[nodiscard]] SDL_GPUCommandBuffer* get() const { return cmd_; }
+    void submit_on_exit() { submit_on_exit_ = true; }
+    bool submit() { return SDL_SubmitGPUCommandBuffer(std::exchange(cmd_, nullptr)); }
+    SDL_GPUFence* submit_and_acquire_fence() {
+        return SDL_SubmitGPUCommandBufferAndAcquireFence(std::exchange(cmd_, nullptr));
+    }
+
+private:
+    SDL_GPUCommandBuffer* cmd_;
+    bool submit_on_exit_ = false;
+};
+
 } // namespace
 
 struct Renderer::Impl {
@@ -63,6 +136,12 @@ struct Renderer::Impl {
     u32 instance_capacity = 0; // in instances
     // One pipeline per colour-target format (swapchain format vs offscreen RGBA8).
     std::array<std::pair<SDL_GPUTextureFormat, SDL_GPUGraphicsPipeline*>, 2> pipelines{};
+
+    struct ArmedFault {
+        GpuFault fault = GpuFault::wait;
+        u32 skip = 0;
+    };
+    std::optional<ArmedFault> armed_fault; // test seam, see Renderer::inject_fault
 
     Impl() = default;
     Impl(const Impl&) = delete;
@@ -97,6 +176,76 @@ struct Renderer::Impl {
         if (window != nullptr)
             SDL_ReleaseWindowFromGPUDevice(device, window);
         SDL_DestroyGPUDevice(device);
+    }
+
+    // SDL_GPU calls that can fail, routed through the fault-injection seam.
+
+    bool injected(GpuFault fault) {
+        if (!armed_fault || armed_fault->fault != fault) {
+            return false;
+        }
+        if (armed_fault->skip > 0) {
+            --armed_fault->skip;
+            return false;
+        }
+        armed_fault.reset();
+        SDL_SetError("injected failure");
+        return true;
+    }
+
+    SDL_GPUTexture* create_texture(const SDL_GPUTextureCreateInfo& info) {
+        return injected(GpuFault::create_texture) ? nullptr : SDL_CreateGPUTexture(device, &info);
+    }
+
+    SDL_GPUBuffer* create_buffer(SDL_GPUBufferUsageFlags usage, u32 bytes) {
+        SDL_GPUBufferCreateInfo info{};
+        info.usage = usage;
+        info.size = bytes;
+        return injected(GpuFault::create_buffer) ? nullptr : SDL_CreateGPUBuffer(device, &info);
+    }
+
+    SDL_GPUTransferBuffer* create_transfer_buffer(SDL_GPUTransferBufferUsage usage, u32 bytes) {
+        SDL_GPUTransferBufferCreateInfo info{};
+        info.usage = usage;
+        info.size = bytes;
+        return injected(GpuFault::create_transfer_buffer) ? nullptr : SDL_CreateGPUTransferBuffer(device, &info);
+    }
+
+    void* map_transfer_buffer(SDL_GPUTransferBuffer* transfer, bool cycle) {
+        return injected(GpuFault::map_transfer_buffer) ? nullptr : SDL_MapGPUTransferBuffer(device, transfer, cycle);
+    }
+
+    SDL_GPUCommandBuffer* acquire_command_buffer() {
+        return injected(GpuFault::acquire_command_buffer) ? nullptr : SDL_AcquireGPUCommandBuffer(device);
+    }
+
+    SDL_GPUCopyPass* begin_copy_pass(SDL_GPUCommandBuffer* cmd) {
+        return injected(GpuFault::begin_copy_pass) ? nullptr : SDL_BeginGPUCopyPass(cmd);
+    }
+
+    SDL_GPURenderPass* begin_render_pass(SDL_GPUCommandBuffer* cmd, const SDL_GPUColorTargetInfo& color) {
+        return injected(GpuFault::begin_render_pass) ? nullptr : SDL_BeginGPURenderPass(cmd, &color, 1, nullptr);
+    }
+
+    bool wait_for_fence(SDL_GPUFence* fence) {
+        return !injected(GpuFault::wait) && SDL_WaitForGPUFences(device, true, &fence, 1);
+    }
+
+    bool wait_for_idle() { return !injected(GpuFault::wait) && SDL_WaitForGPUIdle(device); }
+
+    /// Copies `bytes` from `data` into a new upload transfer buffer.
+    Result<SDL_GPUTransferBuffer*> staged_upload(const void* data, u32 bytes, const char* what) {
+        Owned transfer(device, create_transfer_buffer(SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, bytes));
+        if (!transfer) {
+            return make_error(sdl_error(std::string(what) + ": SDL_CreateGPUTransferBuffer"));
+        }
+        void* mapped = map_transfer_buffer(transfer.get(), false);
+        if (mapped == nullptr) {
+            return make_error(sdl_error(std::string(what) + ": SDL_MapGPUTransferBuffer"));
+        }
+        std::memcpy(mapped, data, bytes);
+        SDL_UnmapGPUTransferBuffer(device, transfer.get());
+        return transfer.take();
     }
 
     Result<bool> create_shaders() {
@@ -197,9 +346,17 @@ struct Renderer::Impl {
         return pipeline;
     }
 
+    /// Replaces the atlas only after the new texture has been fully uploaded; on any failure the
+    /// previous atlas stays bound and everything created here is released.
     Result<bool> upload_atlas(u32 width, u32 height, std::span<const u8> rgba) {
-        if (rgba.size() != static_cast<std::size_t>(width) * height * 4 || width == 0 || height == 0) {
-            return make_error("atlas pixel data does not match its size");
+        const auto bytes = rgba8_byte_size(width, height, "atlas");
+        if (!bytes) {
+            return bytes.error();
+        }
+        if (rgba.size() != bytes.value()) {
+            return make_error("atlas: " + std::to_string(rgba.size()) + " bytes of pixel data for " +
+                              std::to_string(width) + "x" + std::to_string(height) + " RGBA8 (expected " +
+                              std::to_string(bytes.value()) + ")");
         }
         SDL_GPUTextureCreateInfo info{};
         info.type = SDL_GPU_TEXTURETYPE_2D;
@@ -209,44 +366,42 @@ struct Renderer::Impl {
         info.height = height;
         info.layer_count_or_depth = 1;
         info.num_levels = 1;
-        SDL_GPUTexture* texture = SDL_CreateGPUTexture(device, &info);
-        SDL_GPUTransferBufferCreateInfo transfer_info{};
-        transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-        transfer_info.size = static_cast<Uint32>(rgba.size());
-        SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device, &transfer_info);
-        if (texture == nullptr || transfer == nullptr) {
-            if (texture != nullptr) {
-                SDL_ReleaseGPUTexture(device, texture);
-            }
-            if (transfer != nullptr) {
-                SDL_ReleaseGPUTransferBuffer(device, transfer);
-            }
-            return make_error(sdl_error("creating the atlas texture"));
+        Owned texture(device, create_texture(info));
+        if (!texture) {
+            return make_error(sdl_error("atlas: SDL_CreateGPUTexture"));
         }
-        std::memcpy(SDL_MapGPUTransferBuffer(device, transfer, false), rgba.data(), rgba.size());
-        SDL_UnmapGPUTransferBuffer(device, transfer);
-        SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
-        SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
+        auto staged = staged_upload(rgba.data(), bytes.value(), "atlas");
+        if (!staged) {
+            return staged.error();
+        }
+        Owned transfer(device, staged.value());
+        PendingCommands cmd(acquire_command_buffer());
+        if (!cmd) {
+            return make_error(sdl_error("atlas: SDL_AcquireGPUCommandBuffer"));
+        }
+        SDL_GPUCopyPass* copy = begin_copy_pass(cmd.get());
+        if (copy == nullptr) {
+            return make_error(sdl_error("atlas: SDL_BeginGPUCopyPass"));
+        }
         SDL_GPUTextureTransferInfo src{};
-        src.transfer_buffer = transfer;
+        src.transfer_buffer = transfer.get();
         SDL_GPUTextureRegion dst{};
-        dst.texture = texture;
+        dst.texture = texture.get();
         dst.w = width;
         dst.h = height;
         dst.d = 1;
         SDL_UploadToGPUTexture(copy, &src, &dst, false);
         SDL_EndGPUCopyPass(copy);
-        const bool submitted = SDL_SubmitGPUCommandBuffer(cmd);
-        SDL_ReleaseGPUTransferBuffer(device, transfer);
-        if (!submitted) {
-            SDL_ReleaseGPUTexture(device, texture);
-            return make_error(sdl_error("SDL_SubmitGPUCommandBuffer"));
+        if (!cmd.submit()) {
+            return make_error(sdl_error("atlas: SDL_SubmitGPUCommandBuffer"));
         }
         if (atlas != nullptr) {
-            SDL_WaitForGPUIdle(device); // the previous atlas may still be in use
+            if (!wait_for_idle()) { // the previous atlas may still be in use
+                return make_error(sdl_error("atlas: SDL_WaitForGPUIdle"));
+            }
             SDL_ReleaseGPUTexture(device, atlas);
         }
-        atlas = texture;
+        atlas = texture.take();
         return true;
     }
 
@@ -267,30 +422,61 @@ struct Renderer::Impl {
     }
 
     Result<bool> upload_corners() {
-        SDL_GPUBufferCreateInfo buffer_info{};
-        buffer_info.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-        buffer_info.size = sizeof(kQuadCorners);
-        corner_buffer = SDL_CreateGPUBuffer(device, &buffer_info);
-        SDL_GPUTransferBufferCreateInfo transfer_info{};
-        transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-        transfer_info.size = sizeof(kQuadCorners);
-        SDL_GPUTransferBuffer* transfer = SDL_CreateGPUTransferBuffer(device, &transfer_info);
-        if (corner_buffer == nullptr || transfer == nullptr) {
-            if (transfer != nullptr)
-                SDL_ReleaseGPUTransferBuffer(device, transfer);
-            return make_error(sdl_error("creating the quad vertex buffer"));
+        constexpr u32 bytes = sizeof(kQuadCorners);
+        corner_buffer = create_buffer(SDL_GPU_BUFFERUSAGE_VERTEX, bytes);
+        if (corner_buffer == nullptr) {
+            return make_error(sdl_error("quad corners: SDL_CreateGPUBuffer"));
         }
-        std::memcpy(SDL_MapGPUTransferBuffer(device, transfer, false), kQuadCorners.data(), sizeof(kQuadCorners));
-        SDL_UnmapGPUTransferBuffer(device, transfer);
-        SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
-        SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
-        const SDL_GPUTransferBufferLocation src{transfer, 0};
-        const SDL_GPUBufferRegion dst{corner_buffer, 0, sizeof(kQuadCorners)};
+        auto staged = staged_upload(kQuadCorners.data(), bytes, "quad corners");
+        if (!staged) {
+            return staged.error();
+        }
+        Owned transfer(device, staged.value());
+        PendingCommands cmd(acquire_command_buffer());
+        if (!cmd) {
+            return make_error(sdl_error("quad corners: SDL_AcquireGPUCommandBuffer"));
+        }
+        SDL_GPUCopyPass* copy = begin_copy_pass(cmd.get());
+        if (copy == nullptr) {
+            return make_error(sdl_error("quad corners: SDL_BeginGPUCopyPass"));
+        }
+        const SDL_GPUTransferBufferLocation src{transfer.get(), 0};
+        const SDL_GPUBufferRegion dst{corner_buffer, 0, bytes};
         SDL_UploadToGPUBuffer(copy, &src, &dst, false);
         SDL_EndGPUCopyPass(copy);
-        const bool submitted = SDL_SubmitGPUCommandBuffer(cmd);
-        SDL_ReleaseGPUTransferBuffer(device, transfer);
-        return submitted ? Result<bool>(true) : Result<bool>(make_error(sdl_error("SDL_SubmitGPUCommandBuffer")));
+        if (!cmd.submit()) {
+            return make_error(sdl_error("quad corners: SDL_SubmitGPUCommandBuffer"));
+        }
+        return true;
+    }
+
+    /// Replaces the instance buffers with larger ones. On failure the previous buffers and
+    /// capacity stay, so later frames that fit them still render.
+    Result<bool> grow_instances(std::size_t count) {
+        const auto capacity = grow_instance_capacity(instance_capacity, count);
+        if (!capacity) {
+            return capacity.error();
+        }
+        const auto bytes = instance_byte_size(capacity.value());
+        if (!bytes) {
+            return bytes.error();
+        }
+        Owned buffer(device, create_buffer(SDL_GPU_BUFFERUSAGE_VERTEX, bytes.value()));
+        if (!buffer) {
+            return make_error(sdl_error("growing the instance buffer: SDL_CreateGPUBuffer"));
+        }
+        Owned transfer(device, create_transfer_buffer(SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, bytes.value()));
+        if (!transfer) {
+            return make_error(sdl_error("growing the instance buffer: SDL_CreateGPUTransferBuffer"));
+        }
+        if (instance_transfer != nullptr)
+            SDL_ReleaseGPUTransferBuffer(device, instance_transfer);
+        if (instance_buffer != nullptr)
+            SDL_ReleaseGPUBuffer(device, instance_buffer);
+        instance_buffer = buffer.take();
+        instance_transfer = transfer.take();
+        instance_capacity = capacity.value();
+        return true;
     }
 
     /// Grows (x2) the instance buffers when needed and records the upload.
@@ -298,42 +484,34 @@ struct Renderer::Impl {
         if (quads.empty()) {
             return true;
         }
-        const auto count = static_cast<u32>(quads.size());
-        if (count > instance_capacity) {
-            u32 capacity = instance_capacity == 0 ? 1024 : instance_capacity;
-            while (capacity < count)
-                capacity *= 2;
-            if (instance_transfer != nullptr)
-                SDL_ReleaseGPUTransferBuffer(device, instance_transfer);
-            if (instance_buffer != nullptr)
-                SDL_ReleaseGPUBuffer(device, instance_buffer);
-            const auto bytes = static_cast<Uint32>(capacity * sizeof(scene::QuadInstance));
-            SDL_GPUBufferCreateInfo buffer_info{};
-            buffer_info.usage = SDL_GPU_BUFFERUSAGE_VERTEX;
-            buffer_info.size = bytes;
-            instance_buffer = SDL_CreateGPUBuffer(device, &buffer_info);
-            SDL_GPUTransferBufferCreateInfo transfer_info{};
-            transfer_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD;
-            transfer_info.size = bytes;
-            instance_transfer = SDL_CreateGPUTransferBuffer(device, &transfer_info);
-            if (instance_buffer == nullptr || instance_transfer == nullptr) {
-                instance_capacity = 0;
-                return make_error(sdl_error("growing the instance buffer"));
-            }
-            instance_capacity = capacity;
+        const auto bytes = instance_byte_size(quads.size());
+        if (!bytes) {
+            return bytes.error();
         }
-        const auto bytes = static_cast<Uint32>(count * sizeof(scene::QuadInstance));
-        void* mapped = SDL_MapGPUTransferBuffer(device, instance_transfer, true); // cycle: never stall on the GPU
-        std::memcpy(mapped, quads.data(), bytes);
+        if (quads.size() > instance_capacity) {
+            if (auto grown = grow_instances(quads.size()); !grown) {
+                return grown.error();
+            }
+        }
+        void* mapped = map_transfer_buffer(instance_transfer, true); // cycle: never stall on the GPU
+        if (mapped == nullptr) {
+            return make_error(sdl_error("instance upload: SDL_MapGPUTransferBuffer"));
+        }
+        std::memcpy(mapped, quads.data(), bytes.value());
         SDL_UnmapGPUTransferBuffer(device, instance_transfer);
-        SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
+        SDL_GPUCopyPass* copy = begin_copy_pass(cmd);
+        if (copy == nullptr) {
+            return make_error(sdl_error("instance upload: SDL_BeginGPUCopyPass"));
+        }
         const SDL_GPUTransferBufferLocation src{instance_transfer, 0};
-        const SDL_GPUBufferRegion dst{instance_buffer, 0, bytes};
+        const SDL_GPUBufferRegion dst{instance_buffer, 0, bytes.value()};
         SDL_UploadToGPUBuffer(copy, &src, &dst, true);
         SDL_EndGPUCopyPass(copy);
         return true;
     }
 
+    /// Records the instance upload and the draw. On failure no pass is left open, so the caller
+    /// can cancel (or, after a swapchain acquisition, submit) the command buffer.
     Result<bool> encode(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* target, SDL_GPUTextureFormat format, Vec2f size,
                         const scene::DrawList& list, const Camera2D& camera, ClearColor clear) {
         if (auto uploaded = upload_instances(cmd, list.quads()); !uploaded) {
@@ -348,7 +526,10 @@ struct Renderer::Impl {
         color.clear_color = {clear.r, clear.g, clear.b, clear.a};
         color.load_op = SDL_GPU_LOADOP_CLEAR;
         color.store_op = SDL_GPU_STOREOP_STORE;
-        SDL_GPURenderPass* pass = SDL_BeginGPURenderPass(cmd, &color, 1, nullptr);
+        SDL_GPURenderPass* pass = begin_render_pass(cmd, color);
+        if (pass == nullptr) {
+            return make_error(sdl_error("SDL_BeginGPURenderPass"));
+        }
         if (!list.quads().empty()) {
             SDL_BindGPUGraphicsPipeline(pass, pipeline);
             const std::array<SDL_GPUBufferBinding, 2> bindings = {{{corner_buffer, 0}, {instance_buffer, 0}}};
@@ -357,6 +538,7 @@ struct Renderer::Impl {
             SDL_PushGPUVertexUniformData(cmd, 0, matrix.data(), static_cast<Uint32>(sizeof(float) * matrix.size()));
             const SDL_GPUTextureSamplerBinding binding{atlas, sampler};
             SDL_BindGPUFragmentSamplers(pass, 0, &binding, 1);
+            // upload_instances checked the count against kMaxInstances.
             SDL_DrawGPUPrimitives(pass, 6, static_cast<Uint32>(list.quads().size()), 0, 0);
         }
         SDL_EndGPURenderPass(pass);
@@ -401,6 +583,10 @@ Result<bool> Renderer::set_atlas(u32 width, u32 height, std::span<const u8> rgba
     return impl_->upload_atlas(width, height, rgba);
 }
 
+void Renderer::inject_fault(GpuFault fault, u32 skip) {
+    impl_->armed_fault = Impl::ArmedFault{fault, skip};
+}
+
 std::string Renderer::backend() const {
     const char* name = SDL_GetGPUDeviceDriver(impl_->device);
     return name != nullptr ? name : "unknown";
@@ -410,36 +596,38 @@ Result<bool> Renderer::render_to_window(const scene::DrawList& list, const Camer
     if (impl_->window == nullptr) {
         return make_error("renderer was created without a window");
     }
-    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(impl_->device);
-    if (cmd == nullptr) {
-        return make_error(sdl_error("SDL_AcquireGPUCommandBuffer"));
+    PendingCommands cmd(impl_->acquire_command_buffer());
+    if (!cmd) {
+        return make_error(sdl_error("window frame: SDL_AcquireGPUCommandBuffer"));
     }
     SDL_GPUTexture* swapchain = nullptr;
     Uint32 w = 0;
     Uint32 h = 0;
-    if (!SDL_WaitAndAcquireGPUSwapchainTexture(cmd, impl_->window, &swapchain, &w, &h)) {
-        SDL_CancelGPUCommandBuffer(cmd);
-        return make_error(sdl_error("SDL_WaitAndAcquireGPUSwapchainTexture"));
+    if (!SDL_WaitAndAcquireGPUSwapchainTexture(cmd.get(), impl_->window, &swapchain, &w, &h)) {
+        return make_error(sdl_error("window frame: SDL_WaitAndAcquireGPUSwapchainTexture"));
     }
+    cmd.submit_on_exit(); // a command buffer that acquired a swapchain texture must not be cancelled
     if (swapchain == nullptr) {
-        SDL_SubmitGPUCommandBuffer(cmd);
         return false; // minimised / occluded
     }
     const auto format = SDL_GetGPUSwapchainTextureFormat(impl_->device, impl_->window);
-    if (auto ok =
-            impl_->encode(cmd, swapchain, format, {static_cast<float>(w), static_cast<float>(h)}, list, camera, clear);
+    if (auto ok = impl_->encode(cmd.get(), swapchain, format, {static_cast<float>(w), static_cast<float>(h)}, list,
+                                camera, clear);
         !ok) {
-        SDL_SubmitGPUCommandBuffer(cmd);
-        return ok.error();
+        return make_error("window frame: " + ok.error().message);
     }
-    if (!SDL_SubmitGPUCommandBuffer(cmd)) {
-        return make_error(sdl_error("SDL_SubmitGPUCommandBuffer"));
+    if (!cmd.submit()) {
+        return make_error(sdl_error("window frame: SDL_SubmitGPUCommandBuffer"));
     }
     return true;
 }
 
 Result<Image> Renderer::render_offscreen(const scene::DrawList& list, const Camera2D& camera, u32 width, u32 height,
                                          ClearColor clear) {
+    const auto bytes = rgba8_byte_size(width, height, "offscreen frame");
+    if (!bytes) {
+        return bytes.error();
+    }
     SDL_GPUDevice* device = impl_->device;
     constexpr SDL_GPUTextureFormat format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM;
     SDL_GPUTextureCreateInfo tex_info{};
@@ -450,62 +638,57 @@ Result<Image> Renderer::render_offscreen(const scene::DrawList& list, const Came
     tex_info.height = height;
     tex_info.layer_count_or_depth = 1;
     tex_info.num_levels = 1;
-    SDL_GPUTexture* texture = SDL_CreateGPUTexture(device, &tex_info);
-    SDL_GPUTransferBufferCreateInfo download_info{};
-    download_info.usage = SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD;
-    download_info.size = width * height * 4;
-    SDL_GPUTransferBuffer* download = SDL_CreateGPUTransferBuffer(device, &download_info);
-    struct Cleanup {
-        SDL_GPUDevice* device;
-        SDL_GPUTexture* texture;
-        SDL_GPUTransferBuffer* download;
-        Cleanup(SDL_GPUDevice* d, SDL_GPUTexture* t, SDL_GPUTransferBuffer* b) : device(d), texture(t), download(b) {}
-        Cleanup(const Cleanup&) = delete;
-        Cleanup& operator=(const Cleanup&) = delete;
-        Cleanup(Cleanup&&) = delete;
-        Cleanup& operator=(Cleanup&&) = delete;
-        ~Cleanup() {
-            if (download != nullptr)
-                SDL_ReleaseGPUTransferBuffer(device, download);
-            if (texture != nullptr)
-                SDL_ReleaseGPUTexture(device, texture);
-        }
-    } cleanup{device, texture, download};
-    if (texture == nullptr || download == nullptr) {
-        return make_error(sdl_error("creating the offscreen target"));
+    Owned texture(device, impl_->create_texture(tex_info));
+    if (!texture) {
+        return make_error(sdl_error("offscreen frame: SDL_CreateGPUTexture"));
+    }
+    Owned download(device, impl_->create_transfer_buffer(SDL_GPU_TRANSFERBUFFERUSAGE_DOWNLOAD, bytes.value()));
+    if (!download) {
+        return make_error(sdl_error("offscreen frame: SDL_CreateGPUTransferBuffer"));
     }
 
-    SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(device);
-    if (auto ok = impl_->encode(cmd, texture, format, {static_cast<float>(width), static_cast<float>(height)}, list,
-                                camera, clear);
-        !ok) {
-        SDL_SubmitGPUCommandBuffer(cmd);
-        return ok.error();
+    PendingCommands cmd(impl_->acquire_command_buffer());
+    if (!cmd) {
+        return make_error(sdl_error("offscreen frame: SDL_AcquireGPUCommandBuffer"));
     }
-    SDL_GPUCopyPass* copy = SDL_BeginGPUCopyPass(cmd);
+    if (auto ok = impl_->encode(cmd.get(), texture.get(), format,
+                                {static_cast<float>(width), static_cast<float>(height)}, list, camera, clear);
+        !ok) {
+        return make_error("offscreen frame: " + ok.error().message);
+    }
+    SDL_GPUCopyPass* copy = impl_->begin_copy_pass(cmd.get());
+    if (copy == nullptr) {
+        return make_error(sdl_error("offscreen readback: SDL_BeginGPUCopyPass"));
+    }
     SDL_GPUTextureRegion region{};
-    region.texture = texture;
+    region.texture = texture.get();
     region.w = width;
     region.h = height;
     region.d = 1;
     SDL_GPUTextureTransferInfo destination{};
-    destination.transfer_buffer = download;
+    destination.transfer_buffer = download.get();
     SDL_DownloadFromGPUTexture(copy, &region, &destination);
     SDL_EndGPUCopyPass(copy);
-    SDL_GPUFence* fence = SDL_SubmitGPUCommandBufferAndAcquireFence(cmd);
+    SDL_GPUFence* fence = cmd.submit_and_acquire_fence();
     if (fence == nullptr) {
-        return make_error(sdl_error("SDL_SubmitGPUCommandBufferAndAcquireFence"));
+        return make_error(sdl_error("offscreen frame: SDL_SubmitGPUCommandBufferAndAcquireFence"));
     }
-    SDL_WaitForGPUFences(device, true, &fence, 1);
+    const bool finished = impl_->wait_for_fence(fence);
     SDL_ReleaseGPUFence(device, fence);
+    if (!finished) {
+        return make_error(sdl_error("offscreen readback: SDL_WaitForGPUFences"));
+    }
 
+    const void* pixels = impl_->map_transfer_buffer(download.get(), false);
+    if (pixels == nullptr) {
+        return make_error(sdl_error("offscreen readback: SDL_MapGPUTransferBuffer"));
+    }
     Image image;
     image.width = width;
     image.height = height;
-    image.rgba.resize(static_cast<std::size_t>(width) * height * 4);
-    const void* pixels = SDL_MapGPUTransferBuffer(device, download, false);
+    image.rgba.resize(bytes.value());
     std::memcpy(image.rgba.data(), pixels, image.rgba.size());
-    SDL_UnmapGPUTransferBuffer(device, download);
+    SDL_UnmapGPUTransferBuffer(device, download.get());
     return image;
 }
 

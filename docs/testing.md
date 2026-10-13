@@ -3,6 +3,7 @@
 | Rodzaj | Gdzie | Uruchamianie | Wymaga |
 |---|---|---|---|
 | Jednostkowe (doctest) | `tests/unit/` | `ctest --preset <p>` | nic |
+| Renderer: rozmiary i wstrzyknięte awarie GPU | `tests/unit/render_tests.cpp` (`gta20_render_tests`, tylko buildy z SDL) | CTest `Render sizes: *`, `Renderer: *` | rozmiary: nic; awarie: urządzenie GPU, bez niego SKIP |
 | Determinizm scenariuszy | `tests/conformance/` | CTest `conformance.determinism.*` | nic |
 | Regresja scenariuszy | `tests/conformance/golden/` | CTest `conformance.regression.*` | nic |
 | Wrapper `cmake/RunConformance.cmake` | `tests/conformance/wrapper/` (atrapa `gta20-headless`) | CTest `conformance.wrapper.*` | nic |
