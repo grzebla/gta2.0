@@ -41,6 +41,9 @@ public struct INPUT { public uint type; public InputUnion u; }
 [DllImport("user32.dll", SetLastError = true)] public static extern bool PostMessage(System.IntPtr hWnd, uint msg, System.IntPtr wParam, System.IntPtr lParam);
 [DllImport("user32.dll")] public static extern bool IsHungAppWindow(System.IntPtr hWnd);
 [DllImport("user32.dll")] public static extern bool PrintWindow(System.IntPtr hWnd, System.IntPtr hdc, uint flags);
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+public struct GUITHREADINFO { public int cbSize; public int flags; public System.IntPtr hwndActive; public System.IntPtr hwndFocus; public System.IntPtr hwndCapture; public System.IntPtr hwndMenuOwner; public System.IntPtr hwndMoveSize; public System.IntPtr hwndCaret; public RECT rcCaret; }
+[DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO info);
 [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
 [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
 [DllImport("user32.dll")] public static extern System.IntPtr SetFocus(System.IntPtr hWnd);
@@ -53,6 +56,9 @@ public delegate bool EnumProc(System.IntPtr hWnd, System.IntPtr lParam);
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(System.IntPtr hWnd, out uint pid);
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassName(System.IntPtr hWnd, System.Text.StringBuilder s, int n);
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(System.IntPtr hWnd, System.Text.StringBuilder s, int n);
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+public struct IO_COUNTERS { public ulong ReadOperationCount; public ulong WriteOperationCount; public ulong OtherOperationCount; public ulong ReadTransferCount; public ulong WriteTransferCount; public ulong OtherTransferCount; }
+[DllImport("kernel32.dll")] public static extern bool GetProcessIoCounters(System.IntPtr hProcess, out IO_COUNTERS counters);
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
 public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 '@
@@ -141,12 +147,50 @@ $script:VirtualKeys = @{
     LCTRL = 0xA2; LSHIFT = 0xA0; LALT = 0xA4; BACKSPACE = 0x08
 }
 foreach ($c in [char[]] 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') { $script:VirtualKeys[[string]$c] = [int][char]$c }
-$script:InputMethods = @('scancode', 'vk', 'postmessage', 'activate-scancode')
+$script:InputMethods = @('scancode', 'vk', 'postmessage', 'activate-scancode', 'focusmsg-scancode')
 
 function Get-WindowOwner([IntPtr] $Window) {
     $owner = [uint32]0
     $thread = [Gta20.Native]::GetWindowThreadProcessId($Window, [ref] $owner)
     return [pscustomobject]@{ Pid = [int]$owner; Thread = $thread }
+}
+
+# Class name of a window (diagnostics).
+function Get-WindowClass([IntPtr] $Window) {
+    $cls = New-Object System.Text.StringBuilder 128
+    [Gta20.Native]::GetClassName($Window, $cls, 128) | Out-Null
+    return $cls.ToString()
+}
+
+# Which window of the game's GUI thread is active / has keyboard focus, and all visible
+# top-level windows the game process owns (DDrawCompat adds its own presentation window).
+function Get-GameFocusInfo([IntPtr] $Window, [int] $GamePid) {
+    $info = [ordered]@{}
+    $owner = Get-WindowOwner $Window
+    $gti = New-Object Gta20.Native+GUITHREADINFO
+    $gti.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf([type] [Gta20.Native+GUITHREADINFO])
+    if ([Gta20.Native]::GetGUIThreadInfo($owner.Thread, [ref] $gti)) {
+        $info.active = [ordered]@{ window = [int64]$gti.hwndActive; class = (Get-WindowClass $gti.hwndActive) }
+        $info.focus = [ordered]@{ window = [int64]$gti.hwndFocus; class = (Get-WindowClass $gti.hwndFocus) }
+        $info.capture = [int64]$gti.hwndCapture
+    }
+    $wins = [System.Collections.Generic.List[object]]::new()
+    $cb = [Gta20.Native+EnumProc] {
+        param($h, $l)
+        $null = $l
+        $o = [uint32]0
+        [Gta20.Native]::GetWindowThreadProcessId($h, [ref] $o) | Out-Null
+        if ($o -eq $GamePid) {
+            $rc = New-Object Gta20.Native+RECT
+            [Gta20.Native]::GetWindowRect($h, [ref] $rc) | Out-Null
+            $wins.Add([ordered]@{ window = [int64]$h; class = (Get-WindowClass $h); visible = [Gta20.Native]::IsWindowVisible($h)
+                rect = @($rc.Left, $rc.Top, $rc.Right, $rc.Bottom) })
+        }
+        return $true
+    }
+    [Gta20.Native]::EnumWindows($cb, [IntPtr]::Zero) | Out-Null
+    $info.windows = @($wins)
+    return $info
 }
 
 function Send-KeyEvent([uint16] $Vk, [uint16] $Scan, [uint32] $Flags) {
@@ -182,6 +226,12 @@ function Send-GameKey([string] $Key, [int] $HoldMs, [IntPtr] $Window, [string] $
         $diag.hung = [Gta20.Native]::IsHungAppWindow($Window)
         $attached = $false
         $target = Get-WindowOwner $Window
+        if ($Method -eq 'focusmsg-scancode') {
+            # Tell the game window it is active and focused (the game enables input on these).
+            [Gta20.Native]::PostMessage($Window, 0x0006, [IntPtr]1, [IntPtr]::Zero) | Out-Null   # WM_ACTIVATE(WA_ACTIVE)
+            [Gta20.Native]::PostMessage($Window, 0x0007, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null # WM_SETFOCUS
+            Start-Sleep -Milliseconds 100
+        }
         if ($Method -eq 'activate-scancode') {
             $attached = [Gta20.Native]::AttachThreadInput([Gta20.Native]::GetCurrentThreadId(), $target.Thread, $true)
             [Gta20.Native]::BringWindowToTop($Window) | Out-Null
@@ -193,6 +243,7 @@ function Send-GameKey([string] $Key, [int] $HoldMs, [IntPtr] $Window, [string] $
         }
         $diag.attachedThreadInput = $attached
     }
+    if ($Window -ne [IntPtr]::Zero) { $diag.gameFocus = Get-GameFocusInfo -Window $Window -GamePid $GamePid }
     $fg = [Gta20.Native]::GetForegroundWindow()
     $diag.foregroundAtSend = [ordered]@{ window = [int64]$fg; pid = (Get-WindowOwner $fg).Pid; isGame = ((Get-WindowOwner $fg).Pid -eq $GamePid) }
     foreach ($up in @($false, $true)) {
@@ -204,6 +255,7 @@ function Send-GameKey([string] $Key, [int] $HoldMs, [IntPtr] $Window, [string] $
             $diag.postMessage += [ordered]@{ up = $up; ok = $ok; error = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error() }
         } else {
             if ($Method -eq 'vk') {
+                # virtual key + scan code, no KEYEVENTF_SCANCODE
                 $flags = [uint32]0; $v = $vk
             } else {
                 $flags = [uint32]0x0008; $v = [uint16]0       # KEYEVENTF_SCANCODE
@@ -216,6 +268,18 @@ function Send-GameKey([string] $Key, [int] $HoldMs, [IntPtr] $Window, [string] $
         if (-not $up) { Start-Sleep -Milliseconds ([math]::Max(30, $HoldMs)) }
     }
     return $diag
+}
+
+# Bytes the game process has read so far. Entering a new menu screen or a map reads files
+# (frontend images, .gmp/.sty), so this shows progress even when screenshots cannot.
+function Get-ReadByteCount($Process) {
+    try {
+        $c = New-Object Gta20.Native+IO_COUNTERS
+        if ([Gta20.Native]::GetProcessIoCounters($Process.Handle, [ref] $c)) { return [int64]$c.ReadTransferCount }
+    } catch {
+        return $null
+    }
+    return $null
 }
 
 # Visible dialog boxes (class #32770) owned by a process, with their static texts.
@@ -253,6 +317,7 @@ function Get-ProcessDialog([int] $ProcessId) {
 }
 
 $proc = $null
+$script:ProxyFiles = @()   # set before try: the finally block reads it under StrictMode
 try {
     # Desktop before the game starts: frames must differ from it to count as "rendered",
     # otherwise a live process over an unchanged desktop would look like success.
@@ -263,14 +328,45 @@ try {
     $exe = Join-Path $case.gameDir $case.exe
     $lastSample = $baseline
     $lastWindow = $null
+    $inputMethod = 'scancode'
+    if (($case.PSObject.Properties.Name -contains 'inputMethod') -and $case.inputMethod) { $inputMethod = [string]$case.inputMethod }
+    # Method dinput-proxy: our DirectInput 8 proxy (inject\dinput8.dll, uploaded with these scripts)
+    # feeds the scripted keys straight into what the game reads; nothing is sent through Windows.
+    $proxyMethod = ($inputMethod -eq 'dinput-proxy')
+    if ($proxyMethod) {
+        $proxySrc = Join-Path $PSScriptRoot 'inject\dinput8.dll'
+        if (-not (Test-Path $proxySrc)) { throw 'input method dinput-proxy needs inject\dinput8.dll next to the scripts' }
+        $proxyDst = Join-Path $case.gameDir 'dinput8.dll'
+        if (Test-Path $proxyDst) {
+            # A copy of our own proxy left by an interrupted case may be replaced; anything else not.
+            if ((Get-FileHash $proxyDst).Hash -ne (Get-FileHash $proxySrc).Hash) {
+                throw 'refusing to overwrite a dinput8.dll in the game directory that is not our proxy'
+            }
+            Remove-Item -Path $proxyDst -Force
+        }
+        Copy-Item -Path $proxySrc -Destination $proxyDst
+        $script:ProxyFiles = @($proxyDst, (Join-Path $case.gameDir 'gta20-input.txt'))
+        $lines = [System.Collections.Generic.List[string]]::new()
+        if (($case.PSObject.Properties.Name -contains 'inputs') -and $case.inputs) {
+            foreach ($k in @($case.inputs)) {
+                $code = $script:ScanCodes[[string]$k.key]
+                if (-not $code) { throw "unsupported key '$($k.key)'" }
+                $dik = [int]$code[0]; if ($code[1]) { $dik = $dik -bor 0x80 }
+                $hold = if ($k.PSObject.Properties.Name -contains 'holdMs') { [int]$k.holdMs } else { 80 }
+                $down = [int]([double]$k.atSeconds * 1000)
+                $lines.Add(('{0} down {1:x2}' -f $down, $dik))
+                $lines.Add(('{0} up {1:x2}' -f ($down + [math]::Max(30, $hold)), $dik))
+            }
+        }
+        Set-Content -Path $script:ProxyFiles[1] -Value $lines -Encoding ASCII
+        $result.proxyScript = @($lines)
+    }
     $proc = Start-Process -FilePath $exe -WorkingDirectory $case.gameDir -PassThru
     $result.pid = $proc.Id
     $t0 = Get-Date
 
     # Input method: one name, or 'cycle' (key i uses method i mod n - diagnosis of which
     # injection the game accepts). Set by the owner in the compat matrix, never by a scenario.
-    $inputMethod = 'scancode'
-    if (($case.PSObject.Properties.Name -contains 'inputMethod') -and $case.inputMethod) { $inputMethod = [string]$case.inputMethod }
     $keyIndex = 0
     # One timeline: screenshots and (capture mode) scripted key presses, in time order.
     $events = @()
@@ -290,7 +386,14 @@ try {
             $method = if ($inputMethod -eq 'cycle') { $script:InputMethods[$keyIndex % $script:InputMethods.Count] } else { $inputMethod }
             $keyIndex++
             $cpuBefore = $proc.TotalProcessorTime.TotalMilliseconds
-            $diag = Send-GameKey -Key $ev.key -HoldMs $ev.hold -Window $proc.MainWindowHandle -Method $method -GamePid $proc.Id
+            $readBefore = Get-ReadByteCount $proc
+            if ($proxyMethod) {
+                # The proxy delivers this key by itself; only wait for the hold and observe.
+                Start-Sleep -Milliseconds ([math]::Max(30, $ev.hold))
+                $diag = [ordered]@{ method = 'dinput-proxy' }
+            } else {
+                $diag = Send-GameKey -Key $ev.key -HoldMs $ev.hold -Window $proc.MainWindowHandle -Method $method -GamePid $proc.Id
+            }
             # What the screen shows shortly after the key (evidence, not proof of consumption).
             Start-Sleep -Milliseconds 1500
             $afterPng = Join-Path $outDir ('key-{0:D3}s-{1}-{2}.png' -f [int]$ev.at, $ev.key, $method)
@@ -304,6 +407,8 @@ try {
             $diag.afterFile = (Split-Path -Leaf $afterPng)
             $diag.afterChangedRatio = (Compare-FrameSample -Baseline $lastSample -Frame $after).ChangedRatio
             $diag.gameCpuMsDuring = [math]::Round($proc.TotalProcessorTime.TotalMilliseconds - $cpuBefore)
+            $readAfter = Get-ReadByteCount $proc
+            $diag.gameReadBytesDuring = $(if ($null -ne $readBefore -and $null -ne $readAfter) { $readAfter - $readBefore } else { $null })
             $result.inputsSent += $diag
             $lastSample = $after
             continue
@@ -334,11 +439,24 @@ try {
             processAlive = -not $proc.HasExited
             foreground   = ([Gta20.Native]::GetForegroundWindow() -eq $proc.MainWindowHandle)
             windowCapture = $winInfo
+            gameReadBytes = (Get-ReadByteCount $proc)
         }
     }
 
     $proc.Refresh()
     $result.alive = -not $proc.HasExited
+    if ($result.alive) {
+        # Which input/graphics libraries the game actually loaded (e.g. DINPUT.dll and its path).
+        # tasklist lists the modules of a 32-bit (WOW64) process; Process.Modules from this
+        # 64-bit host would only show the WOW64 layer.
+        try {
+            $csv = & tasklist.exe /m /fi "PID eq $($proc.Id)" /fo csv /nh 2>$null
+            $names = @((($csv | Select-Object -First 1) -split '","')[-1].Trim('"') -split ',\s*' | Where-Object { $_ })
+            $result.modules = @($names | Where-Object { $_ -match '^(dinput|dinput8|ddraw|d3d|dsound|dplay|winmm|xinput)' })
+        } catch {
+            $result.modulesError = $_.Exception.Message
+        }
+    }
     # @(if ...) - an if-expression would unroll an empty array to $null (defect D1).
     $result.dialogs = @(if ($result.alive) { Get-ProcessDialog -ProcessId $proc.Id })
     if ($proc.HasExited) {
@@ -358,7 +476,9 @@ try {
     if ($proc -and -not $proc.HasExited) {
         Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
     }
-    # Logs the game or the wrapper (e.g. DDrawCompat-gta2.log) wrote during this case.
+    # Files the game had open (e.g. the proxy DLL) can be removed only after it has exited.
+    if ($proc) { $proc.WaitForExit(15000) | Out-Null }
+    # Logs the game or the wrapper (e.g. DDrawCompat-gta2.log, gta20-dinput.log) wrote during this case.
     try {
         $since = [datetime]::Parse($result.startedAt)
         $logs = @(Get-ChildItem -Path $case.gameDir -Filter '*.log' -File -ErrorAction SilentlyContinue |
@@ -371,6 +491,14 @@ try {
         }
     } catch {
         $result.gameLogsError = $_.Exception.Message
+    }
+    # The proxy must never stay in the game directory for later cases.
+    foreach ($f in $script:ProxyFiles) {
+        for ($i = 0; $i -lt 10 -and (Test-Path $f); $i++) {
+            Remove-Item -Path $f -Force -ErrorAction SilentlyContinue
+            if (Test-Path $f) { Start-Sleep -Milliseconds 500 }
+        }
+        if (Test-Path $f) { $result.proxyCleanupError = "could not remove $f" }
     }
     $result.finishedAt = (Get-Date).ToString('o')
     $result | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 -Path (Join-Path $outDir 'result.json')

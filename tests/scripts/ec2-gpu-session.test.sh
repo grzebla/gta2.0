@@ -333,7 +333,7 @@ case "$1 $2" in
   "ssm describe-instance-information")
     if [[ "$*" == *"LastPingDateTime"* ]]; then date +%s; else echo Online; fi ;;
   "ssm send-command") echo "cmd-123" ;;
-  "cloudformation describe-stacks") echo "gta20-gfx-artifacts-433213574600" ;;
+  "cloudformation describe-stacks") echo "gta20-gfx-artifacts-123456789012" ;;
   "service-quotas get-service-quota") echo "${FAKE_QUOTA:-0.0}" ;;
   "ec2 describe-vpcs") echo "vpc-012515c9ad46fee92" ;;
   "ec2 describe-subnets") echo "subnet-01ca4e08a6f9fa5b3" ;;
@@ -348,7 +348,7 @@ chmod +x "$WORK/bin/aws"
 
 # TMPDIR: run-gfx-compat-local.sh keeps its session state there.
 export PATH="$WORK/bin:$PATH" FAKE_LOG="$WORK/aws.log" RUNNER_TEMP="$WORK" TMPDIR="$WORK/tmp" \
-       AWS_REGION=eu-north-1 GFX_BUCKET=gta20-gfx-artifacts-433213574600 RUN_ID=123-1
+       AWS_REGION=eu-north-1 GFX_BUCKET=gta20-gfx-artifacts-123456789012 RUN_ID=123-1
 # Orchestrator settings must not send operator-script output outside the workspace.
 unset GITHUB_ENV GFX_RESULTS_ROOT GFX_SCENARIOS_DIR
 
@@ -388,8 +388,8 @@ check "capture needs exactly one scenario id" 1 env GFX_MODE=capture GFX_CASES=a
 check "capture accepts one scenario id" 0 env GFX_MODE=capture GFX_CASES=frontend-walk bash "$SCRIPT" resolve
 mkdir -p "$WORK/staged"; echo '{}' > "$WORK/staged/frontend-walk.json"
 check "upload sends the staged scenario directory" 0 env GFX_MODE=capture GFX_CASES=frontend-walk GFX_SCENARIOS_DIR="$WORK/staged" bash "$SCRIPT" upload
-assert "the harness revision is uploaded with the scripts" log_has "harness-revision.txt s3://gta20-gfx-artifacts-433213574600/runs/123-1/scripts/"
-assert "staged scenarios go next to the host scripts" log_has "$WORK/staged/ s3://gta20-gfx-artifacts-433213574600/runs/123-1/scripts/scenarios/"
+assert "the harness revision is uploaded with the scripts" log_has "harness-revision.txt s3://gta20-gfx-artifacts-123456789012/runs/123-1/scripts/"
+assert "staged scenarios go next to the host scripts" log_has "$WORK/staged/ s3://gta20-gfx-artifacts-123456789012/runs/123-1/scripts/scenarios/"
 check "rejects bad RUN_ID" 1 env RUN_ID='1;rm -rf /' bash "$SCRIPT" resolve
 check "rejects bad bucket" 1 env GFX_BUCKET='Bad_Bucket' bash "$SCRIPT" resolve
 check "rejects unknown subcommand" 1 run terminate

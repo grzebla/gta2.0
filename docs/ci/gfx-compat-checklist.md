@@ -93,7 +93,7 @@ akcje budżetowe nie zastąpią mechanizmów A–D. Te zatrzymują hosta w ciąg
 | 4 | Stos `gta20-gfx` (instancja startuje od razu, watchdog wyłączy ją po 60 min) | Ty lub ja po zgodzie | 💰🧑 |
 | 5 | Zaraz po kroku 4: zatrzymać instancję albo od razu uruchomić `probe` | — | 💰 |
 | 6 | Stos `gta20-github-oidc` | Ty lub ja po zgodzie (po kroku 2) | 🧑 |
-| 7 | Gra: zip własnej instalacji GTA 2 10.5 → `s3://gta20-gfx-artifacts-433213574600/game/gta2-10.5.zip` (prywatny bucket z blokadą dostępu publicznego); SHA-256 → `game.sha256` w macierzy, commit na `main` | Ty | 🧑 |
+| 7 | Gra: zip własnej instalacji GTA 2 10.5 → `s3://gta20-gfx-artifacts-<account-id>/game/gta2-10.5.zip` (prywatny bucket z blokadą dostępu publicznego); SHA-256 → `game.sha256` w macierzy, commit na `main` | Ty | 🧑 |
 | 8 | Zmienne repo `AWS_REGION`, `GFX_BUCKET`, `AWS_GFX_ROLE_ARN`, `AWS_GFX_STOP_ROLE_ARN` | ustawione | ✅ |
 | 9 | `infra-lint` zielony na `main` | GitHub | ✅ po pushu |
 | 10 | `gfx-compat`: `mode=probe`, `max_minutes=45`, `cost_confirmation=uruchom-ec2` | Ty | 💰🧑 |

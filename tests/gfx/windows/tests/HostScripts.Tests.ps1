@@ -90,4 +90,44 @@ Describe 'Input diagnostics and provenance' {
         $script:runner | Should -Match 'windowCapture'
     }
     It 'collects logs the game or wrapper wrote during the case' { $script:runner | Should -Match 'game-logs' }
+    It 'records a screenshot-independent progress signal (bytes read by the game)' {
+        $script:runner | Should -Match 'GetProcessIoCounters'
+        $script:runner | Should -Match 'gameReadBytesDuring'
+    }
+    It 'writes developer options only to the Debug subkey and resets them before every case' {
+        $script:invoke | Should -Match 'Debug"\)'
+        $script:invoke | Should -Match 'Reset-DebugSetting'
+    }
+    It 'initialises script-scope state read in finally before the try (StrictMode)' {
+        $script:runner | Should -Match '(?s)\$script:ProxyFiles = @\(\).*?\ntry \{'
+    }
+    It 'removes the input proxy only after the game has exited' {
+        $script:runner | Should -Match 'WaitForExit\(15000\)'
+        $script:runner | Should -Match 'proxyCleanupError'
+    }
+    It 'lists the 32-bit modules the game loaded' { $script:runner | Should -Match 'tasklist\.exe /m' }
 }
+
+Describe 'DirectInput proxy (scripted input)' {
+    BeforeAll {
+        $script:invoke = Get-Content -Raw -Path (Join-Path $script:hostDir 'Invoke-GfxCompat.ps1')
+        $script:runner = Get-Content -Raw -Path (Join-Path $script:hostDir 'Run-Gta2Case.ps1')
+        $script:matrix = Get-Content -Raw -Path (Join-Path $script:hostDir '..\compat-matrix.json') | ConvertFrom-Json
+    }
+    It 'ships the proxy as source, not as a binary' {
+        Test-Path (Join-Path $script:hostDir 'inject\dinput8_proxy.c') | Should -BeTrue
+        Test-Path (Join-Path $script:hostDir 'inject\dinput8_proxy.def') | Should -BeTrue
+        @(Get-ChildItem -Path (Join-Path $script:hostDir 'inject') -Filter '*.dll').Count | Should -Be 0
+    }
+    It 'builds it with a pinned compiler (URL + SHA-256)' {
+        $script:matrix.input.proxy.zigUrl | Should -Match '^https://ziglang\.org/download/'
+        $script:matrix.input.proxy.zigSha256 | Should -Match '^[0-9a-f]{64}$'
+        $script:invoke | Should -Match 'zig SHA-256 mismatch'
+    }
+    It 'uses the proxy by default' { $script:matrix.input.method | Should -Be 'dinput-proxy' }
+    It 'never leaves the proxy in the game directory' {
+        $script:runner | Should -Match 'ProxyFiles'
+        $script:runner | Should -Match 'is not our proxy'
+    }
+}
+

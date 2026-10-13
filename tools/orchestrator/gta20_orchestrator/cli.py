@@ -151,8 +151,10 @@ def run_loop(cfg: Config, *, max_steps: Optional[int], daemon: bool, fake: bool 
             gk_agent, port = make_gatekeeper(cfg)
             from .gfx import GfxRunner
             gfx_runner = GfxRunner(cfg)
+        # Fake agents (tests, simulation) never query the real GitHub: its CI state must not
+        # leak into a simulated run.
         orch = Orchestrator(cfg, database, astra, claude, gatekeeper=gk_agent, github_port=port,
-                            gfx_runner=gfx_runner)
+                            gfx_runner=gfx_runner, use_github=not (fake or fake_spec))
         install_signal_handlers(orch)
         result = orch.run(max_steps=max_steps, on_step=lambda: report.write(database, cfg.state_dir))
         report.write(database, cfg.state_dir)
@@ -393,6 +395,18 @@ def cmd_answer(cfg: Config, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reset_limits(cfg: Config, args: argparse.Namespace) -> int:
+    """Owner: the daily caps (agent runs, EC2 runs) count again from now. The limits themselves,
+    the monthly EC2 budget and subscription quotas are unchanged."""
+    database = open_db(cfg)
+    with database.tx():
+        database.set_meta("limits_reset_at", str(now()))
+        database.set_meta("gfx_blocked_until", "0")
+        database.event("limits_reset", agent="human", outcome="reset", detail=args.note or "")
+    print("daily counters reset; a waiting daemon picks this up after `restart` (or at its next wake-up)")
+    return 0
+
+
 def cmd_service(cfg: Config, args: argparse.Namespace) -> int:
     if args.action == "install":
         sha = gitops.rev(cfg.repo_root)
@@ -548,6 +562,9 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("answer", help="owner: answer Astra's NEEDS_HUMAN question")
     s.add_argument("text")
     s.set_defaults(fn=cmd_answer)
+    s = sub.add_parser("reset-limits", help="owner: daily agent-run and EC2-run counters start again from now")
+    s.add_argument("--note")
+    s.set_defaults(fn=cmd_reset_limits)
     s = sub.add_parser("service", help="launchd LaunchAgent")
     s.add_argument("action", choices=["install", "uninstall", "status"])
     s.set_defaults(fn=cmd_service)

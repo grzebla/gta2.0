@@ -339,6 +339,28 @@ class SimulationTests(SimCase):
 
 
 # ------------------------------------------------------------------------------- Gatekeeper
+class GitHubExcerptTests(unittest.TestCase):
+    def test_failure_excerpts_keep_error_lines_only(self) -> None:
+        from gta20_orchestrator import github as G
+        log = ("linux\tTest\t2026-10-13T11:01:38.8256651Z 105/155 Test #105: rendercheck.x ***Failed 0.01 sec\n"
+               "linux\tTest\t2026-10-13T11:01:38.8257308Z   root: expected rejection 'inside the checkout'\n"
+               "linux\tTest\t2026-10-13T11:01:38.8257309Z just progress output\n")
+        orig = G._run
+        G._run = lambda repo, *a, **k: (1, log, "")
+        try:
+            out = G.GitHubPort("o/r").failure_excerpts([
+                {"name": "linux-x64-release", "bucket": "fail", "link": "https://github.com/o/r/actions/runs/1/job/2"},
+                {"name": "lint", "bucket": "pass", "link": "https://github.com/o/r/actions/runs/1/job/3"}])
+        finally:
+            G._run = orig
+        self.assertIn("--- linux-x64-release ---", out)
+        self.assertIn("***Failed", out)
+        self.assertIn("expected rejection", out)
+        self.assertNotIn("progress output", out)
+        self.assertNotIn("2026-10-13T", out)
+        self.assertNotIn("lint", out)
+
+
 class GatekeeperTests(SimCase):
     def setUp(self) -> None:
         super().setUp()
@@ -445,6 +467,8 @@ class GatekeeperTests(SimCase):
         fix = [t for t in self.env.db.tasks() if t["created_by"] == "gatekeeper"]
         self.assertEqual(len(fix), 1)
         self.assertEqual((fix[0]["status"], fix[0]["priority"]), ("READY", 0))
+        # The developer has no GitHub access: the task carries the CI error lines.
+        self.assertIn("simulated error: expected X, got Y", json.loads(fix[0]["spec"])["context"])
         orch.gatekeeper.step()  # same head: no duplicate task
         self.assertEqual(len([t for t in self.env.db.tasks() if t["created_by"] == "gatekeeper"]), 1)
         self.assertEqual(port.merged, [])
@@ -594,6 +618,9 @@ class GfxTests(SimCase):
 
     def test_scenario_validation_is_strict(self) -> None:
         validate_scenario(dict(SCENARIO), self.matrix, "menu-walk", 2700)
+        ok = validate_scenario(dict(SCENARIO, debug={"skip_frontend": 1, "mapname": "WIL.gmp"}), self.matrix,
+                               "menu-walk", 2700)
+        self.assertEqual(ok["debug"], {"skip_frontend": 1, "mapname": "wil.gmp"})
         bad = [
             dict(SCENARIO, id="other"),
             dict(SCENARIO, script="Remove-Item C:\\"),
@@ -605,6 +632,10 @@ class GfxTests(SimCase):
             dict(SCENARIO, inputs=[{"atSeconds": 1, "key": "F4"}]),
             dict(SCENARIO, inputs=[{"atSeconds": 1, "key": "ENTER", "cmd": "x"}]),
             dict(SCENARIO, inputs=[{"atSeconds": 1, "key": "ENTER", "holdMs": 60000}]),
+            dict(SCENARIO, debug={"do_mike": 1}),
+            dict(SCENARIO, debug={"skip_frontend": 0}),
+            dict(SCENARIO, debug={"mapname": "..\\..\\x.gmp"}),
+            dict(SCENARIO, debug={"mapname": "wil.sty"}),
         ]
         for b in bad:
             with self.assertRaises(ScenarioError, msg=str(b)):
@@ -700,6 +731,22 @@ class GfxTests(SimCase):
         self.assertIn("gfx job 1", orch.step())
         with self.assertRaises(Wait):
             orch.step()  # then the agent cap applies as before
+
+    def test_owner_reset_restarts_the_daily_counters(self) -> None:
+        self.env.cfg.data["limits"]["max_runs_per_day"] = 0
+        self.env.cfg.data["gfx"]["max_runs_per_day"] = 1
+        runner = FakeGfxRunner()
+        orch = self._orch(runner)
+        orch.gfx.enqueue([{"mode": "probe", "target": "all", "reason": "a"},
+                          {"mode": "probe", "target": "all", "reason": "b"}], None, "owner", self.env.repo)
+        self.assertIn("gfx job 1", orch.gfx.run_next())
+        self.assertIsNone(orch.gfx.run_next())  # EC2 cap for today reached
+        time.sleep(1.1)
+        self.assertEqual(cli_main(["--repo", str(self.env.repo), "reset-limits", "--note", "test"]), 0)
+        self.assertEqual(orch.gfx.runs_today(), 0)
+        self.assertIn("gfx job 2", orch.gfx.run_next())
+        self.env.cfg.data["limits"]["max_runs_per_day"] = 5
+        orch.daily_cap()  # agent runs before the reset no longer count
 
     def test_interrupted_run_is_charged_and_failed(self) -> None:
         orch = self._orch(FakeGfxRunner())
