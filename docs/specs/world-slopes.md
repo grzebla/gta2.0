@@ -5,6 +5,10 @@ Dokument badawczy T0019 (2026-10-13, baza `0348c5d`). Opisuje, co wiadomo o każ
 proponuje kolejność zadań implementacyjnych. **Nie** zawiera implementacji. Nic tutaj nie dowodzi
 wierności wizualnej wobec oryginału: brak jakiegokolwiek zrzutu oryginału ze skosem ([O]).
 
+**Stan na 2026-10-13: żadna rodzina skosów (kody 1–61) nie jest odblokowana do implementacji.**
+Geometria opisana w sekcji 4 to materiał badawczy (kandydaci wyprowadzeni z [M] przy nazwanych
+hipotezach), a nie ustalenie.
+
 Uzupełnia [world-geometry.md](world-geometry.md) (bloki bez skosów: osie, pięć ścian, obrót,
 projekcja). Konwencje osi, ścian i etykiet z tamtego dokumentu obowiązują tutaj bez zmian.
 
@@ -30,6 +34,15 @@ Hipotezy nazwane (używane w tabelach):
   „45°”) dzieli wzniesienie równo: kawałek k (1 … n) ma krawędź niską na (k − 1)/n i wysoką na k/n.
 * **H-FOOT** (podstawa diagonalna): bryła kodów 45–52 zajmuje w rzucie z góry tylko jeden trójkąt
   komórki wyznaczony przekątną (sekcja 4.4).
+* **H-DIAG** (ściana diagonalna): kody 45–48 to pionowa ściana pełnej wysokości poziomu na przekątnej
+  komórki, otwarta w stronę z nazwy, z kaflem ze słowa `left`/`right` (sekcja 4.4).
+
+**Reguła odblokowania.** [M] mówi tylko, co zapisano w plikach map; razem z H-CONT, H-STEP, H-FOOT
+czy H-DIAG daje kandydata, nie geometrię. Rodzina przechodzi do implementacji dopiero wtedy, gdy
+każda własność geometryczna, od której zależą jej oczekiwania (sekcja 7, kolumna „Co musi
+stwierdzić”), jest potwierdzona dowodem [F], [B] albo [O]. Do tego czasu kandydaci i oczekiwania
+syntetyczne z tego dokumentu są materiałem badawczym. Kody, które dziś nie mają jednego kandydata
+(49–61, pokrywy 45–48), są zablokowane tym bardziej.
 
 ## 1. Źródła
 
@@ -49,9 +62,14 @@ Hipotezy nazwane (używane w tabelach):
 
 ### 1.1 Powtórzenie agregatów [M]
 
+Z katalogu głównego repozytorium, w nowej powłoce (po `cmake --build --preset debug`):
+
 ```sh
-GTA20_GAME_DIR=~/Games/GTA2 ./build/debug/bin/gta20-headless inventory > "$TMPDIR/inventory.txt"
-python3 -I tools/map-analysis/slope_aggregates.py "$GTA20_GAME_DIR" --inventory "$TMPDIR/inventory.txt"
+export GTA20_GAME_DIR="$HOME/Games/GTA2"         # ta sama instalacja dla wszystkich poleceń
+INVENTORY="${TMPDIR:-/tmp}/gta20-inventory.txt"   # raport T0010, poza repozytorium
+./build/debug/bin/gta20-headless inventory > "$INVENTORY"
+python3 -I tools/map-analysis/slope_aggregates.py "$GTA20_GAME_DIR" --inventory "$INVENTORY"
+python3 -I tools/map-analysis/check_slope_table.py docs/specs/world-slopes.md "$INVENTORY"
 ```
 
 Skrypt sam czyta DMAP (układ z `gmp.md:15-16`) i porównuje swoje liczby komórek z raportem T0010
@@ -82,69 +100,71 @@ Zastrzeżenia do [M]:
 
 ## 3. Tabela kodów 0–63
 
-Kolumny: **Nazwa** — identyfikator z [T] (do potwierdzenia [F]); **Komórki** — suma po 17 mapach z
+Kolumny: **Nazwa** — identyfikator z [T] (do potwierdzenia [F]); **Rodzina** — opis z [T] i
+kandydat z sekcji 4 (np. „ku −y” to kandydacki kierunek wznoszenia [H], nie ustalenie); **Komórki** — suma po 17 mapach z
 T0010 [M] (w nawiasie liczba map, w których kod występuje); **wil/ste/bil** — komórki w trzech
 miastach [M]; **Status**:
 
-* **IMPL** — zaimplementowane jako blok jednostkowy [I];
-* **GOTOWE-H** — geometria wyznaczona przez [M] przy H-CONT i H-STEP; można implementować z
-  syntetycznymi oczekiwaniami (sekcja 6), zgodność z oryginałem nieudowodniona;
-* **CZĘŚĆ** — część geometrii GOTOWE-H, reszta zablokowana;
+* **IMPL** — zaimplementowane jako blok jednostkowy [I] (zgodność z oryginałem nieudowodniona);
+* **BLOK-K** — zablokowane; w sekcji 4 jest **jeden kandydat** geometrii wyprowadzony z [M] przy
+  H-CONT/H-STEP (1–44) albo H-DIAG/H-FOOT (ściany 45–48), ale bez potwierdzenia [F]/[B]/[O];
+  implementacja dopiero po dowodzie z sekcji 7;
 * **BLOK** — zablokowane: dane dopuszczają więcej niż jedną geometrię albo brakuje wymiaru;
 * **BRAK** — kod nie występuje w żadnej mapie;
-* **ZNACZNIK** — kod opisuje relację z innym blokiem, nie własny kształt.
+* **ZNACZNIK** — według [M] kod oznacza relację z innym blokiem; jego własna geometria w oryginale
+  jest nierozstrzygnięta (sekcja 4.3).
 
 | Kod | Nazwa [T] | Rodzina | Komórki (map) | wil/ste/bil | Status | Nierozstrzygnięte |
 |---|---|---|---|---|---|---|
 | 0 | None | brak skosu | 1 273 055 (17) | 95 206/110 477/101 281 | IMPL | wszystko z `world-geometry.md` sekcja 4; pokrywa 1023 w 3 komórkach |
-| 1 | Up26_1 | 26°, ku −y, k = 1 z 2 | 2 068 (16) | 399/265/379 | GOTOWE-H | UV ścian bocznych, orientacja tekstury pokrywy, `flat` na pokrywie (23,6 %) |
-| 2 | Up26_2 | 26°, ku −y, k = 2 z 2 | 2 068 (16) | 391/305/356 | GOTOWE-H | jak 1 |
-| 3 | Down26_1 | 26°, ku +y, k = 1 z 2 | 2 032 (17) | 383/176/375 | GOTOWE-H | jak 1 |
-| 4 | Down26_2 | 26°, ku +y, k = 2 z 2 | 2 038 (17) | 385/216/353 | GOTOWE-H | jak 1 |
-| 5 | Left26_1 | 26°, ku −x, k = 1 z 2 | 1 871 (16) | 321/309/321 | GOTOWE-H | jak 1 |
-| 6 | Left26_2 | 26°, ku −x, k = 2 z 2 | 2 050 (16) | 341/408/316 | GOTOWE-H | jak 1 |
-| 7 | Right26_1 | 26°, ku +x, k = 1 z 2 | 1 854 (16) | 283/330/326 | GOTOWE-H | jak 1 |
-| 8 | Right26_2 | 26°, ku +x, k = 2 z 2 | 2 009 (16) | 314/430/311 | GOTOWE-H | jak 1 |
-| 9 | Up7_1 | 7°, ku −y, k = 1 z 8 | 456 (7) | 85/36/80 | GOTOWE-H | jak 1 |
-| 10 | Up7_2 | 7°, ku −y, k = 2 z 8 | 437 (7) | 81/36/73 | GOTOWE-H | jak 1 |
-| 11 | Up7_3 | 7°, ku −y, k = 3 z 8 | 445 (7) | 85/36/73 | GOTOWE-H | jak 1 |
-| 12 | Up7_4 | 7°, ku −y, k = 4 z 8 | 393 (7) | 64/36/72 | GOTOWE-H | jak 1 |
-| 13 | Up7_5 | 7°, ku −y, k = 5 z 8 | 393 (7) | 67/36/69 | GOTOWE-H | jak 1 |
-| 14 | Up7_6 | 7°, ku −y, k = 6 z 8 | 377 (6) | 59/36/68 | GOTOWE-H | jak 1 |
-| 15 | Up7_7 | 7°, ku −y, k = 7 z 8 | 339 (6) | 47/36/61 | GOTOWE-H | jak 1 |
-| 16 | Up7_8 | 7°, ku −y, k = 8 z 8 | 318 (6) | 47/36/60 | GOTOWE-H | jak 1 |
-| 17 | Down7_1 | 7°, ku +y, k = 1 z 8 | 338 (9) | 94/21/55 | GOTOWE-H | jak 1 |
-| 18 | Down7_2 | 7°, ku +y, k = 2 z 8 | 320 (9) | 92/21/48 | GOTOWE-H | jak 1 |
-| 19 | Down7_3 | 7°, ku +y, k = 3 z 8 | 320 (9) | 92/21/48 | GOTOWE-H | jak 1 |
-| 20 | Down7_4 | 7°, ku +y, k = 4 z 8 | 301 (9) | 81/21/49 | GOTOWE-H | jak 1 |
-| 21 | Down7_5 | 7°, ku +y, k = 5 z 8 | 267 (9) | 67/21/46 | GOTOWE-H | jak 1 |
-| 22 | Down7_6 | 7°, ku +y, k = 6 z 8 | 236 (8) | 55/21/43 | GOTOWE-H | jak 1 |
-| 23 | Down7_7 | 7°, ku +y, k = 7 z 8 | 206 (8) | 46/21/37 | GOTOWE-H | jak 1 |
-| 24 | Down7_8 | 7°, ku +y, k = 8 z 8 | 205 (8) | 46/21/37 | GOTOWE-H | jak 1 |
-| 25 | Left7_1 | 7°, ku −x, k = 1 z 8 | 395 (9) | 94/39/76 | GOTOWE-H | jak 1 |
-| 26 | Left7_2 | 7°, ku −x, k = 2 z 8 | 379 (9) | 93/39/69 | GOTOWE-H | jak 1 |
-| 27 | Left7_3 | 7°, ku −x, k = 3 z 8 | 305 (9) | 88/39/38 | GOTOWE-H | jak 1 |
-| 28 | Left7_4 | 7°, ku −x, k = 4 z 8 | 299 (9) | 84/39/38 | GOTOWE-H | jak 1 |
-| 29 | Left7_5 | 7°, ku −x, k = 5 z 8 | 240 (9) | 62/39/33 | GOTOWE-H | jak 1 |
-| 30 | Left7_6 | 7°, ku −x, k = 6 z 8 | 214 (7) | 53/39/32 | GOTOWE-H | jak 1 |
-| 31 | Left7_7 | 7°, ku −x, k = 7 z 8 | 194 (7) | 49/39/26 | GOTOWE-H | jak 1 |
-| 32 | Left7_8 | 7°, ku −x, k = 8 z 8 | 197 (7) | 51/38/26 | GOTOWE-H | jak 1 |
-| 33 | Right7_1 | 7°, ku +x, k = 1 z 8 | 408 (8) | 89/43/87 | GOTOWE-H | jak 1 |
-| 34 | Right7_2 | 7°, ku +x, k = 2 z 8 | 390 (8) | 87/43/80 | GOTOWE-H | jak 1 |
-| 35 | Right7_3 | 7°, ku +x, k = 3 z 8 | 326 (7) | 90/43/49 | GOTOWE-H | jak 1 |
-| 36 | Right7_4 | 7°, ku +x, k = 4 z 8 | 306 (7) | 82/43/46 | GOTOWE-H | jak 1 |
-| 37 | Right7_5 | 7°, ku +x, k = 5 z 8 | 237 (6) | 51/43/45 | GOTOWE-H | jak 1 |
-| 38 | Right7_6 | 7°, ku +x, k = 6 z 8 | 227 (5) | 48/43/44 | GOTOWE-H | jak 1 |
-| 39 | Right7_7 | 7°, ku +x, k = 7 z 8 | 213 (5) | 45/43/40 | GOTOWE-H | jak 1 |
-| 40 | Right7_8 | 7°, ku +x, k = 8 z 8 | 207 (5) | 44/43/38 | GOTOWE-H | jak 1 |
-| 41 | Up45 | 45°, ku −y, k = 1 z 1 | 4 941 (15) | 821/509/1 173 | GOTOWE-H | jak 1; `flat` na pokrywie 33,1 % |
-| 42 | Down45 | 45°, ku +y | 4 881 (15) | 798/541/1 151 | GOTOWE-H | jak 41 (`flat` 36,0 %) |
-| 43 | Left45 | 45°, ku −x | 4 270 (15) | 523/389/1 307 | GOTOWE-H | jak 41 (`flat` 46,8 %) |
-| 44 | Right45 | 45°, ku +x | 3 809 (15) | 461/510/1 070 | GOTOWE-H | jak 41 (`flat` 40,0 %) |
-| 45 | DiagonalFacingUpLeft | ściana diagonalna, otwarta ku NW | 3 000 (13) | 377/391/764 | CZĘŚĆ | kształt i UV pokrywy (H-FOOT), UV ściany ukośnej, pokrywa 1023 w 4 komórkach |
-| 46 | DiagonalFacingUpRight | ściana diagonalna, otwarta ku NE | 2 940 (13) | 382/364/721 | CZĘŚĆ | jak 45 (pokrywa 1023: 4) |
-| 47 | DiagonalFacingDownLeft | ściana diagonalna, otwarta ku SW | 2 944 (13) | 409/502/653 | CZĘŚĆ | jak 45 (pokrywa 1023: 2) |
-| 48 | DiagonalFacingDownRight | ściana diagonalna, otwarta ku SE | 2 748 (13) | 411/421/591 | CZĘŚĆ | jak 45 (pokrywa 1023: 0) |
+| 1 | Up26_1 | 26°, ku −y, k = 1 z 2 | 2 068 (16) | 399/265/379 | BLOK-K | UV ścian bocznych, orientacja tekstury pokrywy, `flat` na pokrywie (23,6 %) |
+| 2 | Up26_2 | 26°, ku −y, k = 2 z 2 | 2 068 (16) | 391/305/356 | BLOK-K | jak 1 |
+| 3 | Down26_1 | 26°, ku +y, k = 1 z 2 | 2 032 (17) | 383/176/375 | BLOK-K | jak 1 |
+| 4 | Down26_2 | 26°, ku +y, k = 2 z 2 | 2 038 (17) | 385/216/353 | BLOK-K | jak 1 |
+| 5 | Left26_1 | 26°, ku −x, k = 1 z 2 | 1 871 (16) | 321/309/321 | BLOK-K | jak 1 |
+| 6 | Left26_2 | 26°, ku −x, k = 2 z 2 | 2 050 (16) | 341/408/316 | BLOK-K | jak 1 |
+| 7 | Right26_1 | 26°, ku +x, k = 1 z 2 | 1 854 (16) | 283/330/326 | BLOK-K | jak 1 |
+| 8 | Right26_2 | 26°, ku +x, k = 2 z 2 | 2 009 (16) | 314/430/311 | BLOK-K | jak 1 |
+| 9 | Up7_1 | 7°, ku −y, k = 1 z 8 | 456 (7) | 85/36/80 | BLOK-K | jak 1 |
+| 10 | Up7_2 | 7°, ku −y, k = 2 z 8 | 437 (7) | 81/36/73 | BLOK-K | jak 1 |
+| 11 | Up7_3 | 7°, ku −y, k = 3 z 8 | 445 (7) | 85/36/73 | BLOK-K | jak 1 |
+| 12 | Up7_4 | 7°, ku −y, k = 4 z 8 | 393 (7) | 64/36/72 | BLOK-K | jak 1 |
+| 13 | Up7_5 | 7°, ku −y, k = 5 z 8 | 393 (7) | 67/36/69 | BLOK-K | jak 1 |
+| 14 | Up7_6 | 7°, ku −y, k = 6 z 8 | 377 (6) | 59/36/68 | BLOK-K | jak 1 |
+| 15 | Up7_7 | 7°, ku −y, k = 7 z 8 | 339 (6) | 47/36/61 | BLOK-K | jak 1 |
+| 16 | Up7_8 | 7°, ku −y, k = 8 z 8 | 318 (6) | 47/36/60 | BLOK-K | jak 1 |
+| 17 | Down7_1 | 7°, ku +y, k = 1 z 8 | 338 (9) | 94/21/55 | BLOK-K | jak 1 |
+| 18 | Down7_2 | 7°, ku +y, k = 2 z 8 | 320 (9) | 92/21/48 | BLOK-K | jak 1 |
+| 19 | Down7_3 | 7°, ku +y, k = 3 z 8 | 320 (9) | 92/21/48 | BLOK-K | jak 1 |
+| 20 | Down7_4 | 7°, ku +y, k = 4 z 8 | 301 (9) | 81/21/49 | BLOK-K | jak 1 |
+| 21 | Down7_5 | 7°, ku +y, k = 5 z 8 | 267 (9) | 67/21/46 | BLOK-K | jak 1 |
+| 22 | Down7_6 | 7°, ku +y, k = 6 z 8 | 236 (8) | 55/21/43 | BLOK-K | jak 1 |
+| 23 | Down7_7 | 7°, ku +y, k = 7 z 8 | 206 (8) | 46/21/37 | BLOK-K | jak 1 |
+| 24 | Down7_8 | 7°, ku +y, k = 8 z 8 | 205 (8) | 46/21/37 | BLOK-K | jak 1 |
+| 25 | Left7_1 | 7°, ku −x, k = 1 z 8 | 395 (9) | 94/39/76 | BLOK-K | jak 1 |
+| 26 | Left7_2 | 7°, ku −x, k = 2 z 8 | 379 (9) | 93/39/69 | BLOK-K | jak 1 |
+| 27 | Left7_3 | 7°, ku −x, k = 3 z 8 | 305 (9) | 88/39/38 | BLOK-K | jak 1 |
+| 28 | Left7_4 | 7°, ku −x, k = 4 z 8 | 299 (9) | 84/39/38 | BLOK-K | jak 1 |
+| 29 | Left7_5 | 7°, ku −x, k = 5 z 8 | 240 (9) | 62/39/33 | BLOK-K | jak 1 |
+| 30 | Left7_6 | 7°, ku −x, k = 6 z 8 | 214 (7) | 53/39/32 | BLOK-K | jak 1 |
+| 31 | Left7_7 | 7°, ku −x, k = 7 z 8 | 194 (7) | 49/39/26 | BLOK-K | jak 1 |
+| 32 | Left7_8 | 7°, ku −x, k = 8 z 8 | 197 (7) | 51/38/26 | BLOK-K | jak 1 |
+| 33 | Right7_1 | 7°, ku +x, k = 1 z 8 | 408 (8) | 89/43/87 | BLOK-K | jak 1 |
+| 34 | Right7_2 | 7°, ku +x, k = 2 z 8 | 390 (8) | 87/43/80 | BLOK-K | jak 1 |
+| 35 | Right7_3 | 7°, ku +x, k = 3 z 8 | 326 (7) | 90/43/49 | BLOK-K | jak 1 |
+| 36 | Right7_4 | 7°, ku +x, k = 4 z 8 | 306 (7) | 82/43/46 | BLOK-K | jak 1 |
+| 37 | Right7_5 | 7°, ku +x, k = 5 z 8 | 237 (6) | 51/43/45 | BLOK-K | jak 1 |
+| 38 | Right7_6 | 7°, ku +x, k = 6 z 8 | 227 (5) | 48/43/44 | BLOK-K | jak 1 |
+| 39 | Right7_7 | 7°, ku +x, k = 7 z 8 | 213 (5) | 45/43/40 | BLOK-K | jak 1 |
+| 40 | Right7_8 | 7°, ku +x, k = 8 z 8 | 207 (5) | 44/43/38 | BLOK-K | jak 1 |
+| 41 | Up45 | 45°, ku −y, k = 1 z 1 | 4 941 (15) | 821/509/1 173 | BLOK-K | jak 1; `flat` na pokrywie 33,1 % |
+| 42 | Down45 | 45°, ku +y | 4 881 (15) | 798/541/1 151 | BLOK-K | jak 41 (`flat` 36,0 %) |
+| 43 | Left45 | 45°, ku −x | 4 270 (15) | 523/389/1 307 | BLOK-K | jak 41 (`flat` 46,8 %) |
+| 44 | Right45 | 45°, ku +x | 3 809 (15) | 461/510/1 070 | BLOK-K | jak 41 (`flat` 40,0 %) |
+| 45 | DiagonalFacingUpLeft | ściana diagonalna, otwarta ku NW | 3 000 (13) | 377/391/764 | BLOK-K (ściany), BLOK (pokrywa) | kształt i UV pokrywy (H-FOOT), UV ściany ukośnej, pokrywa 1023 w 4 komórkach |
+| 46 | DiagonalFacingUpRight | ściana diagonalna, otwarta ku NE | 2 940 (13) | 382/364/721 | BLOK-K (ściany), BLOK (pokrywa) | jak 45 (pokrywa 1023: 4) |
+| 47 | DiagonalFacingDownLeft | ściana diagonalna, otwarta ku SW | 2 944 (13) | 409/502/653 | BLOK-K (ściany), BLOK (pokrywa) | jak 45 (pokrywa 1023: 2) |
+| 48 | DiagonalFacingDownRight | ściana diagonalna, otwarta ku SE | 2 748 (13) | 411/421/591 | BLOK-K (ściany), BLOK (pokrywa) | jak 45 (pokrywa 1023: 0) |
 | 49 | DiagonalSlopeFacingUpLeft | skos diagonalny 3-/4-boczny, ku NW | 1 800 (13) | 110/433/428 | BLOK | H-TET vs H-HIP (pokrywa 1023, 88,2 %), H-COMP vs H-VALLEY (pozostałe); UV; `flat` na ścianie ukośnej |
 | 50 | DiagonalSlopeFacingUpRight | skos diagonalny, ku NE | 1 749 (12) | 117/400/412 | BLOK | jak 49 (1023: 88,5 %) |
 | 51 | DiagonalSlopeFacingDownLeft | skos diagonalny, ku SW | 1 942 (13) | 128/500/447 | BLOK | jak 49 (1023: 84,9 %) |
@@ -159,14 +179,17 @@ miastach [M]; **Status**:
 | 60 | PartialBlockBottomLeftCorner | słupek w narożniku SW | 270 (9) | 15/69/55 | BLOK | jak 57 |
 | 61 | PartialBlockCentre | słupek na środku komórki | 801 (12) | 76/3/295 | BLOK | rozmiar; jak 53 |
 | 62 | Reserved | zarezerwowany | 0 (0) | 0/0/0 | BRAK | znaczenie tylko z [T]; brak zadania |
-| 63 | SlopeAbove | znacznik „skos w bloku powyżej” | 42 886 (17) | 7 555/5 241/8 912 | ZNACZNIK | czy ma własny kształt (sekcja 4.8); wpływ na kolizje poza zakresem |
+| 63 | SlopeAbove | znacznik „skos w bloku powyżej” | 42 886 (17) | 7 555/5 241/8 912 | ZNACZNIK | geometria w oryginale (dziś zastępczo [I]: jak każdy blok, sekcja 4.3); wpływ na kolizje poza zakresem |
 
 Kontrola pokrycia: tabela ma dokładnie 64 wiersze, kody 0–63, każdy raz; liczby komórek i map są
 sprawdzane względem raportu T0010 (sekcja 8).
 
 ## 4. Rodziny
 
-### 4.1 Skosy gradientowe 1–44: wysokości narożników
+### 4.1 Skosy gradientowe 1–44: kandydackie wysokości narożników
+
+**Status: BLOK-K.** Wszystko poniżej poza liczbami [M] jest kandydatem zależnym od H-CONT i H-STEP;
+odblokowanie wymaga dowodu z sekcji 7 (E1/E2/E3, punkty G1–G4 w 7.2).
 
 **[M] — łańcuchy.** Kawałki tej samej rodziny leżą obok siebie w jednej osi, w kolejności numerów:
 
@@ -193,13 +216,13 @@ kodzie 1 — 2,1 %, kod 6 przy kodzie 5 — 2,6 %, `0+lid` przy kodach 7 i 17 �
 wysokiej stronie bywa pusto (16: 23,0 %, 41–44: 20,7–30,4 %) albo kod 63 (2, 4, 6, 8: 12,5–15,3 %;
 możliwe [H]: rampa ciągnie się poziom wyżej). H-CONT opisuje więc typowy układ, nie każdą komórkę.
 
-**Wniosek [H] (H-CONT + H-STEP, zgodny z [M]):** nazwa rodziny = kierunek **wznoszenia się**
+**Kandydat [H] (H-CONT + H-STEP, zgodny z [M]):** nazwa rodziny = kierunek **wznoszenia się**
 („Up” = ku −y, czyli ku górze ekranu); łańcuch n kawałków wznosi się o jeden poziom (od pustej
 komórki z gruntem na wysokości z do pełnego bloku z wierzchem na z + 1). Nazwy „26°”, „7°” i „45°”
 zgadzają się z atan(1/2) = 26,6°, atan(1/8) = 7,1° i atan(1) = 45° tylko przy równych stopniach i
 h/w = 1 — to poszlaka dla H-STEP, nie pomiar.
 
-**Wysokości narożników (h ponad z), kawałek k z n, L = (k − 1)/n, U = k/n:**
+**Kandydackie wysokości narożników [H] (h ponad z), kawałek k z n, L = (k − 1)/n, U = k/n:**
 
 | Kierunek | Kody (k) | NW | NE | SE | SW | Normalna (h/w = 1, nienormowana) |
 |---|---|---|---|---|---|---|
@@ -240,7 +263,7 @@ narożniki p0..p3 = NW, NE, SE, SW i trójkąty {0,1,2}, {0,2,3}, jak dla pokryw
 Przykład: kod 2 (Up26_2) — `left` 27,3 %, `right` 26,9 %, `top` (−y, strona wysoka) 10,1 %,
 `bottom` 0,0 %; kod 1 — `top` i `bottom` 0,0 %.
 
-**Wniosek [H]:** każda ściana boczna kawałka leży w płaszczyźnie swojej strony komórki (jak w
+**Kandydat [H]:** każda ściana boczna kawałka leży w płaszczyźnie swojej strony komórki (jak w
 T0001) i bierze kafel ze słowa tej strony:
 
 * dwie ściany wzdłuż osi wzniesienia (dla Up/Down: `left` i `right`; dla Left/Right: `top` i
@@ -255,8 +278,8 @@ Nierozstrzygnięte: jaka część kafla 64 × 64 trafia na trapez/trójkąt (prz
 ściśnięcie całego kafla), orientacja i obrót tekstury na ścianach i na pochyłej pokrywie (czy
 obowiązuje tabela `world-geometry.md` 5.1 bez względu na kierunek wznoszenia), widoczność ścian
 (WG-WALL-SEL, WG-WALL-BITS), znaczenie `flat` na pokrywach skosów (20,0–32,0 % dla 1–8, 3,1–23,8 %
-dla 9–40, 33,1–46,8 % dla 41–44), oświetlenie. Do implementacji te punkty muszą być jawnie
-oznaczone jako [H] albo pozostać poza zakresem (sekcja 6).
+dla 9–40, 33,1–46,8 % dla 41–44), oświetlenie. Także sam kształt ścian bocznych jest kandydatem
+(wynika z kandydackich wysokości z 4.1), więc **status: BLOK-K** jak w 4.1.
 
 ### 4.3 Kod 63 i bloki pod skosami
 
@@ -268,9 +291,14 @@ boczne 15,0–18,4 %; pod nim pusto (52,7 %) albo blok kodu 0.
 
 **Wniosek [H]:** 63 oznacza „pod skosem gradientowym”, zgodnie z nazwą [T]. Pokrywa bloku 63 leży
 pod powierzchnią skosu, więc zwykle nie ma kafla; ściany boczne to np. boki nasypu lub podpory
-mostu. Czy oryginał traktuje 63 jako zwykły blok jednostkowy przy rysowaniu, jest nierozstrzygnięte
-(brak [F]/[B]/[O]); do tego czasu 63 nie wymaga osobnej geometrii — obecna ścieżka bloku
-jednostkowego obsługuje jego słowa jak dla kodu 0.
+mostu. Jak oryginał rysuje blok 63 (jak blok jednostkowy, inaczej, czy wcale), jest
+**nierozstrzygnięte** (brak [F]/[B]/[O]).
+
+Zachowanie zastępcze naszego silnika [I], nie ustalenie o oryginale: `draw_list.cpp:94-115` nie
+sprawdza kodu skosu, więc pokrywa bloku 63 (jeśli ma kafel) jest rysowana jak każda inna płaska
+pokrywa, a ścian bocznych silnik dziś nie rysuje dla żadnego kodu. To zachowanie nie jest kandydatem
+geometrii 63 i nie może służyć za oczekiwanie w testach; zmiana wymaga dowodu z sekcji 7 (punkt M1
+w 7.2).
 
 ### 4.4 Ściany diagonalne 45–48
 
@@ -286,9 +314,12 @@ jednostkowego obsługuje jego słowa jak dla kodu 0.
 („—”: pusty sąsiad nie jest najczęstszą klasą; w tych kierunkach dominują bloki kodu 0 z pokrywą
 lub bez, ~29–38 % każda.)
 
-**Wniosek [H] (zgodny z nazwą [T] „facing …”):** ściana diagonalna to pionowa płaszczyzna pełnej
-wysokości poziomu wzdłuż przekątnej komórki; „facing” wskazuje stronę otwartą (normalna ściany
-ukośnej). Bryła zajmuje trójkąt po przeciwnej stronie (H-FOOT). Kafel ściany ukośnej pochodzi ze
+**Status: BLOK-K (ściany), BLOK (pokrywa).** Kandydat ścian to H-DIAG + H-FOOT, bez potwierdzenia
+[F]/[B]/[O]; odblokowanie — sekcja 7.2, punkty D1–D4 (ściany) i D5 (pokrywa).
+
+**Kandydat [H] (H-DIAG, zgodny z nazwą [T] „facing …”):** ściana diagonalna to pionowa
+płaszczyzna pełnej wysokości poziomu wzdłuż przekątnej komórki; „facing” wskazuje stronę otwartą
+(normalna ściany ukośnej). Bryła zajmuje trójkąt po przeciwnej stronie (H-FOOT). Kafel ściany ukośnej pochodzi ze
 słowa `left` (45, 47) albo `right` (46, 48) — to jedyne słowa ustawione w ≥ 96,8 % komórek. Z
 pozostałych słów ustawiane są tylko te dwie strony, które zostają z bryły trójkątnej; trzecia
 „zbędna” strona ma 0,0 %.
@@ -430,7 +461,7 @@ dwustronną ścianę (WG-FLAT).
 
 | Rodzina | Kody | Pokrywa 1023 | Słowo powierzchni ukośnej | Status |
 |---|---|---|---|---|
-| Ściana diagonalna | 45–48 | 10 komórek (45: 4, 46: 4, 47: 2) — znaczenie nieznane | `left` (45, 47) / `right` (46, 48) | CZĘŚĆ (pokrywa BLOK) |
+| Ściana diagonalna | 45–48 | 10 komórek (45: 4, 46: 4, 47: 2) — znaczenie nieznane | `left` (45, 47) / `right` (46, 48) | BLOK-K (ściany), BLOK (pokrywa) |
 | Skos diagonalny trójboczny | 49–52 z pokrywą 1023 | 6 402 komórki; atrapa: tekstura nie z pokrywy [H] | `left` (49, 51) / `right` (50, 52) | BLOK (H-TET vs H-HIP) |
 | Skos diagonalny czteroboczny | 49–52 bez 1023 | — (pokrywa = zwykły kafel, 80–85 % ≠ 0) | jw. | BLOK (H-COMP vs H-VALLEY) |
 | Pozostałe | 0 (3), reszta 0 | kod 0: nieznane (WG-RESERVED) | — | — |
@@ -440,45 +471,80 @@ pomocniczy, nie tekstura 1023 (`world-geometry.md` sekcja 4, wiersz 10).
 
 ## 6. Proponowany podział na zadania
 
-Zasady: jedno zadanie = najwyżej jedna rodzina; CPU-owy kod w `engine/scene` (jak T0005), bez zmian
-renderera, dopóki projekcja z wysokością nie jest gotowa. Oczekiwania testów są **syntetyczne**
-(`provenance: synthetic`, identyfikatory `synthetic-slope-*`, komentarz „SYNTHETIC, hypothesis, see
-docs/specs/world-slopes.md”) i wpisywane ręcznie z tabel tego dokumentu, **niezależnie od kodu** i
-osobno dla każdej rodziny (żadna rodzina nie wyprowadza oczekiwań z innej). Przejście takich testów
-nie jest dowodem zgodności z oryginałem.
+**Wszystkie zadania S1–S9 są dziś zablokowane.** Każde zaczyna się dopiero wtedy, gdy własności z
+sekcji 7.2 dla jego rodziny potwierdzi dowód [F], [B] albo [O]; [M] z hipotezami H-CONT, H-STEP,
+H-DIAG, H-FOOT nie wystarcza. Dowód dla jednej rodziny nie odblokowuje innej, chyba że źródło wprost
+obejmuje obie (np. jeden fragment dokumentu DMA opisujący wszystkie skosy gradientowe).
 
-| # | Zadanie | Kody | Wymagane dowody przed startem | Oczekiwania syntetyczne | Poza zakresem |
-|---|---|---|---|---|---|
-| S1 | Skosy 45° | 41–44 | brak dodatkowych: sekcje 4.1–4.2 ([M] + H-CONT; H-STEP trywialne dla n = 1) | dla każdego kodu: wysokości NW/NE/SE/SW; które słowo daje którą ścianę; kształt ścian (2 trójkąty wzdłuż osi, prostokąt po stronie wysokiej, brak po niskiej); nawinięcie na zewnątrz; ściana z kaflem 0 nie powstaje ([H], `world-geometry.md` sekcja 4, wiersz 6) | UV ścian bocznych, `flat`, widoczność ścian, renderer |
-| S2 | Skosy 26° | 1–8 | jw. + H-STEP (n = 2) | jw. dla 8 kodów; ciągłość krawędzi w parach 1–2, 3–4, 5–6, 7–8 i na grzbietach 2/4 i 6/8 | jw. |
-| S3 | Skosy 7° | 9–40 | jw. + H-STEP (n = 8) | jw. dla 32 kodów; ciągłość wzdłuż łańcuchów i grzbietów o równym k | jw. |
-| S4 | Ściany diagonalne (bez pokrywy) | 45–48 | brak dodatkowych dla ścian (sekcja 4.4) | płaszczyzna i narożniki ściany ukośnej, wybór słowa `left`/`right`, dwie pozostałe ściany, brak trzeciej | **pokrywa** (BLOK do decyzji H-FOOT), UV ściany ukośnej |
-| S5 | Skosy trójboczne | 49–52 + pokrywa 1023 | **ZABLOKOWANE**: rozstrzygnięcie H-TET/H-HIP przez E1, E2 lub E3 | dopiero po rozstrzygnięciu | — |
-| S6 | Skosy czteroboczne | 49–52 bez 1023 | **ZABLOKOWANE**: H-COMP/H-VALLEY przez E1, E2 lub E3 | dopiero po rozstrzygnięciu | — |
-| S7 | Pasy częściowe | 53–56 | **ZABLOKOWANE**: grubość pasa (E1, E2 lub E3) | — | — |
-| S8 | Słupki narożne | 57–60 | **ZABLOKOWANE**: rozmiar (E1, E2 lub E3) | — | — |
-| S9 | Słupek środkowy | 61 | **ZABLOKOWANE**: rozmiar (E1, E2 lub E3) | — | — |
-| — | Kod 63 | 63 | brak zadania geometrii; E1 potwierdza, że 63 nie ma własnego kształtu | — | kolizje |
-| — | Kod 62 | 62 | brak zadania (nie występuje) | — | — |
+Zasady po odblokowaniu: jedno zadanie = najwyżej jedna rodzina; CPU-owy kod w `engine/scene` (jak
+T0005), bez zmian renderera, dopóki projekcja z wysokością nie jest gotowa. Oczekiwania testów są
+**syntetyczne** (`provenance: synthetic`, identyfikatory `synthetic-slope-*`, komentarz
+„SYNTHETIC, see docs/specs/world-slopes.md”), wpisywane ręcznie z tabel tego dokumentu
+**poprawionych o potwierdzony dowód**, niezależnie od kodu i osobno dla każdej rodziny (żadna
+rodzina nie wyprowadza oczekiwań z innej). Kandydaci z sekcji 4 są punktem wyjścia do porównania z
+dowodem, nie oczekiwaniem. Przejście takich testów nie jest dowodem zgodności z oryginałem.
 
-Kolejność S1 → S2 → S3 → S4: od jednego kawałka na poziom do ośmiu, potem rodzina bez pochyłej
-pokrywy. Pokrywa 45–48 dołącza do S4 albo do osobnego zadania dopiero po decyzji H-FOOT (pytanie do
-Astry). Wspólny dla S1–S3 nierozstrzygnięty punkt — UV ścian bocznych i orientacja tekstury pochyłej
-pokrywy — powinien trafić do jednego zadania dowodowego (E3), zanim cokolwiek zacznie to rysować.
+| # | Zadanie | Kody | Status | Odblokowuje (sekcja 7.2) | Kandydackie oczekiwania (materiał badawczy, sekcja 4) | Poza zakresem |
+|---|---|---|---|---|---|---|
+| S1 | Skosy 45° | 41–44 | **ZABLOKOWANE** (BLOK-K) | G1–G4 dla 41–44 | wysokości NW/NE/SE/SW (4.1); słowo → ściana; kształt ścian (2 trójkąty wzdłuż osi, prostokąt po stronie wysokiej, brak po niskiej); nawinięcie na zewnątrz; ściana z kaflem 0 nie powstaje ([H], `world-geometry.md` sekcja 4, wiersz 6) | UV i orientacja (U1), `flat`, widoczność ścian, renderer |
+| S2 | Skosy 26° | 1–8 | **ZABLOKOWANE** (BLOK-K) | G1–G4 dla 1–8 | jw. dla 8 kodów; ciągłość krawędzi w parach 1–2, 3–4, 5–6, 7–8 i na grzbietach 2/4 i 6/8 | jw. |
+| S3 | Skosy 7° | 9–40 | **ZABLOKOWANE** (BLOK-K) | G1–G4 dla 9–40 | jw. dla 32 kodów; ciągłość wzdłuż łańcuchów i grzbietów o równym k | jw. |
+| S4 | Ściany diagonalne (bez pokrywy) | 45–48 | **ZABLOKOWANE** (BLOK-K) | D1–D4 | płaszczyzna i narożniki ściany ukośnej, słowo `left`/`right`, dwie pozostałe ściany, brak trzeciej (4.4) | pokrywa (D5), UV (U1) |
+| S4b | Pokrywa ścian diagonalnych | 45–48 | **ZABLOKOWANE** (BLOK) | D5 | brak jednego kandydata (H-FOOT albo pełna komórka) | UV (U1) |
+| S5 | Skosy trójboczne | 49–52 + pokrywa 1023 | **ZABLOKOWANE** (BLOK) | T1–T3 | brak jednego kandydata (H-TET albo H-HIP, 4.5) | UV (U1) |
+| S6 | Skosy czteroboczne | 49–52 bez 1023 | **ZABLOKOWANE** (BLOK) | C1–C2 | brak jednego kandydata (H-COMP albo H-VALLEY, 4.6) | UV (U1) |
+| S7 | Pasy częściowe | 53–56 | **ZABLOKOWANE** (BLOK) | P1–P3 dla 53–56 | strona przylegania (4.7); grubość nieznana | UV (U1), `flat` |
+| S8 | Słupki narożne | 57–60 | **ZABLOKOWANE** (BLOK) | P1–P3 dla 57–60 | narożnik (4.7); rozmiar nieznany | jw. |
+| S9 | Słupek środkowy | 61 | **ZABLOKOWANE** (BLOK) | P1–P3 dla 61 | rozmiar nieznany | jw. |
+| — | Kod 63 | 63 | brak zadania; dziś zachowanie zastępcze [I] (4.3) | M1 | — | kolizje |
+| — | Kod 62 | 62 | brak zadania (nie występuje) | — | — | — |
+
+Kolejność po odblokowaniu: S1 → S2 → S3 → S4 → S4b → S5 → S6 → S7 → S8 → S9 (od jednego kawałka na
+poziom do ośmiu, potem rodziny diagonalne, na końcu bloki częściowe). Jeżeli dowód dla późniejszej
+rodziny przyjdzie wcześniej, kolejność może się zmienić, ale nie zasada „najpierw dowód”. Zanim
+jakakolwiek rodzina trafi do renderera, potrzebny jest też dowód U1 (UV i orientacja tekstur).
 
 ## 7. Zadania dowodowe (prerekwizyty)
 
-| # | Dowód | Co rozstrzyga | Warunek wykonania |
+### 7.1 Źródła dowodów
+
+| # | Dowód | Kat. | Warunek wykonania |
 |---|---|---|---|
-| E1 | Przepisanie (własnymi słowami) sekcji o skosach, 3-/4-bocznych skosach, kaflu 1023, blokach częściowych i `flat` z dokumentu DMA v8.2 do `docs/formats/gmp.md` | nazwy kodów [T] → [F]; S5–S9 o ile dokument podaje kształty i wymiary; kod 63 | dostęp do dokumentu: w tej sesji brak sieci; potrzebna lokalna kopia od właściciela albo sesja z dostępem do gtamp.com |
-| E2 | Analiza GTA2_RE ze **wskazaną rewizją** (SHA), opis własnymi słowami, bez kodu (`docs/reference/gta2re.md`) | kształt 49–52 (H-TET/H-HIP, H-COMP/H-VALLEY), wymiary 53–61, czy 63 rysuje się jak blok | lokalna kopia GTA2_RE lub dostęp sieciowy; wynik to [B], nie [O] |
-| E3 | Przechwycenie oryginału (tryb M, `world-geometry.md` sekcja 7) w miejscach wybranych lokalnym zapytaniem do danych: rampa 26°/7° z ustawionymi ścianami bocznymi, grupa 2 × 2 kodów 49–52 z pokrywą 1023, wklęsły narożnik 49–52 bez 1023, płot z 53–60, słupek 61 | UV ścian, kształty i wymiary — jedyny dowód [O] | przebieg dociera do świata (T0012: dotąd nie), ustawienie kamery klawiszami; prośba wyłącznie przez `gfx_requests` w osobnym zadaniu |
+| E1 | Przepisanie (własnymi słowami) sekcji dokumentu DMA v8.2 o skosach (znaczenie 0–63, kawałki „low/high” i numerowane, ściany diagonalne, 3-/4-boczne skosy i kafel 1023, bloki częściowe z wymiarami, kod 63, `flat`) do `docs/formats/gmp.md`, z cytowaną lokalizacją w dokumencie | [F] | dostęp do dokumentu: w tej sesji brak sieci; potrzebna lokalna kopia od właściciela albo sesja z dostępem do gtamp.com |
+| E2 | Analiza GTA2_RE ze **wskazaną rewizją** (SHA), opis własnymi słowami, bez kodu i bez struktur (`docs/reference/gta2re.md`); punkty wyjścia: `FindGroundZForCoord_4E5B60` (wysokość gruntu w punkcie komórki — G1–G3, D1–D2, T1, C1, P1–P2), `DrawGradientSlope_4F6630` (G4, U1), `DrawDiagonalWall_4F02D0` (D1–D5) | [B] | lokalna kopia GTA2_RE lub dostęp sieciowy; wynik to [B], nie [O] |
+| E3 | Przechwycenia oryginału (tryb M, `world-geometry.md` sekcja 7), **osobny scenariusz dla każdej rodziny**: E3-G45 (41–44), E3-G26 (1–8), E3-G7 (9–40), E3-D (45–48 z pokrywą), E3-T (grupa 2 × 2 kodów 49–52 z pokrywą 1023), E3-C (wklęsły narożnik 49–52 bez 1023), E3-P (płot 53–60, słupek 61); miejsca z lokalnego zapytania do danych (tylko współrzędne i słowa) | [O] | przebieg dociera do świata (T0012: dotąd nie); pomiar wysokości wymaga najpierw `K`, `r`, `c` z WG-ELEV/WG-PROJ; prośba wyłącznie przez `gfx_requests` w osobnym zadaniu |
+
+### 7.2 Co musi stwierdzić dowód (dla każdej rodziny)
+
+Każdy punkt musi zostać potwierdzony (albo obalony i zastąpiony) przez E1, E2 lub E3; w raporcie
+zadania dowodowego podaje się, które punkty dane źródło rozstrzyga, a które zostawia otwarte.
+
+| Punkt | Rodzina | Co musi stwierdzić | Źródła |
+|---|---|---|---|
+| G1 | 1–44 (osobno 41–44, 1–8, 9–40) | kierunek wznoszenia każdego kodu (np. „Up” = ku −y) i która krawędź komórki jest wysoka | E1, E2, E3 |
+| G2 | jw. | wysokości krawędzi kawałka k z n (kandydat: (k − 1)/n i k/n, łańcuch pokonuje dokładnie jeden poziom od z do z + 1; H-STEP, H-CONT) | E1 (jeśli podaje), E2, E3 (po WG-ELEV) |
+| G3 | jw. | że powierzchnia między krawędziami jest jedną płaszczyzną (nie np. schodkiem ani zakrzywieniem) | E2, E3 |
+| G4 | jw. | które słowa dają które ściany boczne i jaki mają kształt (kandydat: trapez/trójkąt od h = 0 na bokach, prostokąt po stronie wysokiej, nic po niskiej) | E2, E3 |
+| D1 | 45–48 | położenie ściany: pionowa, na której przekątnej, pełnej wysokości poziomu (H-DIAG) | E1, E2, E3 |
+| D2 | 45–48 | która strona jest otwarta, a który trójkąt pełny (H-FOOT) | E1, E2, E3 |
+| D3 | 45–48 | które słowo teksturuje ścianę ukośną (kandydat: `left` dla 45, 47, `right` dla 46, 48) | E1, E2, E3 |
+| D4 | 45–48 | które z pozostałych ścian istnieją i z których słów | E2, E3 |
+| D5 | 45–48 | kształt pokrywy (trójkąt bryły czy cała komórka) i rola pokrywy 1023 na tych kodach | E1, E2, E3 |
+| T1 | 49–52 z 1023 | kształt: H-TET czy H-HIP (albo inny), z wysokościami narożników | E1, E2, E3 |
+| T2 | jw. | skąd pochodzi tekstura pochyłej powierzchni (kandydat: słowo `left`/`right`, pokrywa 1023 jako atrapa) | E1, E2, E3 |
+| T3 | jw. | które ściany pionowe istnieją i z których słów | E2, E3 |
+| C1 | 49–52 bez 1023 | kształt: H-COMP czy H-VALLEY (albo inny), z wysokościami narożników | E1, E2, E3 |
+| C2 | jw. | które słowo teksturuje którą powierzchnię (pokrywa a słowo ukośne) | E2, E3 |
+| P1 | 53–56, 57–60, 61 (osobno) | strona/narożnik przylegania (kandydat z 4.7) i wymiar w poziomie (grubość pasa, bok słupka) | E1, E2, E3 |
+| P2 | jw. | wysokość bryły (cały poziom?) | E1, E2, E3 |
+| P3 | jw. | które ściany i z których słów; znaczenie `flat` na tych kodach (WG-FLAT) | E1, E2, E3 |
+| M1 | 63 | czy blok 63 ma własną geometrię i jak jest rysowany (dziś tylko zachowanie zastępcze [I]) | E1, E2, E3 |
+| U1 | wszystkie | UV i orientacja tekstur na pochyłych powierzchniach i ścianach nieprostokątnych (przycięcie czy ściśnięcie, obrót/odbicie) | E2, E3 |
 
 ## 8. Weryfikacja tego dokumentu
 
-* Pokrycie tabeli z sekcji 3 i jej liczby względem T0010:
-  `python3 -I tools/map-analysis/check_slope_table.py docs/specs/world-slopes.md "$TMPDIR/inventory.txt"`
-  — 2026-10-13: `slope table: 64 rows, PASS` (każdy kod 0–63 dokładnie raz; suma komórek, liczba
+* Pokrycie tabeli z sekcji 3 i jej liczby względem T0010: ostatnie polecenie z sekcji 1.1
+  (`check_slope_table.py` z tym samym `$INVENTORY`) — 2026-10-13: `slope table: 64 rows, PASS` (każdy kod 0–63 dokładnie raz; suma komórek, liczba
   map i liczby dla `wil`/`ste`/`bil` równe raportowi T0010). Bez drugiego argumentu sprawdza samo
   pokrycie kodów.
 * Skrypt z 1.1 potwierdził identyczne liczby komórek na każdej mapie i dla każdego kodu oraz 6 415
