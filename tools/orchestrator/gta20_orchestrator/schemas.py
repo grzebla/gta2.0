@@ -87,6 +87,14 @@ CLAUDE_REPORT = _obj({
     "gfx_requests": GFX_REQUESTS,
 })
 
+# Resolution of a conflicted merge of the target branch into the integration branch.
+SYNC_REPORT = _obj({
+    "status": {"type": "string", "enum": ["resolved", "cannot_resolve"]},
+    "summary": STR,
+    "files": {"type": "array", "items": _obj({"file": STR, "resolution": STR})},
+    "tests": STRS,
+})
+
 GATEKEEPER_REVIEW = _obj({
     "decision": {"type": "string", "enum": ["MERGE", "REQUEST_CHANGES", "HOLD", "NEEDS_HUMAN"]},
     "rationale": STR,

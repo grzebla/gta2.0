@@ -361,10 +361,30 @@ class GitHubExcerptTests(unittest.TestCase):
         self.assertNotIn("lint", out)
 
 
+class InterleavedTaskTests(SimCase):
+    def test_verify_checks_the_tasks_own_branch(self) -> None:
+        orch = self.env.orchestrator(FakeAstra(plans=[fake_plan("M1", ["walls"])]), FakeClaude())
+        orch.run(max_steps=2)  # plan, implement -> VERIFYING
+        t = self.env.db.task("T0001")
+        self.assertEqual(t["status"], "VERIFYING")
+        wt = self.env.cfg.worktree("dev")
+        # Another active task left the developer worktree on its own branch.
+        subprocess.run(["git", "switch", "-q", "-c", "agent/t0099"], cwd=wt, check=True)
+        (wt / "other.txt").write_text("another task\n")
+        subprocess.run(["git", "add", "-A"], cwd=wt, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "[T0099] other"], cwd=wt, check=True)
+        orch.step()
+        t = self.env.db.task("T0001")
+        own = subprocess.run(["git", "rev-parse", "agent/t0001"], cwd=wt, capture_output=True, text=True).stdout.strip()
+        self.assertEqual(t["head_commit"], own)
+        self.assertEqual(t["status"], "IN_REVIEW")
+
+
 class GatekeeperTests(SimCase):
     def setUp(self) -> None:
         super().setUp()
         self.env.cfg.data["release"]["every_s"] = 10 ** 9  # only explicit steps in these tests
+        self.env.cfg.data["release"]["sync_every_s"] = 10 ** 12
 
     def _integration_pr(self, port, **kw) -> None:
         port.add_pr(6, "agents/integration", "main", draft=True, **kw)
@@ -422,9 +442,31 @@ class GatekeeperTests(SimCase):
         self.assertIn("MERGED", msg)
         self.assertFalse([t for t in self.env.db.tasks() if t["created_by"] == "gatekeeper"])
 
-    def test_sync_conflict_asks_the_owner_not_an_agent(self) -> None:
+    def test_sync_conflict_is_resolved_by_the_developer_agent(self) -> None:
         orch, gk, port = sim.gatekeeper_env(self.env)
         sim.finish_one_task(self.env, orch)
+        self._main_commit("sim/T0001.txt", "owner version\n")
+        self._integration_pr(port)
+        called, msg = orch.gatekeeper.step()
+        self.assertFalse(called)
+        self.assertIn("conflicts resolved by the developer agent", msg)
+        sync_calls = [c for c in orch.claude.calls if c["kind"] == "sync"]
+        self.assertEqual(len(sync_calls), 1)
+        self.assertTrue(sync_calls[0]["cwd"].endswith("/wt/sync"))
+        self.assertEqual(self._git_int("status", "--porcelain").stdout.strip(), "")
+        self.assertEqual(self._git_int("merge-base", "--is-ancestor", "origin/main", "HEAD").returncode, 0)
+        merged = (self._wt_int() / "sim/T0001.txt").read_text()
+        self.assertIn("owner version", merged)
+        self.assertIn("work", merged)
+        self.assertEqual(self.env.db.get_meta("human_question") or "", "")
+        self._integration_pr(port)  # GitHub sees the new head; the gate accepts the resolved merge
+        called, msg = orch.gatekeeper.step()
+        self.assertIn("MERGED", msg)
+
+    def test_unresolvable_sync_conflict_asks_the_owner_once(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.finish_one_task(self.env, orch)
+        orch.claude.script = [{"do": "leave_markers"}, {"do": "leave_markers"}]
         head = self._git_int("rev-parse", "HEAD").stdout.strip()
         self._main_commit("sim/T0001.txt", "owner version\n")
         self._integration_pr(port)
@@ -433,7 +475,12 @@ class GatekeeperTests(SimCase):
         self.assertEqual(self._git_int("rev-parse", "HEAD").stdout.strip(), head)
         self.assertEqual(self._git_int("status", "--porcelain").stdout.strip(), "")
         self.assertFalse([t for t in self.env.db.tasks() if t["created_by"] == "gatekeeper"])
-        self.assertIn("sim/T0001.txt", self.env.db.get_meta("human_question"))
+        question = self.env.db.get_meta("human_question")
+        self.assertIn("sim/T0001.txt", question)
+        self.assertIn("conflict markers remain", question)
+        calls = len(orch.claude.calls)
+        orch.gatekeeper.step()  # same main head: no new attempt, no new question
+        self.assertEqual(len(orch.claude.calls), calls)
         # The owner resolves it by hand (keeps the agents' version); the gate accepts that merge.
         self._git_int("merge", "origin/main")
         self._git_int("checkout", "--ours", "sim/T0001.txt")
@@ -442,6 +489,44 @@ class GatekeeperTests(SimCase):
         self._integration_pr(port)
         called, msg = orch.gatekeeper.step()
         self.assertIn("MERGED", msg)
+
+    def test_failed_verification_sends_the_resolution_back_once(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.finish_one_task(self.env, orch)
+        self.env.cfg.data["verify"]["commands"] = [["sh", "-c", "! grep -q BROKEN sim/T0001.txt"]]
+        orch.claude.script = [{"do": "resolve", "content": {"sim/T0001.txt": "BROKEN\n"}},
+                              {"do": "resolve", "content": {"sim/T0001.txt": "owner version + agents' work\n"}}]
+        self._main_commit("sim/T0001.txt", "owner version\n")
+        state, msg = orch.gatekeeper.sync_integration()
+        self.assertEqual(state, "merged", msg)
+        sync_calls = [c for c in orch.claude.calls if c["kind"] == "sync"]
+        self.assertEqual([c["resume"] for c in sync_calls], [False, True])
+        prompt = (sorted(self.env.cfg.state_dir.glob("runs/*-claude-sync"))[-1] / "prompt.md").read_text()
+        self.assertIn("verification failed", prompt)
+        parents = self._git_int("rev-list", "--parents", "-n", "1", "HEAD").stdout.split()[1:]
+        self.assertEqual(len(parents), 2)
+        self.assertEqual((self._wt_int() / "sim/T0001.txt").read_text(), "owner version + agents' work\n")
+
+    def test_owner_only_paths_take_mains_version_in_a_conflict(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.finish_one_task(self.env, orch)
+        self._main_commit("tools/orchestrator/x.txt", "v1\n")
+        self.assertEqual(orch.gatekeeper.sync_integration()[0], "merged")
+        (self._wt_int() / "tools/orchestrator/x.txt").write_text("integration edit\n")
+        self._git_int("commit", "-q", "-am", "agent-memory: stray edit")
+        self._main_commit("tools/orchestrator/x.txt", "v2 from the owner\n")
+        state, msg = orch.gatekeeper.sync_integration()
+        self.assertEqual(state, "merged", msg)
+        self.assertEqual([c for c in orch.claude.calls if c["kind"] == "sync"], [])  # nothing left for an agent
+        self.assertEqual((self._wt_int() / "tools/orchestrator/x.txt").read_text(), "v2 from the owner\n")
+
+    def test_loop_syncs_main_between_gatekeeper_checks(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.finish_one_task(self.env, orch)
+        self.env.cfg.data["release"]["sync_every_s"] = 0
+        self._main_commit("docs/owner.md", "owner work\n")
+        self.assertIn("sync: synced origin/main into agents/integration", orch.step())
+        self.assertEqual(self._git_int("merge-base", "--is-ancestor", "origin/main", "HEAD").returncode, 0)
 
     def test_sync_merge_may_not_rewrite_protected_paths(self) -> None:
         orch, gk, port = sim.gatekeeper_env(self.env)

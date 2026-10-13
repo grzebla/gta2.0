@@ -314,6 +314,12 @@ class Orchestrator:
                 return "gfx: " + msg
         self.daily_cap()
         task = self.db.active_task()
+        if task is None and self.gatekeeper is not None and self.gatekeeper.sync_due():
+            # Keep the agents' branch close to main between Gatekeeper checks: small, frequent
+            # merges conflict less often, and a conflict is resolved by the developer agent.
+            state, msg = self.gatekeeper.sync_integration()
+            if state == "merged":
+                return "sync: " + msg
         if task is None and self.release_due():
             called, msg = self.gatekeeper.step()
             if msg:
@@ -511,6 +517,9 @@ class Orchestrator:
     # ------------------------------------------------------------------ verify
     def verify(self, task: Any) -> str:
         tid = task["id"]
+        # Several tasks can be active at once (e.g. the owner unblocked one while another ran):
+        # verify THIS task's branch, not whatever the developer worktree last held.
+        gitops.switch_task_branch(self.wt_dev, task["branch"], task["base_commit"], "orchestrator: before verify " + tid)
         head = gitops.rev(self.wt_dev)
         report = loads(task["report"], {}) or {}
         blocked_report = report.get("status") == "blocked"

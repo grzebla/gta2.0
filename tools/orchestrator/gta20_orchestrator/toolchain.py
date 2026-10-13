@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Dict, Optional
 
 # pip package -> version; TOOLS: executable -> the package that provides it.
-PINNED = {"clang-format": "23.1.3", "shellcheck-py": "0.10.0.1"}
-TOOLS = {"clang-format": "clang-format", "shellcheck": "shellcheck-py"}
+PINNED = {"clang-format": "23.1.3", "clang-tidy": "22.1.8", "shellcheck-py": "0.10.0.1"}
+TOOLS = {"clang-format": "clang-format", "clang-tidy": "clang-tidy", "shellcheck": "shellcheck-py"}
 
 
 def tools_bin(state_dir: Path) -> Path:

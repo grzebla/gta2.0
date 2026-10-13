@@ -410,7 +410,13 @@ def cmd_reset_limits(cfg: Config, args: argparse.Namespace) -> int:
 def cmd_service(cfg: Config, args: argparse.Namespace) -> int:
     if args.action == "install":
         sha = gitops.rev(cfg.repo_root)
-        info = service.install(cfg.repo_root, cfg.state_dir, Path(__file__).resolve().parent, sha)
+        # Install the repository's code (labelled with its HEAD), not the copy this command runs
+        # from: `gta20-orchestrator` itself executes the previously installed version.
+        source = cfg.repo_root / "tools" / "orchestrator" / "gta20_orchestrator"
+        if not (source / "cli.py").is_file():
+            source = Path(__file__).resolve().parent
+        info = service.install(cfg.repo_root, cfg.state_dir, source, sha)
+        info["source"] = str(source)
         database = open_db(cfg)
         if database.get_meta("desired_state") is None:
             set_desired(database, STOPPED, "service installed (not started)")

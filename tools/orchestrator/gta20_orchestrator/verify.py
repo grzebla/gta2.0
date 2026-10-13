@@ -65,6 +65,18 @@ def run_commands(commands: List[Any], *, cwd: Path, env: Dict[str, str], log_dir
     return results
 
 
+def command_env(cfg: Any, tools_dir: Optional[Path]) -> Dict[str, str]:
+    env = agent_env(cfg.verify_env())
+    env["GTA20_ORCHESTRATOR_VERIFY"] = "1"
+    # Verification runs agent-written code outside the sandbox: it must never see the
+    # owner's AWS session (`aws login` lives in ~/.aws).
+    env.update({"AWS_CONFIG_FILE": "/dev/null", "AWS_SHARED_CREDENTIALS_FILE": "/dev/null",
+                "AWS_EC2_METADATA_DISABLED": "true"})
+    if tools_dir:
+        env["PATH"] = str(tools_dir) + ":" + env["PATH"]
+    return env
+
+
 def verify_task(cfg: Any, *, wt: Path, base: str, head: str, previous_hash: Optional[str],
                 log_dir: Path, run_commands_too: bool = True, tools_dir: Optional[Path] = None) -> Dict[str, Any]:
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -93,15 +105,7 @@ def verify_task(cfg: Any, *, wt: Path, base: str, head: str, previous_hash: Opti
     commands: List[Dict[str, Any]] = []
     structural_ok = all(c["ok"] for c in checks if c["hard"])
     if run_commands_too and structural_ok:
-        env = agent_env(cfg.verify_env())
-        env["GTA20_ORCHESTRATOR_VERIFY"] = "1"
-        # Verification runs agent-written code outside the sandbox: it must never see the
-        # owner's AWS session (`aws login` lives in ~/.aws).
-        env.update({"AWS_CONFIG_FILE": "/dev/null", "AWS_SHARED_CREDENTIALS_FILE": "/dev/null",
-                    "AWS_EC2_METADATA_DISABLED": "true"})
-        if tools_dir:
-            env["PATH"] = str(tools_dir) + ":" + env["PATH"]
-        commands = run_commands(cfg["verify"]["commands"], cwd=wt, env=env, log_dir=log_dir,
+        commands = run_commands(cfg["verify"]["commands"], cwd=wt, env=command_env(cfg, tools_dir), log_dir=log_dir,
                                 timeout_s=float(cfg["verify"]["timeout_s"]))
         for c in commands:
             checks.append(_check("command: " + c["command"], c["returncode"] == 0,
