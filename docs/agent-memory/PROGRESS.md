@@ -17,3 +17,7 @@ Approved T0002 at 78fa72c: documented unsloped geometry conventions, evidence li
 ## 2026-10-12T22:57:49Z — T0003 Keep original-data render captures outside the checkout
 
 Approved T0003 at a16ba67: district render smoke tests now retain original-data screenshots in validated external directories with independent run names. Added 12 asset-free path tests and documented local capture use. Inspected logs confirm 68/68 headless and 71/71 data-enabled Debug tests passed; all three district captures exist outside the checkout and CI artifact paths. M1 fidelity remains unproven.
+
+## 2026-10-13T05:54:14Z — T0004 Isolate offline shell-test outputs and cleanup
+
+Approved T0004 at d78585c: offline shell tests now use disposable repository copies with validated external temporary paths and guarded cleanup. All 33 original assertions remain unchanged. Inspected execution logs confirm 60/60 isolation self-tests, 68/68 headless tests and 71/71 Debug tests passed. The full mock suite was not run under fixed policy. M1 remains incomplete.
