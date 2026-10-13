@@ -1,3 +1,3 @@
 # Known Issues
 
-Replace the T0008 review blocker with approved, pending integration. Track dependency properties on non-module helper targets, configure_file-generated output and third-party CMake under .deps/ as separate enforcement follow-ups, per the owner's narrowed scope. These do not block T0008.
+Nonblocking follow-up: WorldMesh::append_face reserves exactly the next required size on every append, which can cause quadratic allocation/copy work. Assess geometric capacity growth or batch reservation before map-scale assembly; T0013 specifies no performance threshold.
