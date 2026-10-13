@@ -33,7 +33,8 @@ identyczne na powierzchni gry — sekcja 2).
 * Werdykt `FAIL_GAME_DIALOG` w `summary.json` **nie jest dowodem okna dialogowego**: `dialogs=null`
   w `result.json` prawdopodobnie oznacza „zero okien”, a `Get-CaseVerdict` liczy `@($null)` jako
   jedno okno (sekcja 4, defekt D1). [N — wniosek z kodu, nieuruchomiony]
-* Runner zgłasza 2 zdarzenia `SendInput` na każdy ENTER [R]; **czy gra je odebrała — nieustalone**. [N]
+* Runner zgłasza 2 zdarzenia `SendInput` na każdy ENTER [R]; **czy gra je odebrała i czy okno gry miało fokus w chwili
+  wstrzyknięcia — nieustalone**. [N]
 
 ## 2. Klatki: geometria i identyczność
 
@@ -74,7 +75,7 @@ zmianą minut zegara. [O]
 
 | s | Plik | Grupa | Wejście przed klatką | Etykieta | Uwagi |
 |---|---|---|---|---|---|
-| 6 | `frame-006s.png` | A | — | `MENU` | menu główne gotowe przed pierwszym ENTER |
+| 6 | `frame-006s.png` | A | — | `MENU` | menu główne widoczne przed pierwszym ENTER (gotowość do odbioru wejścia nieustalona) |
 | 12 | `frame-012s.png` | A | — | `MENU` | |
 | 18 | `frame-018s.png` | A | ENTER @ 15 | `MENU` | bez zmian względem 12 s |
 | 22 | `frame-022s.png` | A | | `MENU` | |
@@ -128,8 +129,8 @@ wyglądałoby tak samo w obu przypadkach (sekcja 5).
 | Zrzuty | brak okna dialogowego na obu powierzchniach; pulpit bez otwartych okien, na pasku zadań przycisk GTA2 | [O] |
 | stdout hosta | „no Application log errors collected” dla przypadku | [R] |
 
-**Wniosek.** Obserwacje (brak okna na zrzutach, okno gry na pierwszym planie w każdej klatce)
-przeczą temu, żeby gra stała na własnym oknie komunikatu. Werdykt wynika najpewniej z defektu D1
+**Wniosek.** Obserwacja (brak okna na zrzutach [O]) i wartości runnera (okno gry na pierwszym planie
+w chwilach zrzutów [R]) przeczą temu, żeby gra stała na własnym oknie komunikatu. Werdykt wynika najpewniej z defektu D1
 (sekcja 5): runner zapisuje `null` zamiast pustej listy, a werdykt traktuje `null` jako jedno okno.
 Gdyby `dialogs` liczono jako 0, ta sama ścieżka `Get-CaseVerdict` dałaby `PASS` (progi
 `minUniqueColors` 24, `maxBlackRatio` 0,97, `minChangedRatio` 0,25 są spełnione w każdej klatce)
@@ -183,8 +184,14 @@ skryptów. Możliwe przyczyny braku reakcji (wszystkie [N], ten przebieg ich nie
 3. UIPI — mało prawdopodobne: runner działa z `RunLevel Limited` (`Invoke-GfxCompat.ps1:226`) i sam
    uruchamia grę (`Start-Process`), ale poziom integralności gry nie jest zapisany.
 
-Wykluczone przez dane: brak fokusu (`foreground: true` w każdej klatce [R]) i zbyt wczesny ENTER
-(menu gotowe już w 6 s [O]).
+4. Okno gry nie miało fokusu w chwili wstrzyknięcia. `foreground: true` [R] jest mierzone tylko w
+   chwilach zrzutów (najbliższe: 1–3 s przed i 3 s po każdym ENTER), a wynik `SetForegroundWindow` w
+   `Send-GameKey` i stan pierwszego planu w trakcie wciśnięcia nie są zapisywane — fokus podczas
+   wstrzyknięcia jest **niezweryfikowany** [N].
+5. Gra nie była jeszcze gotowa na wejście. Menu było **widoczne** już w 6 s [O], ale widoczny
+   obraz menu nie dowodzi, że frontend przyjmuje klawisze [N].
+
+Żadnej z tych przyczyn ten przebieg nie wyklucza.
 
 **Uwaga o wyświetlaczach [O].** `Initialize-GfxHost.ps1:291-300` wyłącza Basic Display Adapter
 (środowisko przebiegu pokazuje go jako wyłączony), a mimo to wirtualny ekran ma dwie powierzchnie
@@ -193,29 +200,31 @@ Wykluczone przez dane: brak fokusu (`foreground: true` w każdej klatce [R]) i z
 ## 6. Co ten przebieg dowodzi, a czego nie
 
 Dowodzi [O]: oryginalne GTA 2 **9.6** startuje na hoście w pełnym ekranie przez DDrawCompat, menu
-główne jest gotowe przed 6 s, domyślnie podświetlone jest „PLAY”, proces żyje do końca (≈ 120 s),
-na zrzutach nie ma okna dialogowego.
+główne jest widoczne przed 6 s, domyślnie podświetlone jest „PLAY”, na zrzutach nie ma okna
+dialogowego. Według runnera [R] proces żył do końca (≈ 120 s; `alive`, `processAlive`).
 
-Nie dowodzi: że klawisze dotarły do gry; że pętla gry działała po 6 s; niczego o świecie, kamerze
-ani położeniu w `wil.gmp`. Pytania 1–4 scenariusza (sekcja 1 scenariusza) pozostają otwarte;
+Nie dowodzi: że klawisze dotarły do gry; że okno gry miało fokus w chwili wstrzyknięcia; że frontend
+był gotowy na wejście; że pętla gry działała po 6 s; niczego o świecie, kamerze ani położeniu w
+`wil.gmp`. Pytania 1–4 scenariusza (sekcja 1 scenariusza) pozostają otwarte;
 WG-PROJ i lokalizacja nie mają materiału.
 
 ## 7. Następny warunek wstępny (jeden)
 
-**Przed kolejnym płatnym przebiegiem: runner musi umieć wykazać, czy wstrzyknięty klawisz dotarł do
-gry i jaka rewizja skryptów została wdrożona.** Bez tego kolejny przebieg z innym `inputs` byłby
-zgadywaniem — zmiana harmonogramu wejść nie ma dziś podstawy w danych.
+**Przed decyzją o kolejnym płatnym przebiegu: właściciel przegląda podejrzewany defekt werdyktu D1 i
+przygotowuje ograniczoną diagnostykę wejścia w runnerze, identyfikowaną rewizją.** Zmiana
+harmonogramu wejść nie ma dziś podstawy w danych; `inputs` scenariusza zostaje bez zmian.
 
-To wymaga zmian w chronionej ścieżce `tests/gfx/windows/` (agenci jej nie modyfikują) — **przekazanie
-właścicielowi** (przez Astrę). Zakres proponowany do przekazania:
+To zmiana w chronionej ścieżce `tests/gfx/windows/` (agenci jej nie modyfikują) — **przekazanie
+właścicielowi** (przez Astrę). Proponowany zakres:
 
-1. `Run-Gta2Case.ps1`, `Send-GameKey`/pętla zdarzeń: dla każdego wejścia zapisać
-   `Process.Responding` i `TotalProcessorTime` gry przed i ok. 1 s po klawiszu, `GetLastError` gdy
-   suma `SendInput` < 2, poziom integralności procesu gry; w `result.json` zapisać SHA-256 wdrożonych
-   skryptów runnera.
-2. D1: `Run-Gta2Case.ps1:209` — zapisywać pustą listę zamiast `null`; `GfxAnalysis.psm1:106` —
-   traktować `null` jako brak okien; dodać przypadki Pester dla `null` i pustej listy.
+1. D1 do przeglądu: `Run-Gta2Case.ps1:209` (`null` zamiast pustej listy) i `GfxAnalysis.psm1:106`
+   (`@($null).Count` = 1), z przypadkami Pester dla `null` i pustej listy.
+2. Diagnostyka wokół każdego wstrzyknięcia w `Send-GameKey`/pętli zdarzeń: wynik
+   `SetForegroundWindow`, stan pierwszego planu tuż przed i tuż po klawiszu, `GetLastError` gdy suma
+   `SendInput` < 2, a pomocniczo `Process.Responding`, czas CPU i poziom integralności procesu gry.
+3. Identyfikacja rewizji: SHA-256 wdrożonych skryptów runnera w `result.json`.
 
-Potem jeden przebieg **niezmienionego** `m1-downtown-baseline` rozstrzygnie między przyczynami 1–3 z
-sekcji 5 (np. czas CPU stoi → pętla gry; CPU rośnie, okno odpowiada, obraz bez zmian → ścieżka
-wejścia).
+To są **dane diagnostyczne, nie dowód** dostarczenia ani obsłużenia klawisza: zawężają możliwe
+przyczyny z sekcji 5, ale żadna z tych wartości nie pokazuje, że gra odczytała wejście. Konsumpcja
+wejścia może pozostać nierozstrzygnięta także po przebiegu z diagnostyką. O kolejnym przebiegu należy
+zdecydować dopiero po przejrzeniu tych zmian i zebranych danych.

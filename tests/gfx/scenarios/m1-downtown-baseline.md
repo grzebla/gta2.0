@@ -180,7 +180,7 @@ do prostokąta strefy — tylko jako kontrola, nie jako dowód położenia.
 * Jeśli świat nie pojawi się przed 64 s: poprawić `inputs` na podstawie zrzutów `MENU` (nowy
   commit tego samego `id`) i dopiero wtedy prosić o kolejny przebieg. **Po przebiegu z sekcji 8:**
   zrzuty `MENU` nie pokazały żadnej reakcji na ENTER, więc nie dają podstawy do innej sekwencji —
-  najpierw trzeba ustalić, czy wejście w ogóle dociera do gry.
+  najpierw potrzebna jest diagnostyka wejścia po stronie właściciela (sekcja 8).
 * Dopiero po potwierdzeniu stabilnej kamery w spoczynku można planować scenariusze w zadanych
   miejscach mapy.
 
@@ -194,17 +194,21 @@ Zrzuty zostają lokalnie; tutaj tylko wnioski.
   sekcja 6 (lokalizacja) i WG-PROJ nie mają materiału. [O]
 * **Wejścia:** powierzchnia gry jest identyczna co do piksela od 6 s do 118 s, także po ENTER w 15,
   25 i 65 s; zmienia się tylko zegar pulpitu. Runner zgłasza po 2 zdarzenia `SendInput` na ENTER,
-  ale czy gra je odebrała — nieustalone. [O] / [R]
+  ale czy gra je odebrała — nieustalone. `foreground: true` runner mierzy tylko w chwilach zrzutów,
+  więc fokus w chwili wstrzyknięcia też jest nieustalony. [O] / [R]
 * **Założenia z sekcji 3:** wersja gry na hoście to **9.6** (napis w menu) [O]; menu główne jest
-  gotowe przed 6 s [O]; domyślnie podświetlone „PLAY” [O]. Pełny ekran działa (DDrawCompat), ale
+  widoczne przed 6 s [O] (czy frontend był już gotowy przyjmować klawisze — nieustalone); domyślnie podświetlone „PLAY” [O]. Pełny ekran działa (DDrawCompat), ale
   zrzut ma 2304×800 z dwiema powierzchniami: gra zajmuje x 0–1279 (1280×800, obraz 4:3 ze
   skalowaniem ≈ 1,667), pulpit x 1280–2303 [O]. Przebieg ekranu 2 frontendu i dalsze punkty sekcji
   3 pozostają [H].
 * **Werdykt hosta** `FAIL_GAME_DIALOG` nie jest dowodem okna dialogowego (`dialogs=null`, brak okna na
-  zrzutach, okno gry na pierwszym planie); prawdopodobny defekt werdyktu w runnerze — raport,
-  sekcja 5, D1.
-* **Następny warunek wstępny:** przed kolejnym płatnym przebiegiem runner musi zapisywać dowód
-  dostarczenia wejścia (odpowiadanie procesu i czas CPU gry wokół klawisza, błędy `SendInput`, poziom
-  integralności gry) oraz rewizję wdrożonych skryptów. To zmiana w chronionej ścieżce
-  `tests/gfx/windows/` — **do przekazania właścicielowi przez Astrę** (raport, sekcja 7). Harmonogram
-  `inputs` tego scenariusza pozostaje bez zmian.
+  zrzutach, okno gry na pierwszym planie w chwilach zrzutów [R]); prawdopodobny defekt werdyktu w
+  runnerze — raport, sekcja 5, D1.
+* **Następny warunek wstępny (po stronie właściciela):** przegląd podejrzewanego defektu werdyktu D1
+  i przygotowanie ograniczonej diagnostyki wejścia w runnerze, identyfikowanej rewizją (SHA-256
+  wdrożonych skryptów): wynik `SetForegroundWindow` i stan pierwszego planu tuż przed i po każdym
+  wstrzyknięciu, błędy `SendInput`, pomocniczo stan procesu gry. To dane diagnostyczne, **nie dowód**
+  dostarczenia ani obsłużenia klawisza — konsumpcja wejścia może pozostać nierozstrzygnięta. Zmiana
+  dotyczy chronionej ścieżki `tests/gfx/windows/` — **do przekazania właścicielowi przez Astrę**
+  (raport, sekcja 7). O kolejnym przebiegu decyduje się dopiero po przejrzeniu tej zmiany i
+  zebranych danych. Harmonogram `inputs` tego scenariusza pozostaje bez zmian.
