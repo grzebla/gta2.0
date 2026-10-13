@@ -10,7 +10,7 @@
     "registryView": "Registry32"
   },
   "input": {
-    "$comment": "How capture mode injects keys: scancode (SendInput + KEYEVENTF_SCANCODE), vk (SendInput virtual key + scan code), postmessage (WM_KEYDOWN/UP to the game window), activate-scancode (attach to the game's input thread, focus, then scancode) or cycle (key i uses method i mod 4, for diagnosis). 2026-10-13: scancode did not change the 9.6 frontend under DDrawCompat (run local-20261013-084136); cycle is set TEMPORARILY for one diagnosis run, then the working method becomes the default.",
+    "$comment": "How capture mode injects keys: scancode (SendInput + KEYEVENTF_SCANCODE), vk (SendInput virtual key + scan code), postmessage (WM_KEYDOWN/UP to the game window), activate-scancode (attach to the game's input thread, focus, then scancode) focusmsg-scancode (WM_ACTIVATE + WM_SETFOCUS to the game window, then scancode) or cycle (key i uses method i mod 5, for diagnosis). 2026-10-13: scancode did not change the 9.6 frontend under DDrawCompat (run local-20261013-084136); cycle is set TEMPORARILY for one diagnosis run, then the working method becomes the default.",
     "method": "cycle"
   },
   "observe": {
@@ -40,6 +40,13 @@
       "url": "https://github.com/narzoul/DDrawCompat/releases/download/v0.7.1/DDrawCompat-v0.7.1.zip",
       "sha256": "0c33ecb1c01c1c779063b490a2e818f6d9227b3b4ee827c51790fb0fd59b17c5",
       "files": [{ "from": "ddraw.dll", "to": "ddraw.dll" }]
+    },
+    "ddrawcompat-exclusive": {
+      "$comment": "DDrawCompat with real exclusive fullscreen instead of its borderless presentation window (input focus diagnosis 2026-10-13).",
+      "url": "https://github.com/narzoul/DDrawCompat/releases/download/v0.7.1/DDrawCompat-v0.7.1.zip",
+      "sha256": "0c33ecb1c01c1c779063b490a2e818f6d9227b3b4ee827c51790fb0fd59b17c5",
+      "files": [ { "from": "ddraw.dll", "to": "ddraw.dll" } ],
+      "config": { "DDrawCompat.ini": ["FullscreenMode = exclusive"] }
     },
     "dgvoodoo2": {
       "url": "https://github.com/dege-diosg/dgVoodoo2/releases/download/v2.87.5/dgVoodoo2_87_5.zip",

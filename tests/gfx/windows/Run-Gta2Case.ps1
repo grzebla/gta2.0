@@ -41,6 +41,9 @@ public struct INPUT { public uint type; public InputUnion u; }
 [DllImport("user32.dll", SetLastError = true)] public static extern bool PostMessage(System.IntPtr hWnd, uint msg, System.IntPtr wParam, System.IntPtr lParam);
 [DllImport("user32.dll")] public static extern bool IsHungAppWindow(System.IntPtr hWnd);
 [DllImport("user32.dll")] public static extern bool PrintWindow(System.IntPtr hWnd, System.IntPtr hdc, uint flags);
+[System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+public struct GUITHREADINFO { public int cbSize; public int flags; public System.IntPtr hwndActive; public System.IntPtr hwndFocus; public System.IntPtr hwndCapture; public System.IntPtr hwndMenuOwner; public System.IntPtr hwndMoveSize; public System.IntPtr hwndCaret; public RECT rcCaret; }
+[DllImport("user32.dll")] public static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO info);
 [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
 [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
 [DllImport("user32.dll")] public static extern System.IntPtr SetFocus(System.IntPtr hWnd);
@@ -144,12 +147,50 @@ $script:VirtualKeys = @{
     LCTRL = 0xA2; LSHIFT = 0xA0; LALT = 0xA4; BACKSPACE = 0x08
 }
 foreach ($c in [char[]] 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') { $script:VirtualKeys[[string]$c] = [int][char]$c }
-$script:InputMethods = @('scancode', 'vk', 'postmessage', 'activate-scancode')
+$script:InputMethods = @('scancode', 'vk', 'postmessage', 'activate-scancode', 'focusmsg-scancode')
 
 function Get-WindowOwner([IntPtr] $Window) {
     $owner = [uint32]0
     $thread = [Gta20.Native]::GetWindowThreadProcessId($Window, [ref] $owner)
     return [pscustomobject]@{ Pid = [int]$owner; Thread = $thread }
+}
+
+# Class name of a window (diagnostics).
+function Get-WindowClass([IntPtr] $Window) {
+    $cls = New-Object System.Text.StringBuilder 128
+    [Gta20.Native]::GetClassName($Window, $cls, 128) | Out-Null
+    return $cls.ToString()
+}
+
+# Which window of the game's GUI thread is active / has keyboard focus, and all visible
+# top-level windows the game process owns (DDrawCompat adds its own presentation window).
+function Get-GameFocusInfo([IntPtr] $Window, [int] $GamePid) {
+    $info = [ordered]@{}
+    $owner = Get-WindowOwner $Window
+    $gti = New-Object Gta20.Native+GUITHREADINFO
+    $gti.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf([type] [Gta20.Native+GUITHREADINFO])
+    if ([Gta20.Native]::GetGUIThreadInfo($owner.Thread, [ref] $gti)) {
+        $info.active = [ordered]@{ window = [int64]$gti.hwndActive; class = (Get-WindowClass $gti.hwndActive) }
+        $info.focus = [ordered]@{ window = [int64]$gti.hwndFocus; class = (Get-WindowClass $gti.hwndFocus) }
+        $info.capture = [int64]$gti.hwndCapture
+    }
+    $wins = [System.Collections.Generic.List[object]]::new()
+    $cb = [Gta20.Native+EnumProc] {
+        param($h, $l)
+        $null = $l
+        $o = [uint32]0
+        [Gta20.Native]::GetWindowThreadProcessId($h, [ref] $o) | Out-Null
+        if ($o -eq $GamePid) {
+            $rc = New-Object Gta20.Native+RECT
+            [Gta20.Native]::GetWindowRect($h, [ref] $rc) | Out-Null
+            $wins.Add([ordered]@{ window = [int64]$h; class = (Get-WindowClass $h); visible = [Gta20.Native]::IsWindowVisible($h)
+                rect = @($rc.Left, $rc.Top, $rc.Right, $rc.Bottom) })
+        }
+        return $true
+    }
+    [Gta20.Native]::EnumWindows($cb, [IntPtr]::Zero) | Out-Null
+    $info.windows = @($wins)
+    return $info
 }
 
 function Send-KeyEvent([uint16] $Vk, [uint16] $Scan, [uint32] $Flags) {
@@ -185,6 +226,12 @@ function Send-GameKey([string] $Key, [int] $HoldMs, [IntPtr] $Window, [string] $
         $diag.hung = [Gta20.Native]::IsHungAppWindow($Window)
         $attached = $false
         $target = Get-WindowOwner $Window
+        if ($Method -eq 'focusmsg-scancode') {
+            # Tell the game window it is active and focused (the game enables input on these).
+            [Gta20.Native]::PostMessage($Window, 0x0006, [IntPtr]1, [IntPtr]::Zero) | Out-Null   # WM_ACTIVATE(WA_ACTIVE)
+            [Gta20.Native]::PostMessage($Window, 0x0007, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null # WM_SETFOCUS
+            Start-Sleep -Milliseconds 100
+        }
         if ($Method -eq 'activate-scancode') {
             $attached = [Gta20.Native]::AttachThreadInput([Gta20.Native]::GetCurrentThreadId(), $target.Thread, $true)
             [Gta20.Native]::BringWindowToTop($Window) | Out-Null
@@ -196,6 +243,7 @@ function Send-GameKey([string] $Key, [int] $HoldMs, [IntPtr] $Window, [string] $
         }
         $diag.attachedThreadInput = $attached
     }
+    if ($Window -ne [IntPtr]::Zero) { $diag.gameFocus = Get-GameFocusInfo -Window $Window -GamePid $GamePid }
     $fg = [Gta20.Native]::GetForegroundWindow()
     $diag.foregroundAtSend = [ordered]@{ window = [int64]$fg; pid = (Get-WindowOwner $fg).Pid; isGame = ((Get-WindowOwner $fg).Pid -eq $GamePid) }
     foreach ($up in @($false, $true)) {
@@ -207,6 +255,7 @@ function Send-GameKey([string] $Key, [int] $HoldMs, [IntPtr] $Window, [string] $
             $diag.postMessage += [ordered]@{ up = $up; ok = $ok; error = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error() }
         } else {
             if ($Method -eq 'vk') {
+                # virtual key + scan code, no KEYEVENTF_SCANCODE
                 $flags = [uint32]0; $v = $vk
             } else {
                 $flags = [uint32]0x0008; $v = [uint16]0       # KEYEVENTF_SCANCODE
@@ -223,7 +272,7 @@ function Send-GameKey([string] $Key, [int] $HoldMs, [IntPtr] $Window, [string] $
 
 # Bytes the game process has read so far. Entering a new menu screen or a map reads files
 # (frontend images, .gmp/.sty), so this shows progress even when screenshots cannot.
-function Get-ReadBytes($Process) {
+function Get-ReadByteCount($Process) {
     try {
         $c = New-Object Gta20.Native+IO_COUNTERS
         if ([Gta20.Native]::GetProcessIoCounters($Process.Handle, [ref] $c)) { return [int64]$c.ReadTransferCount }
@@ -305,7 +354,7 @@ try {
             $method = if ($inputMethod -eq 'cycle') { $script:InputMethods[$keyIndex % $script:InputMethods.Count] } else { $inputMethod }
             $keyIndex++
             $cpuBefore = $proc.TotalProcessorTime.TotalMilliseconds
-            $readBefore = Get-ReadBytes $proc
+            $readBefore = Get-ReadByteCount $proc
             $diag = Send-GameKey -Key $ev.key -HoldMs $ev.hold -Window $proc.MainWindowHandle -Method $method -GamePid $proc.Id
             # What the screen shows shortly after the key (evidence, not proof of consumption).
             Start-Sleep -Milliseconds 1500
@@ -320,7 +369,7 @@ try {
             $diag.afterFile = (Split-Path -Leaf $afterPng)
             $diag.afterChangedRatio = (Compare-FrameSample -Baseline $lastSample -Frame $after).ChangedRatio
             $diag.gameCpuMsDuring = [math]::Round($proc.TotalProcessorTime.TotalMilliseconds - $cpuBefore)
-            $readAfter = Get-ReadBytes $proc
+            $readAfter = Get-ReadByteCount $proc
             $diag.gameReadBytesDuring = $(if ($null -ne $readBefore -and $null -ne $readAfter) { $readAfter - $readBefore } else { $null })
             $result.inputsSent += $diag
             $lastSample = $after
@@ -352,7 +401,7 @@ try {
             processAlive = -not $proc.HasExited
             foreground   = ([Gta20.Native]::GetForegroundWindow() -eq $proc.MainWindowHandle)
             windowCapture = $winInfo
-            gameReadBytes = (Get-ReadBytes $proc)
+            gameReadBytes = (Get-ReadByteCount $proc)
         }
     }
 

@@ -110,7 +110,8 @@ function Get-Wrapper([string] $Name) {
         Remove-Item -Force $zip
         Set-Content -Path $marker -Value $w.sha256
     }
-    return [pscustomobject]@{ Dir = $dir; Files = @($w.files) }
+    $config = if ($w.PSObject.Properties.Name -contains 'config') { $w.config } else { $null }
+    return [pscustomobject]@{ Dir = $dir; Files = @($w.files); Config = $config }
 }
 
 function Set-ScreenSetting($Settings) {
@@ -235,6 +236,16 @@ if ($Mode -ne 'probe') {
                     if (Test-Path $dst) { throw "refusing to overwrite existing game file '$($f.to)'" }
                     Copy-Item -Path $src -Destination $dst
                     $installed += $dst
+                }
+                # Wrapper configuration files from the matrix (e.g. DDrawCompat.ini), one line each.
+                if ($wrapper.Config) {
+                    foreach ($cfgFile in $wrapper.Config.PSObject.Properties) {
+                        if ($cfgFile.Name -notmatch '^[A-Za-z0-9_.-]{1,64}\.(ini|conf)$') { throw "bad wrapper config name '$($cfgFile.Name)'" }
+                        $dst = Join-Path $gameDir $cfgFile.Name
+                        if (Test-Path $dst) { throw "refusing to overwrite existing game file '$($cfgFile.Name)'" }
+                        Set-Content -Path $dst -Value @($cfgFile.Value) -Encoding ASCII
+                        $installed += $dst
+                    }
                 }
             }
 
