@@ -732,6 +732,22 @@ class GfxTests(SimCase):
         with self.assertRaises(Wait):
             orch.step()  # then the agent cap applies as before
 
+    def test_owner_reset_restarts_the_daily_counters(self) -> None:
+        self.env.cfg.data["limits"]["max_runs_per_day"] = 0
+        self.env.cfg.data["gfx"]["max_runs_per_day"] = 1
+        runner = FakeGfxRunner()
+        orch = self._orch(runner)
+        orch.gfx.enqueue([{"mode": "probe", "target": "all", "reason": "a"},
+                          {"mode": "probe", "target": "all", "reason": "b"}], None, "owner", self.env.repo)
+        self.assertIn("gfx job 1", orch.gfx.run_next())
+        self.assertIsNone(orch.gfx.run_next())  # EC2 cap for today reached
+        time.sleep(1.1)
+        self.assertEqual(cli_main(["--repo", str(self.env.repo), "reset-limits", "--note", "test"]), 0)
+        self.assertEqual(orch.gfx.runs_today(), 0)
+        self.assertIn("gfx job 2", orch.gfx.run_next())
+        self.env.cfg.data["limits"]["max_runs_per_day"] = 5
+        orch.daily_cap()  # agent runs before the reset no longer count
+
     def test_interrupted_run_is_charged_and_failed(self) -> None:
         orch = self._orch(FakeGfxRunner())
         orch.gfx.enqueue([{"mode": "probe", "target": "all", "reason": "a"}], None, "astra", self.env.repo)

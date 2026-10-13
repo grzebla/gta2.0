@@ -214,6 +214,7 @@ $B pause | resume | stop [--now] [--unload]
 $B restart [--now] [--timeout S]      # zastosuj zmiany konfiguracji / zainstalowanego kodu
 $B unblock T0003 --note "..."         # decyzja właściciela dla BLOCKED/NEEDS_HUMAN
 $B answer "..."                       # odpowiedź na pytanie Astry (NEEDS_HUMAN)
+$B reset-limits [--note "..."]        # dzienne liczniki (agenci, EC2) liczą od nowa; limity bez zmian
 $B release status | review [--pr N] | run [--pr N]   # Gatekeeper ręcznie
 $B gfx status | request <mode> <target> | cancel --id N | run   # przebiegi na hoście EC2
 $B simulate [all|happy|quota_known_reset|...]   # pętla na atrapach w tymczasowym repo
