@@ -42,10 +42,17 @@ struct Trace {
     std::vector<TickSnapshot> snapshots;
 };
 
+/// Every integrity problem, empty when valid: supported header (schema 1, scenario id, known
+/// provenance, tick rate > 0, ticks >= 0), at least one snapshot, snapshot ticks strictly increasing
+/// within 0..header.ticks (sparse schedules are fine), entity ids non-empty and unique per tick,
+/// property names unique per entity.
+[[nodiscard]] std::vector<std::string> validate(const Trace& trace);
+
 /// Canonical JSON Lines: line 1 {"header":{...}}, then {"tick":N,"entities":[...]}.
 /// Sorted keys, shortest round-trip doubles, no timestamps: identical runs give identical bytes.
 void write_trace(const Trace& trace, std::ostream& out);
 [[nodiscard]] std::string trace_to_string(const Trace& trace);
+/// Rejects duplicate JSON keys, unknown provenance and any validate() problem.
 [[nodiscard]] Result<Trace> read_trace(std::istream& in);
 [[nodiscard]] Result<Trace> read_trace_file(const std::string& path);
 [[nodiscard]] Result<bool> write_trace_file(const Trace& trace, const std::string& path);

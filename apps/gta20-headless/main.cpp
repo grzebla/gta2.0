@@ -141,6 +141,8 @@ int main(int argc, char** argv) try {
         if (auto p = args.get("--markdown"); !p.empty())
             std::ofstream(p) << md;
         std::cout << md;
+        if (!report.valid())
+            return kUsage;
         return report.passed() ? kOk : kDiverged;
     }
 

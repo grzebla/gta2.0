@@ -96,6 +96,14 @@ Linia 1: `{"header":{…}}`, potem `{"tick":N,"entities":[{"id","kind","properti
 najkrótszą postacią odtwarzalną bit w bit (`std::to_chars`), wartości nieskończone jako
 `"nan"`/`"inf"`/`"-inf"`, bez znaczników czasu. Ten sam przebieg daje identyczny plik.
 
+Integralność (`validate(const Trace&)`, sprawdzana przez `read_trace` i przez `compare_traces`):
+`schemaVersion: 1`, niepusty `scenarioId`, `provenance` tylko `synthetic | originalGta2 | engine`
+(nieznana wartość jest błędem, nie „synthetic”), `tickRateHz > 0`, `ticks ≥ 0`, co najmniej
+jeden snapshot (sam nagłówek jest błędem), ticki ściśle rosnące w zakresie `0..ticks`
+(rzadki harmonogram jest dozwolony), niepuste i unikalne `id` encji w ticku, unikalne nazwy
+właściwości encji (powtórzony klucz JSON w pliku też jest błędem). Tożsamość adaptera
+(`adapter`, `adapterVersion`) ani `provenance` nie muszą się zgadzać między śladami.
+
 ### Raport
 
 `gta20-headless compare` zwraca kod 0 (zgodne), 1 (rozbieżne) lub 2 (błąd wejścia) i wypisuje
@@ -104,6 +112,9 @@ najniższy tick / encja / właściwość), statystyki na (rodzaj, właściwość
 odchylenie z tickiem, pierwszy tick poza tolerancją — oraz listę rozbieżności
 (`HeaderMismatch`, `MissingTick`, `UnexpectedTick`, `MissingEntity`, `UnexpectedEntity`,
 `KindMismatch`, `MissingProperty`, `UnexpectedProperty`, `ValueOutOfTolerance`).
+Gdy któryś ślad nie przechodzi walidacji, nic nie jest porównywane: raport ma status
+`INVALID INPUT` z listą problemów (`expected: …` / `actual: …`; w JSON `validInput: false`,
+`invalidInput`, `passed: false`), a `compare` zwraca kod 2.
 
 ### Wzorce regresyjne
 

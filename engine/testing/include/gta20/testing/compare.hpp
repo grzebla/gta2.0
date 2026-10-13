@@ -52,10 +52,15 @@ struct ComparisonReport {
     std::optional<Divergence> first_divergence; // header first, then lowest tick / entity / property
     std::vector<Divergence> divergences;        // ordered, truncated to the limit
     std::vector<PropertyStats> statistics;
+    // validate() problems prefixed "expected: " / "actual: "; when present nothing was compared.
+    std::vector<std::string> invalid_input;
 
-    [[nodiscard]] bool passed() const { return total_divergences == 0; }
+    [[nodiscard]] bool valid() const { return invalid_input.empty(); }
+    [[nodiscard]] bool passed() const { return valid() && total_divergences == 0; }
 };
 
+/// Validates both traces first; invalid input yields a report with only invalid_input filled
+/// (at most max_reported entries plus a summary line), which never passes.
 [[nodiscard]] ComparisonReport compare_traces(const Trace& expected, const Trace& actual,
                                               const ToleranceSet& tolerances, std::size_t max_reported = 200);
 

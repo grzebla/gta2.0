@@ -48,6 +48,19 @@ ComparisonReport compare_traces(const Trace& expected, const Trace& actual, cons
                                 std::size_t max_reported) {
     ComparisonReport report;
     report.scenario_id = expected.header.scenario_id;
+    for (const auto& [side, trace] : {std::pair{"expected: ", &expected}, std::pair{"actual: ", &actual}}) {
+        for (const auto& problem : validate(*trace))
+            report.invalid_input.push_back(side + problem);
+    }
+    if (!report.valid()) {
+        if (report.invalid_input.size() > max_reported) {
+            const auto more = report.invalid_input.size() - max_reported;
+            report.invalid_input.resize(max_reported);
+            report.invalid_input.push_back("... and " + std::to_string(more) + " more");
+        }
+        return report;
+    }
+
     std::vector<Divergence> all;
     std::map<std::pair<std::string, std::string>, PropertyStats> stats;
 
@@ -194,8 +207,15 @@ std::string row(const Divergence& d) {
 
 std::string report_to_markdown(const ComparisonReport& r) {
     std::ostringstream o;
-    o << "### Conformance: `" << r.scenario_id << "` - " << (r.passed() ? "PASS" : "FAIL") << "\n\n";
+    o << "### Conformance: `" << r.scenario_id << "` - "
+      << (!r.valid() ? "INVALID INPUT" : (r.passed() ? "PASS" : "FAIL")) << "\n\n";
     o << "- expected: `" << r.expected_source << "`\n- actual: `" << r.actual_source << "`\n";
+    if (!r.valid()) {
+        o << "\n**Invalid input** (nothing compared)\n\n";
+        for (const auto& problem : r.invalid_input)
+            o << "- " << problem << "\n";
+        return o.str();
+    }
     o << "- compared ticks: " << r.compared_ticks << ", values: " << r.compared_values
       << ", divergences: " << r.total_divergences << "\n\n";
     const char* table_header = "| tick | entity | property | kind | expected | actual | distance | tolerance "
@@ -241,6 +261,8 @@ std::string report_to_json(const ComparisonReport& r) {
            {"expectedSource", r.expected_source},
            {"actualSource", r.actual_source},
            {"passed", r.passed()},
+           {"validInput", r.valid()},
+           {"invalidInput", r.invalid_input},
            {"comparedTicks", r.compared_ticks},
            {"comparedValues", r.compared_values},
            {"totalDivergences", r.total_divergences}};
