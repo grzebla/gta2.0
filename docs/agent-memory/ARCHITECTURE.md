@@ -1,3 +1,3 @@
 # Architecture
 
-T0009 adds offline original-game capture scenario validation and synthetic CTest coverage. Host requests remain orchestrator-only; scenario provenance and interpretation are documented separately from host JSON. Runtime architecture is unchanged.
+T0010 adds a separate strict local inventory command and assets-owned map/style associations for all 17 maps. gta2 uses these associations for default style selection. Optional asset-free CTest behavior remains available. Inventory success does not establish geometry fidelity.

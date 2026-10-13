@@ -1,3 +1,3 @@
 # Known Issues
 
-T0010 attempt 1 remains unapproved: reproduced legacy-only environment fallback and unknown-option false passes; code inspection identified case-normalized map/configuration collisions and unbounded failure diagnostics. Retain existing T0008 issues.
+T0010 attempt-1 findings are resolved at c4c0c8b. Retain existing T0008 issues.

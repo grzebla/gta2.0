@@ -37,3 +37,7 @@ Approved T0007 at 2fca90f. Trace parsing and comparison now reject empty or stru
 ## 2026-10-13T06:34:54Z — T0009 Prepare the first original-game geometry capture scenario
 
 Approved T0009 at 519e9aa: committed the first bounded original-game discovery scenario, companion interpretation and camera-localization procedure, and offline validation with 37 synthetic cases. Local checks passed; inspected logs confirm 121/121 headless and 124/124 Debug passes. Requested one discovery capture. M1 remains incomplete.
+
+## 2026-10-13T07:44:19Z — T0010 Add a strict local map inventory gate
+
+Approved T0010 at c4c0c8b. The strict local inventory validates all 17 maps and their sourced style associations, reports bounded aggregates and rejects missing data, invalid arguments and case collisions. Verified 150/150 headless and 153/153 Debug passes plus a direct successful original-data inventory. M1 remains incomplete.
