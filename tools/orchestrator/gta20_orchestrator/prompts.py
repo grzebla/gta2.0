@@ -163,6 +163,11 @@ Decide exactly one of:
 - CHANGES_REQUESTED: fixable problems; list concrete, actionable required_changes.
 - BLOCKED: a real obstacle the developer cannot remove (explain it in the rationale).
 - NEEDS_HUMAN: a decision only the owner can make (put the question in human_question).
+Scope of CHANGES_REQUESTED: only (a) acceptance criteria not met, (b) defects or regressions
+introduced by this diff, (c) policy violations. Further hardening the task did not promise (new
+edge cases, defences against contrived inputs, nice-to-haves) is NOT a reason to reject: approve
+and record it in KNOWN_ISSUES via memory_updates so it is planned as a separate task. Do not move
+the goalposts between attempts: an earlier review's list is the bar, unless the fix broke something.
 Check each acceptance criterion in `criteria` with evidence you verified yourself. Give a
 rationale. progress_entry: one short paragraph for PROGRESS.md if APPROVED, else null. Use
 memory_updates to keep TEST_STATUS/KNOWN_ISSUES/ARCHITECTURE accurate (null = unchanged).

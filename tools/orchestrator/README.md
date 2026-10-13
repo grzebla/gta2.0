@@ -59,13 +59,21 @@ Po każdym scaleniu sprawdza ponownie od razu, żeby przejść cały stos. Obsł
    - dzienny limit scaleń (6);
    - w PR agentów każdy commit musi być zadaniem zatwierdzonym przez Astrę i zweryfikowanym
      (`[Txxxx]` / `Merge Txxxx`) albo commitem pamięci zmieniającym tylko `docs/agent-memory/`.
-     Zadania nie mogą ruszać ścieżek chronionych.
+     Zadania nie mogą ruszać ścieżek chronionych. Dozwolone są też commity scalające `main` do
+     gałęzi integracyjnej: pliki rozwiązane ręcznie (różne od obu rodziców) nie mogą dotykać
+     ścieżek chronionych.
 
    Gdy CI jest czerwone lub bramka nie przechodzi:
    - PR agentów → zadanie naprawcze (priorytet 0);
    - PR właściciela → komentarz w PR.
 
    Gdy CI trwa → czekanie.
+   **Synchronizacja z `main`.** Zanim Gatekeeper oceni PR agentów, sprawdza, czy `main` jest już
+   w gałęzi integracyjnej. Jeśli nie, Orchestrator scala `origin/main` (commit „Sync origin/main
+   into agents/integration (orchestrator)”), wypycha i czeka na CI nowego heada. Konflikt nie
+   staje się zadaniem dla agentów, bo nie mogą scalać. Scalenie jest przerywane, a właściciel
+   dostaje pytanie z listą plików i instrukcją: `pause` → `git merge origin/main` w worktree
+   integracyjnym → rozwiązanie → commit → push → `resume`.
 3. **Review modelu.** Worktree `release` jest ustawiony na sprawdzanym commicie, z pełnym diffem
    względem `main`, wynikami CI, listą zadań i decyzjami Astry. Decyzje: `MERGE`,
    `REQUEST_CHANGES`, `HOLD`, `NEEDS_HUMAN`.
