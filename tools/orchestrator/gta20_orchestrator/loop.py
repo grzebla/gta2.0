@@ -517,6 +517,9 @@ class Orchestrator:
     # ------------------------------------------------------------------ verify
     def verify(self, task: Any) -> str:
         tid = task["id"]
+        # Several tasks can be active at once (e.g. the owner unblocked one while another ran):
+        # verify THIS task's branch, not whatever the developer worktree last held.
+        gitops.switch_task_branch(self.wt_dev, task["branch"], task["base_commit"], "orchestrator: before verify " + tid)
         head = gitops.rev(self.wt_dev)
         report = loads(task["report"], {}) or {}
         blocked_report = report.get("status") == "blocked"
