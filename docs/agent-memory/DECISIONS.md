@@ -171,3 +171,14 @@ Principal findings: apps/gta2/main.cpp rebuilds visible map quads every frame; r
 Read-only whitespace and boundary checks passed. Inspected T0005 verification logs and LastTest.log confirm 72 headless and 75 Debug passes, including three external district captures. Those counts do not establish M1 fidelity. The supplied CI success belongs to an older SHA; current integration-wide CI is unverified. The backlog below prioritises trustworthy gates and original-reference preparation, then small renderer steps. No completed tasks are cancelled. No EC2 request is justified until a reviewed capture scenario exists.
 
 New tasks: T0006, T0007, T0008, T0009, T0010
+
+## 2026-10-13T06:16:04Z — T0006 APPROVED
+
+Task T0006 "Reject failed or stale conformance executions" at 3b9d89540
+
+Reviewed immutable commit 3b9d89540e0a8664597febff873294a85cd23fad and all five changed files. All acceptance criteria are met. Inspected execution logs confirm 12/12 focused conformance tests, 78/78 headless tests and 81/81 data-enabled Debug tests passed. The successful orchestrator Debug run supersedes the developer's sandbox failures. Local whitespace checks passed. No blocking defect or policy violation found.
+
+- [x] cmake/RunConformance.cmake checks both determinism execution statuses before reading output and rejects unknown MODE values. — RunConformance.cmake:6–8 rejects unsupported modes. Lines 20–28 check execution status and output existence. Both calls at lines 30–32 complete before hashing at lines 33–34. WrapperTest.cmake:102–106 covers bogus, case-mismatched and empty modes.
+- [x] Invocation outputs cannot be inherited from an earlier successful run. — RunConformance.cmake:16–17 removes both traces and report files before execution. WrapperTest.cmake:77–94 seeds matching stale traces and verifies rejection of second-run failures, write-then-fail behavior and missing output from either run.
+- [x] Synthetic wrapper tests cover first-run failure, second-run failure with a pre-existing matching b.jsonl, missing output, differing output and successful deterministic output. — Inspected FakeHeadless.cmake and WrapperTest.cmake:60–106. Tests assert exit status, diagnostic and execution count. All six wrapper cases are registered with CTest. Developer execution output at stdout.jsonl:59 records 12/12 focused passes; orchestrator verify-04.log independently confirms every conformance case passed.
+- [x] Preserve existing golden traces and comparisons; use synthetic stand-ins without executing cloud or protected operator scripts. — The complete changed-file list contains no golden traces, comparison implementation or protected paths. Existing scenario registrations remain unchanged. The stand-in executes only CMake operations on synthetic files. All six existing conformance tests passed.

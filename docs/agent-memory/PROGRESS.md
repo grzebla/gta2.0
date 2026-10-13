@@ -25,3 +25,7 @@ Approved T0004 at d78585c: offline shell tests now use disposable repository cop
 ## 2026-10-13T06:01:47Z — T0005 Add CPU face texture-corner mapping
 
 Approved T0005 at e41b6ae: added GPU-independent texture-corner mapping for five block faces, with 40 explicit synthetic expectations and eight regressions against existing lid drawing. Inspected logs confirm 72/72 headless and 75/75 Debug tests passing, including external district captures. Runtime rendering is unchanged; wall orientation and original-game fidelity remain unverified. M1 remains incomplete.
+
+## 2026-10-13T06:16:04Z — T0006 Reject failed or stale conformance executions
+
+Approved T0006 at 3b9d895. The conformance wrapper now validates both execution statuses, rejects unsupported modes and clears prior outputs. Six synthetic wrapper tests cover failure, stale-output, missing-output and success cases. Inspected logs confirm 12/12 focused conformance, 78/78 headless and 81/81 Debug passes. Existing goldens remain unchanged; M1 remains incomplete.
