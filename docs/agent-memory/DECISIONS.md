@@ -276,3 +276,11 @@ Verified ba732b05969242147d07456074bdca60341d1fbd. T0011 contains zero new commi
 
 - [ ] Every listed problem is resolved with evidence — git merge-tree using merge base 8f820b7, HEAD ba732b0 and origin/main d7b8be7 produces conflict markers around the test workspace setup. agent/t0011 and agents/integration both resolve to ba732b0; their diff is empty.
 - [ ] CI is green on the new integration head — There is no new integration head. Inspected 20261013-110108-T0011-verify/summary.md reports zero task commits; that verification directory contains no build or test logs. Green CI for a resolved integration head is not established.
+
+## 2026-10-13T09:08:16Z — Astra plan
+
+Inspected integration 12281baf3eecab74977cc905a7890ed019987656, scene/render code, existing tests, T0008's branch, and local capture results. M1 remains incomplete. CPU faces and texture transforms are implemented, but runtime rendering still uses flat quads without depth or static mesh caching. The first and last original-game frames show the main menu; result.json records dialogs=null and three ENTER inputs with two events each. FAIL_GAME_DIALOG does not establish an actual dialog or successful input consumption. Do not repeat the paid capture yet. Queue an offline capture audit and two small CPU mesh steps. Preserve T0008 and T0011 as existing blocked work rather than duplicating them. Read-only whitespace and current boundary checks passed; no build or test suite was rerun.
+
+New tasks: T0012, T0013, T0014
+
+Needs human: Orchestrator intervention is required to reconcile integration with origin/main for T0011 while preserving test isolation and containing GFX_RESULTS_ROOT, then rerun deterministic gates. Do not ask Claude to bypass the merge denial. Requeue existing T0008 for its remaining review fixes rather than creating a duplicate. If the offline capture audit confirms a runner defect, route the fix to the owner-controlled workflow: tests/gfx/windows and orchestrator files are protected by fixed policy item 5. No additional paid run is requested.
