@@ -56,11 +56,9 @@ Result<GameInstall> inspect_game_dir(const std::filesystem::path& root) {
     return install;
 }
 
-std::filesystem::path game_dir_from_environment() {
-    const char* value = std::getenv("GTA20_GAME_DIR");
-    if (value == nullptr || *value == '\0') {
-        value = std::getenv("G2N_GAME_DIR"); // pre-rename name, still honoured
-    }
+namespace {
+
+std::filesystem::path expand_home(const char* value) {
     if (value == nullptr || *value == '\0') {
         return {};
     }
@@ -75,6 +73,17 @@ std::filesystem::path game_dir_from_environment() {
         }
     }
     return path;
+}
+
+} // namespace
+
+std::filesystem::path game_dir_from_environment() {
+    auto dir = strict_game_dir_from_environment();
+    return dir.empty() ? expand_home(std::getenv("G2N_GAME_DIR")) : dir; // pre-rename name, still honoured
+}
+
+std::filesystem::path strict_game_dir_from_environment() {
+    return expand_home(std::getenv("GTA20_GAME_DIR"));
 }
 
 } // namespace gta20::assets

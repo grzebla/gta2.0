@@ -30,12 +30,22 @@ GTA20_GAME_DIR=~/Games/GTA2 cmake --build --preset debug --target gamedata-stric
 GTA20_GAME_DIR=~/Games/GTA2 ./build/debug/bin/gta20-headless inventory
 ```
 
-Kod wyjścia: `0` — instalacja kompletna, `1` — brak/błąd danych, `2` — błędne argumenty.
-Bramka (`engine/assets/src/map_inventory.cpp`) zgłasza błąd, gdy:
+Katalog gry pochodzi **wyłącznie** z jednej opcji `--game-dir <katalog>` albo, bez niej, ze
+zmiennej `GTA20_GAME_DIR`. Stara nazwa `G2N_GAME_DIR` (wciąż honorowana przez `gta2` i testy
+`[gamedata]`) jest tu ignorowana, a puste `GTA20_GAME_DIR` znaczy „nieustawione”.
 
-* `GTA20_GAME_DIR` (ani `--game-dir`) nie jest ustawione, katalog nie istnieje lub nie ma `data/`;
+Kod wyjścia: `0` — instalacja kompletna, `1` — brak/błąd danych, `2` — błędne argumenty: każdy
+inny argument niż `--game-dir`, `--game-dir` bez wartości, z pustą wartością lub podane dwa razy
+(wtedy inwentaryzacja w ogóle się nie uruchamia). Bramka (`engine/assets/src/map_inventory.cpp`)
+zgłasza błąd, gdy:
+
+* katalog gry nie jest podany (ani `--game-dir`, ani niepuste `GTA20_GAME_DIR`), nie istnieje lub
+  nie ma `data/`;
 * `data/` nie zawiera **dokładnie** 17 map `.gmp` z listy w
   [formats/map-styles.md](formats/map-styles.md) (brakująca, dodatkowa lub inna mapa);
+* dwie mapy albo dwa pliki konfiguracyjne różnią się tylko wielkością liter (na systemach plików
+  rozróżniających wielkość liter, np. `wil.gmp` i `WIL.GMP`) — nazwy są dopasowywane bez
+  względu na wielkość liter, więc taka para jest niejednoznaczna;
 * któraś mapa się nie parsuje (DMAP) albo nie ma żadnego bloku;
 * styl przypisany mapie nie istnieje lub się nie parsuje, albo przypisanie jest nierozstrzygnięte;
 * pliki konfiguracyjne gry (`data/test1.seq`, `data/*.mmp`) nie deklarują zapisanych par
@@ -45,15 +55,29 @@ Wypisuje wyłącznie metadane i sumy: dla stylu wersję i liczbę kafli, dla map
 liczbę unikalnych bloków i zajętych komórek, zakres poziomów `z` z niepustymi blokami, liczby
 komórek dla każdego użytego kodu skosu (0–63) oraz liczby ścian i pokryw z kaflami
 zarezerwowanymi 992–1022 i ze znacznikiem 1023 (liczone po komórkach siatki 256×256×8).
-Nie wypisuje rekordów bloków ani pikseli. Polecenie nie jest testem CTest, więc ani preset
-`headless`, ani `debug` bez danych nie przestają przechodzić.
+Nie wypisuje rekordów bloków ani pikseli. Raport jest ograniczony: najwyżej 40 problemów
+(pozostałe są tylko liczone: „… N more problems not shown”, a wynik `FAIL (M problems)` podaje
+pełną liczbę), każdy problem najwyżej 240 znaków (dłuższy kończy się ` [...]`, znaki sterujące
+zamieniane na `?`), cały raport najwyżej 32 KiB (ewentualne obcięcie zachowuje końcową linię
+`result:`). Polecenie nie jest testem CTest, więc ani preset `headless`, ani `debug` bez danych
+nie przestają przechodzić.
 
 Zachowanie bramki bez oryginalnych danych sprawdzają testy CTest w każdym presecie:
-`Strict map inventory: *` (syntetyczna instalacja w katalogu tymczasowym: brak wejścia,
-uszkodzone mapy, zła liczba map, brakujące/uszkodzone style, sprzeczna konfiguracja,
-nierozstrzygnięte przypisanie oraz poprawna inwentaryzacja 17 map ze sprawdzonymi sumami) i
-`inventory.strict.*` (kod wyjścia `1` samego `gta20-headless inventory` bez `GTA20_GAME_DIR`,
-z nieistniejącym katalogiem, bez `data/`, z pustymi plikami map i z 16 mapami).
+
+* `Strict map inventory: *` i `Map styles: *` (`tests/unit/inventory_tests.cpp`, syntetyczna
+  instalacja w katalogu tymczasowym): brak wejścia, uszkodzone mapy, zła liczba map,
+  brakujące/uszkodzone style, sprzeczna konfiguracja, nierozstrzygnięte przypisanie, nazwy
+  różniące się wielkością liter (test na systemie plików rozróżniającym wielkość liter; na
+  nierozróżniającym, np. domyślnym APFS, kończy się komunikatem o pominięciu), ograniczenia
+  raportu przy setkach problemów i długich wartościach oraz poprawna inwentaryzacja 17 map ze
+  sprawdzonymi sumami;
+* `inventory.strict.*` (`tests/inventory/`): kod wyjścia samego `gta20-headless inventory` —
+  `1` bez `GTA20_GAME_DIR`, z pustym `GTA20_GAME_DIR` lub tylko z `G2N_GAME_DIR` wskazującym
+  **poprawną** syntetyczną instalację, z nieistniejącym katalogiem, bez `data/`, z pustymi
+  plikami map i z 16 mapami; `0` dla poprawnej syntetycznej instalacji przez `--game-dir` i
+  przez `GTA20_GAME_DIR`; `2` dla nieznanej opcji (także obok poprawnego `--game-dir`),
+  argumentu pozycyjnego, braku lub pustej wartości i powtórzonego `--game-dir`. Syntetyczną
+  instalację zapisuje pomocniczy program `gta20_write_synthetic_install`.
 
 ## Zrzuty renderu z oryginalnych danych (`gamedata.render.*`)
 

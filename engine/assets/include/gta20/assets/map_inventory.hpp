@@ -53,20 +53,33 @@ struct StyleInventoryEntry {
     std::size_t tiles = 0;
 };
 
+/// Output bounds: at most this many problems are kept (the rest are only counted), each problem
+/// is cut to kMaxProblemChars and the formatted report never exceeds kMaxInventoryReportBytes.
+inline constexpr std::size_t kMaxInventoryProblems = 40;
+inline constexpr std::size_t kMaxProblemChars = 240;
+inline constexpr std::size_t kMaxInventoryReportBytes = 32 * 1024;
+
 struct MapInventory {
     std::filesystem::path root;
     std::vector<StyleInventoryEntry> styles;
     std::vector<MapInventoryEntry> maps;
-    std::vector<std::string> problems; // empty = the installation passed every strict check
+    std::vector<std::string> problems; // first kMaxInventoryProblems problems, each bounded
+    std::size_t omitted_problems = 0;  // problems found but not kept
 
-    [[nodiscard]] bool passed() const { return problems.empty(); }
+    [[nodiscard]] bool passed() const { return problems.empty() && omitted_problems == 0; }
+    [[nodiscard]] std::size_t problem_count() const { return problems.size() + omitted_problems; }
 };
 
+/// Groups of names that differ only in letter case (each group sorted, groups sorted). GTA 2 file
+/// names are matched case-insensitively, so on a case-sensitive file system such names collide.
+[[nodiscard]] std::vector<std::vector<std::string>> case_only_duplicates(std::vector<std::string> names);
+
 /// Strict check of an original installation against `expected` (default: original_map_styles()).
-/// Fails (problems non-empty) when `root` is empty, is not a game directory, data/ does not hold
+/// Fails (passed() is false) when `root` is empty, is not a game directory, data/ does not hold
 /// exactly the expected maps, a map or style does not parse, a map has no blocks, an association
 /// is unresolved, or the game's own configuration files (test1.seq, *.mmp) do not declare the
-/// recorded map-to-style pairs.
+/// recorded map-to-style pairs, or two maps or two configuration files differ only in letter case.
+/// Problems are bounded (kMaxInventoryProblems, kMaxProblemChars); extra ones are only counted.
 [[nodiscard]] MapInventory take_map_inventory(const std::filesystem::path& root,
                                               std::span<const MapStyleAssociation> expected = original_map_styles());
 

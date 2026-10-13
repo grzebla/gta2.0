@@ -65,10 +65,54 @@ bool has_extension(const std::filesystem::path& p, std::string_view ext) {
     return lower(p.extension().string()) == ext;
 }
 
+/// Problem text safe to print: control characters replaced, cut to kMaxProblemChars without
+/// splitting a UTF-8 sequence.
+std::string bounded(std::string text) {
+    for (auto& c : text) {
+        const auto u = static_cast<unsigned char>(c);
+        c = (u < 0x20 || u == 0x7F) ? '?' : c;
+    }
+    if (text.size() <= kMaxProblemChars) {
+        return text;
+    }
+    constexpr std::string_view kCut = " [...]";
+    std::size_t keep = kMaxProblemChars - kCut.size();
+    while (keep > 0 && (static_cast<unsigned char>(text[keep]) & 0xC0) == 0x80) {
+        --keep;
+    }
+    text.resize(keep);
+    text += kCut;
+    return text;
+}
+
+/// Collects problems into an inventory: the first kMaxInventoryProblems are kept, the rest counted.
+class ProblemSink {
+public:
+    explicit ProblemSink(MapInventory& inventory) : inventory_(inventory) {}
+    void add(std::string text) {
+        if (inventory_.problems.size() < kMaxInventoryProblems) {
+            inventory_.problems.push_back(bounded(std::move(text)));
+        } else {
+            ++inventory_.omitted_problems;
+        }
+    }
+
+private:
+    MapInventory& inventory_;
+};
+
+std::string join(const std::vector<std::string>& names) {
+    std::string out;
+    for (const auto& n : names) {
+        out += (out.empty() ? "" : ", ") + n;
+    }
+    return out;
+}
+
 /// Map -> style pairs (lower-case file names) declared by one GTA 2 configuration file
 /// ("Key = Value" lines; a GMPFile line is paired with the next STYFile line).
 std::vector<std::pair<std::string, std::string>> declared_pairs(std::string_view text, const std::string& source,
-                                                                std::vector<std::string>& problems) {
+                                                                ProblemSink& problems) {
     std::vector<std::pair<std::string, std::string>> pairs;
     std::string pending_map;
     std::size_t start = 0;
@@ -84,12 +128,12 @@ std::vector<std::pair<std::string, std::string>> declared_pairs(std::string_view
         const auto value = lower(file_name(trim(line.substr(eq + 1))));
         if (key == "gmpfile") {
             if (!pending_map.empty()) {
-                problems.push_back(source + ": map " + pending_map + " has no STYFile");
+                problems.add(source + ": map " + pending_map + " has no STYFile");
             }
             pending_map = value;
         } else if (key == "styfile") {
             if (pending_map.empty()) {
-                problems.push_back(source + ": STYFile " + value + " without a preceding GMPFile");
+                problems.add(source + ": STYFile " + value + " without a preceding GMPFile");
             } else {
                 pairs.emplace_back(pending_map, value);
                 pending_map.clear();
@@ -97,7 +141,7 @@ std::vector<std::pair<std::string, std::string>> declared_pairs(std::string_view
         }
     }
     if (!pending_map.empty()) {
-        problems.push_back(source + ": map " + pending_map + " has no STYFile");
+        problems.add(source + ": map " + pending_map + " has no STYFile");
     }
     return pairs;
 }
@@ -142,6 +186,21 @@ std::span<const MapStyleAssociation> original_map_styles() {
     return kOriginalMapStyles;
 }
 
+std::vector<std::vector<std::string>> case_only_duplicates(std::vector<std::string> names) {
+    std::sort(names.begin(), names.end());
+    std::map<std::string, std::vector<std::string>> by_lower;
+    for (auto& n : names) {
+        by_lower[lower(n)].push_back(std::move(n));
+    }
+    std::vector<std::vector<std::string>> groups;
+    for (auto& [key, group] : by_lower) {
+        if (group.size() > 1) {
+            groups.push_back(std::move(group));
+        }
+    }
+    return groups;
+}
+
 const MapStyleAssociation* find_map_style(std::string_view map) {
     const auto name = lower(file_name(map));
     for (const auto& a : kOriginalMapStyles) {
@@ -155,52 +214,63 @@ const MapStyleAssociation* find_map_style(std::string_view map) {
 MapInventory take_map_inventory(const std::filesystem::path& root, std::span<const MapStyleAssociation> expected) {
     MapInventory inv;
     inv.root = root;
-    auto& problems = inv.problems;
+    ProblemSink problems(inv);
     if (root.empty()) {
-        problems.emplace_back("no game directory: set GTA20_GAME_DIR (or pass --game-dir) to an original GTA 2 "
-                              "installation");
+        problems.add("no game directory: set GTA20_GAME_DIR (or pass --game-dir) to an original GTA 2 installation");
         return inv;
     }
     std::error_code ec;
     if (!std::filesystem::is_directory(root, ec)) {
-        problems.push_back("game directory not found: " + root.string());
+        problems.add("game directory not found: " + root.string());
         return inv;
     }
     const auto data = resolve_game_path(root, "data");
     if (!data || !std::filesystem::is_directory(data.value(), ec)) {
-        problems.push_back("no data/ directory in " + root.string());
+        problems.add("no data/ directory in " + root.string());
         return inv;
     }
 
     // The set of maps must match exactly.
+    // Names are matched case-insensitively, so names differing only in case (possible on
+    // case-sensitive file systems) are ambiguous and rejected.
     std::map<std::string, std::filesystem::path> found; // lower-case "data/x.gmp" -> path
+    std::vector<std::string> map_files, config_files;
     std::vector<std::filesystem::path> configs;
     for (const auto& entry : std::filesystem::directory_iterator(data.value(), ec)) {
         if (!entry.is_regular_file(ec)) {
             continue;
         }
+        const auto name = "data/" + entry.path().filename().string();
         if (has_extension(entry.path(), ".gmp")) {
-            found.emplace("data/" + lower(entry.path().filename().string()), entry.path());
+            map_files.push_back(name);
+            found.emplace(lower(name), entry.path());
         } else if (has_extension(entry.path(), ".mmp") || has_extension(entry.path(), ".seq")) {
+            config_files.push_back(name);
             configs.push_back(entry.path());
         }
+    }
+    for (const auto& group : case_only_duplicates(map_files)) {
+        problems.add("map files differ only in letter case: " + join(group));
+    }
+    for (const auto& group : case_only_duplicates(config_files)) {
+        problems.add("configuration files differ only in letter case: " + join(group));
     }
     std::set<std::string> wanted;
     for (const auto& a : expected) {
         wanted.insert(lower(a.map));
     }
-    if (found.size() != expected.size()) {
-        problems.push_back("found " + std::to_string(found.size()) + " maps (.gmp) in data/, expected exactly " +
-                           std::to_string(expected.size()));
+    if (map_files.size() != expected.size()) {
+        problems.add("found " + std::to_string(map_files.size()) + " maps (.gmp) in data/, expected exactly " +
+                     std::to_string(expected.size()));
     }
     for (const auto& a : expected) {
         if (!found.contains(lower(a.map))) {
-            problems.push_back("missing map: " + std::string(a.map));
+            problems.add("missing map: " + std::string(a.map));
         }
     }
     for (const auto& [name, path] : found) {
         if (!wanted.contains(name)) {
-            problems.push_back("unexpected map: " + name);
+            problems.add("unexpected map: " + name);
         }
     }
 
@@ -210,23 +280,23 @@ MapInventory take_map_inventory(const std::filesystem::path& root, std::span<con
         if (a.resolved()) {
             style_names.insert(std::string(a.style));
         } else {
-            problems.push_back("unresolved style for " + std::string(a.map) + " (" + std::string(a.source) + ")");
+            problems.add("unresolved style for " + std::string(a.map) + " (" + std::string(a.source) + ")");
         }
     }
     for (const auto& name : style_names) {
         const auto path = resolve_game_path(root, name);
         if (!path) {
-            problems.push_back("missing style: " + name);
+            problems.add("missing style: " + name);
             continue;
         }
         const auto bytes = read_file(path.value());
         if (!bytes) {
-            problems.push_back(name + ": " + bytes.error().message);
+            problems.add(name + ": " + bytes.error().message);
             continue;
         }
         const auto style = parse_sty(bytes.value());
         if (!style) {
-            problems.push_back(name + ": " + style.error().message);
+            problems.add(name + ": " + style.error().message);
             continue;
         }
         inv.styles.push_back({name, style.value().version(), style.value().tile_count()});
@@ -238,15 +308,17 @@ MapInventory take_map_inventory(const std::filesystem::path& root, std::span<con
         const auto source = "data/" + path.filename().string();
         const auto bytes = read_file(path);
         if (!bytes) {
-            problems.push_back(source + ": " + bytes.error().message);
+            problems.add(source + ": " + bytes.error().message);
             continue;
         }
         if (bytes.value().size() > kMaxConfigBytes) {
-            problems.push_back(source + ": larger than " + std::to_string(kMaxConfigBytes) + " bytes");
+            problems.add(source + ": larger than " + std::to_string(kMaxConfigBytes) + " bytes");
             continue;
         }
         const std::string_view text(reinterpret_cast<const char*>(bytes.value().data()), bytes.value().size());
-        declared[lower(source)] = declared_pairs(text, source, problems);
+        if (!declared.contains(lower(source))) { // case-only duplicates are reported above
+            declared[lower(source)] = declared_pairs(text, source, problems);
+        }
     }
     std::map<std::string, std::string> recorded; // map file name -> style file name (lower case)
     for (const auto& a : expected) {
@@ -259,10 +331,10 @@ MapInventory take_map_inventory(const std::filesystem::path& root, std::span<con
             const auto it = recorded.find(map);
             if (it == recorded.end()) {
                 if (!wanted.contains("data/" + map)) {
-                    problems.push_back(source + " declares map " + map + ", which is not an expected map");
+                    problems.add(source + " declares map " + map + ", which is not an expected map");
                 }
             } else if (it->second != style) {
-                problems.push_back(source + " pairs " + map + " with " + style + ", recorded style is " + it->second);
+                problems.add(source + " pairs " + map + " with " + style + ", recorded style is " + it->second);
             }
         }
     }
@@ -272,13 +344,13 @@ MapInventory take_map_inventory(const std::filesystem::path& root, std::span<con
         }
         const auto it = declared.find(lower(a.source));
         if (it == declared.end()) {
-            problems.push_back("missing source " + std::string(a.source) + " for " + std::string(a.map));
+            problems.add("missing source " + std::string(a.source) + " for " + std::string(a.map));
             continue;
         }
         const std::pair<std::string, std::string> pair{lower(file_name(a.map)), lower(file_name(a.style))};
         if (std::find(it->second.begin(), it->second.end(), pair) == it->second.end()) {
-            problems.push_back(std::string(a.source) + " does not declare " + std::string(a.map) + " with " +
-                               std::string(a.style));
+            problems.add(std::string(a.source) + " does not declare " + std::string(a.map) + " with " +
+                         std::string(a.style));
         }
     }
 
@@ -294,19 +366,19 @@ MapInventory take_map_inventory(const std::filesystem::path& root, std::span<con
         e.source = std::string(a.source);
         const auto bytes = read_file(it->second);
         if (!bytes) {
-            problems.push_back(e.map + ": " + bytes.error().message);
+            problems.add(e.map + ": " + bytes.error().message);
             continue;
         }
         e.bytes = bytes.value().size();
         const auto map = parse_gmp(bytes.value());
         if (!map) {
-            problems.push_back(e.map + ": " + map.error().message);
+            problems.add(e.map + ": " + map.error().message);
             continue;
         }
         e.unique_blocks = map.value().unique_blocks().size();
         count_map(map.value(), e);
         if (e.occupied_cells == 0) {
-            problems.push_back(e.map + ": map holds no blocks");
+            problems.add(e.map + ": map holds no blocks");
         }
         inv.maps.push_back(std::move(e));
     }
@@ -315,15 +387,15 @@ MapInventory take_map_inventory(const std::filesystem::path& root, std::span<con
 
 std::string format_map_inventory(const MapInventory& inv) {
     std::ostringstream out;
-    out << "GTA 2 strict map inventory: " << (inv.root.empty() ? std::string("(no game directory)") : inv.root.string())
+    out << "GTA 2 strict map inventory: " << bounded(inv.root.empty() ? "(no game directory)" : inv.root.string())
         << "\n";
     for (const auto& s : inv.styles) {
-        out << "style " << s.style << ": GBST " << s.version << ", " << s.tiles << " tiles\n";
+        out << "style " << bounded(s.style) << ": GBST " << s.version << ", " << s.tiles << " tiles\n";
     }
     for (const auto& m : inv.maps) {
-        out << "map " << m.map << ": style " << (m.style.empty() ? std::string("UNRESOLVED") : m.style) << " (source "
-            << m.source << "), " << m.bytes << " bytes, " << m.unique_blocks << " unique blocks, " << m.occupied_cells
-            << " occupied cells, levels ";
+        out << "map " << bounded(m.map) << ": style " << (m.style.empty() ? "UNRESOLVED" : bounded(m.style))
+            << " (source " << bounded(m.source) << "), " << m.bytes << " bytes, " << m.unique_blocks
+            << " unique blocks, " << m.occupied_cells << " occupied cells, levels ";
         if (m.min_level < 0) {
             out << "none\n";
         } else {
@@ -340,16 +412,29 @@ std::string format_map_inventory(const MapInventory& inv) {
             << " lid 1023=" << m.marker_lids << "\n";
     }
     out << "maps: " << inv.maps.size() << " inventoried\n";
+    std::string tail;
     if (inv.passed()) {
-        out << "result: PASS\n";
+        tail = "result: PASS\n";
     } else {
-        out << "problems:\n";
+        out << "problems (" << inv.problems.size() << " of " << inv.problem_count() << " shown):\n";
         for (const auto& p : inv.problems) {
             out << "  - " << p << "\n";
         }
-        out << "result: FAIL (" << inv.problems.size() << " problems)\n";
+        if (inv.omitted_problems > 0) {
+            out << "  - ... " << inv.omitted_problems << " more problems not shown\n";
+        }
+        tail = "result: FAIL (" + std::to_string(inv.problem_count()) + " problems)\n";
     }
-    return out.str();
+    // Keep the verdict even if the body has to be cut (only possible with very large tables).
+    std::string body = out.str();
+    constexpr std::string_view kTruncated = "... report truncated\n";
+    if (body.size() + tail.size() > kMaxInventoryReportBytes) {
+        const auto limit = kMaxInventoryReportBytes - tail.size() - kTruncated.size();
+        const auto line_end = body.rfind('\n', limit - 1);
+        body.resize(line_end == std::string::npos ? 0 : line_end + 1);
+        body += kTruncated;
+    }
+    return body + tail;
 }
 
 } // namespace gta20::assets

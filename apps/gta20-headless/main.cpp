@@ -8,8 +8,9 @@
 //
 // Exit codes: 0 ok / traces match, 1 traces diverge, 2 usage or input error.
 // `inventory` is the strict original-data gate (docs/testing.md): 0 when the game directory
-// (--game-dir, else GTA20_GAME_DIR) holds exactly the 17 original maps with their styles, 1 when
-// it is missing, invalid or incomplete. It prints aggregate counts only.
+// (--game-dir, else GTA20_GAME_DIR; never G2N_GAME_DIR) holds exactly the 17 original maps with
+// their styles, 1 when it is missing, invalid or incomplete, 2 for any other argument, a repeated
+// or empty --game-dir. It prints bounded aggregate counts only.
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -19,6 +20,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -87,12 +89,44 @@ std::string game_dir(const Args& a) {
     return env != nullptr ? env : "";
 }
 
+/// Strict original-data gate. The only option is one `--game-dir <non-empty dir>`; without it the
+/// directory comes from GTA20_GAME_DIR alone (never the legacy G2N_GAME_DIR fallback).
+int inventory(int argc, char** argv) {
+    std::optional<std::filesystem::path> named_dir;
+    for (int i = 2; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a != "--game-dir") {
+            std::cerr << "error: inventory: unknown argument '" << a.substr(0, 64) << "'\n";
+            return usage();
+        }
+        if (named_dir) {
+            std::cerr << "error: inventory: --game-dir given more than once\n";
+            return usage();
+        }
+        if (i + 1 >= argc) {
+            std::cerr << "error: inventory: --game-dir needs a directory\n";
+            return usage();
+        }
+        if (*argv[i + 1] == '\0') {
+            std::cerr << "error: inventory: --game-dir must not be empty\n";
+            return usage();
+        }
+        named_dir = argv[++i];
+    }
+    const auto dir = named_dir ? *named_dir : gta20::assets::strict_game_dir_from_environment();
+    const auto result = gta20::assets::take_map_inventory(dir);
+    std::cout << gta20::assets::format_map_inventory(result);
+    return result.passed() ? kOk : kDiverged;
+}
+
 } // namespace
 
 int main(int argc, char** argv) try {
     if (argc < 2)
         return usage();
     const std::string command = argv[1];
+    if (command == "inventory")
+        return inventory(argc, argv);
     const Args args = Args::parse(argc, argv, 2);
 
     if (command == "validate" && args.positional.size() == 1) {
@@ -184,14 +218,6 @@ int main(int argc, char** argv) try {
         return kOk;
     }
 
-    if (command == "inventory" && args.positional.empty()) {
-        const auto named_dir = args.get("--game-dir");
-        const std::filesystem::path dir =
-            named_dir.empty() ? gta20::assets::game_dir_from_environment() : std::filesystem::path(named_dir);
-        const auto inventory = gta20::assets::take_map_inventory(dir);
-        std::cout << gta20::assets::format_map_inventory(inventory);
-        return inventory.passed() ? kOk : kDiverged;
-    }
     return usage();
 } catch (const std::exception& e) {
     std::cerr << "fatal: " << e.what() << "\n";

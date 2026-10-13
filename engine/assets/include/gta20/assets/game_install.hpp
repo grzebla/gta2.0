@@ -24,7 +24,12 @@ struct GameInstall {
 /// Inspects a directory that should contain an original GTA 2 installation (gta2.exe + data/).
 [[nodiscard]] Result<GameInstall> inspect_game_dir(const std::filesystem::path& root);
 
-/// Game directory from GTA20_GAME_DIR (empty if unset). "~/" is expanded with HOME/USERPROFILE.
+/// Game directory from GTA20_GAME_DIR, else the pre-rename G2N_GAME_DIR (empty if neither is set).
+/// "~/" is expanded with HOME/USERPROFILE.
 [[nodiscard]] std::filesystem::path game_dir_from_environment();
+
+/// Like game_dir_from_environment() but reads only GTA20_GAME_DIR (no legacy fallback). Used by the
+/// strict data gate, which must fail when GTA20_GAME_DIR itself is unset or empty.
+[[nodiscard]] std::filesystem::path strict_game_dir_from_environment();
 
 } // namespace gta20::assets

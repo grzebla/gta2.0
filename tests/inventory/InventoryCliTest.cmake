@@ -1,7 +1,8 @@
-# Asset-free checks of the strict gate `gta20-headless inventory`: every case must exit with 1
-# and name the problem. Installations are SYNTHETIC directories under WORK (no original data).
-#   cmake -DHEADLESS=<gta20-headless> -DCASE=<case> -DWORK=<dir> -P InventoryCliTest.cmake
-foreach(var HEADLESS CASE WORK)
+# Asset-free checks of the strict gate `gta20-headless inventory`: exit code and message per case.
+# Installations are SYNTHETIC directories under WORK (no original data); FIXTURE_TOOL writes a
+# valid 17-map one.
+#   cmake -DHEADLESS=<gta20-headless> -DFIXTURE_TOOL=<tool> -DCASE=<case> -DWORK=<dir> -P InventoryCliTest.cmake
+foreach(var HEADLESS FIXTURE_TOOL CASE WORK)
     if(NOT DEFINED ${var})
         message(FATAL_ERROR "${var} is required")
     endif()
@@ -13,11 +14,26 @@ set(maps wil lorne2e lorne2m lorne2h ste mike1e mike1m mike1h bil mike2e mike2m 
 file(REMOVE_RECURSE "${WORK}")
 file(MAKE_DIRECTORY "${WORK}")
 set(game_dir "${WORK}/game")
+set(fixture "${WORK}/fixture")
+execute_process(COMMAND "${FIXTURE_TOOL}" "${fixture}" RESULT_VARIABLE fixture_code)
+if(NOT fixture_code STREQUAL "0")
+    message(FATAL_ERROR "cannot write the SYNTHETIC fixture (${fixture_code})")
+endif()
+
+# Default: no game directory from the environment at all. Exit 1 = data gate failed.
 set(env_args --unset=GTA20_GAME_DIR --unset=G2N_GAME_DIR)
 set(cli_args)
+set(expected_code 1)
+set(stream out)
 
 if(CASE STREQUAL "missing-env")
     set(expected "GTA20_GAME_DIR")
+elseif(CASE STREQUAL "legacy-env-ignored")
+    set(env_args --unset=GTA20_GAME_DIR "G2N_GAME_DIR=${fixture}")
+    set(expected "no game directory: set GTA20_GAME_DIR")
+elseif(CASE STREQUAL "empty-env")
+    set(env_args "GTA20_GAME_DIR=" "G2N_GAME_DIR=${fixture}")
+    set(expected "no game directory: set GTA20_GAME_DIR")
 elseif(CASE STREQUAL "env-not-a-directory")
     set(env_args --unset=G2N_GAME_DIR "GTA20_GAME_DIR=${WORK}/does-not-exist")
     set(expected "game directory not found")
@@ -42,26 +58,89 @@ elseif(CASE STREQUAL "wrong-count")
     endforeach()
     set(cli_args --game-dir "${game_dir}")
     set(expected "found 16 maps")
+# Passing runs on the valid SYNTHETIC fixture (exit 0).
+elseif(CASE STREQUAL "fixture-option")
+    set(env_args --unset=GTA20_GAME_DIR "G2N_GAME_DIR=${WORK}/does-not-exist")
+    set(cli_args --game-dir "${fixture}")
+    set(expected_code 0)
+    set(expected "maps: 17 inventoried")
+elseif(CASE STREQUAL "fixture-env")
+    set(env_args "GTA20_GAME_DIR=${fixture}" --unset=G2N_GAME_DIR)
+    set(expected_code 0)
+    set(expected "maps: 17 inventoried")
+# Invalid arguments are usage errors (exit 2) even next to a valid --game-dir.
+elseif(CASE STREQUAL "unknown-option")
+    set(cli_args --game-dir "${fixture}" --typo)
+    set(expected_code 2)
+    set(stream err)
+    set(expected "unknown argument '--typo'")
+elseif(CASE STREQUAL "unknown-option-with-value")
+    set(cli_args --typo value --game-dir "${fixture}")
+    set(expected_code 2)
+    set(stream err)
+    set(expected "unknown argument '--typo'")
+elseif(CASE STREQUAL "positional-argument")
+    set(cli_args "${fixture}")
+    set(expected_code 2)
+    set(stream err)
+    set(expected "unknown argument")
+elseif(CASE STREQUAL "missing-value")
+    set(env_args "GTA20_GAME_DIR=${fixture}")
+    set(cli_args --game-dir)
+    set(expected_code 2)
+    set(stream err)
+    set(expected "--game-dir needs a directory")
+elseif(CASE STREQUAL "empty-value")
+    set(env_args "GTA20_GAME_DIR=${fixture}")
+    set(expected_code 2)
+    set(stream err)
+    set(expected "--game-dir must not be empty")
+elseif(CASE STREQUAL "duplicate-option")
+    set(cli_args --game-dir "${fixture}" --game-dir "${fixture}")
+    set(expected_code 2)
+    set(stream err)
+    set(expected "--game-dir given more than once")
 else()
     message(FATAL_ERROR "unknown CASE ${CASE}")
 endif()
 
-execute_process(
-    COMMAND ${CMAKE_COMMAND} -E env ${env_args} "${HEADLESS}" inventory ${cli_args}
-    RESULT_VARIABLE code
-    OUTPUT_VARIABLE out
-    ERROR_VARIABLE err)
+if(CASE STREQUAL "empty-value")
+    # An unquoted list expansion drops empty elements, so the empty value is passed explicitly.
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E env ${env_args} "${HEADLESS}" inventory --game-dir ""
+        RESULT_VARIABLE code
+        OUTPUT_VARIABLE out
+        ERROR_VARIABLE err)
+else()
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E env ${env_args} "${HEADLESS}" inventory ${cli_args}
+        RESULT_VARIABLE code
+        OUTPUT_VARIABLE out
+        ERROR_VARIABLE err)
+endif()
 file(REMOVE_RECURSE "${WORK}")
 
-if(NOT code STREQUAL "1")
-    message(FATAL_ERROR "expected exit code 1, got '${code}'\nstdout:\n${out}\nstderr:\n${err}")
+if(NOT code STREQUAL "${expected_code}")
+    message(FATAL_ERROR "expected exit code ${expected_code}, got '${code}'\nstdout:\n${out}\nstderr:\n${err}")
 endif()
-string(FIND "${out}" "${expected}" at)
+string(FIND "${${stream}}" "${expected}" at)
 if(at EQUAL -1)
-    message(FATAL_ERROR "output does not mention '${expected}':\n${out}")
+    message(FATAL_ERROR "std${stream} does not mention '${expected}':\nstdout:\n${out}\nstderr:\n${err}")
 endif()
-string(FIND "${out}" "result: FAIL" at)
-if(at EQUAL -1)
-    message(FATAL_ERROR "output lacks 'result: FAIL':\n${out}")
+if(expected_code EQUAL 0)
+    set(verdict "result: PASS")
+elseif(expected_code EQUAL 1)
+    set(verdict "result: FAIL")
+else()
+    set(verdict "")
+    if(NOT out STREQUAL "")
+        message(FATAL_ERROR "a usage error must not run the inventory:\n${out}")
+    endif()
 endif()
-message(STATUS "${CASE}: exit 1 as expected")
+if(NOT verdict STREQUAL "")
+    string(FIND "${out}" "${verdict}" at)
+    if(at EQUAL -1)
+        message(FATAL_ERROR "output lacks '${verdict}':\n${out}")
+    endif()
+endif()
+message(STATUS "${CASE}: exit ${code} as expected")

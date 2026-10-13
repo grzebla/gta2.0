@@ -1,6 +1,5 @@
 // Strict map inventory (gta20-headless inventory) against SYNTHETIC installations built in a
-// temporary directory. No original GTA 2 data is used: maps come from GmpWriter, styles are
-// minimal GBST containers and test1.seq / *.mmp are generated from the recorded associations.
+// temporary directory (tests/inventory/synthetic_install.*). No original GTA 2 data is used.
 #include <doctest/doctest.h>
 
 #include <algorithm>
@@ -14,56 +13,15 @@
 #include "gta20/assets/file_io.hpp"
 #include "gta20/assets/gmp_writer.hpp"
 #include "gta20/assets/map_inventory.hpp"
+#include "synthetic_install.hpp"
 
 using namespace gta20;
 using namespace gta20::assets;
+using testsupport::synthetic_map;
+using testsupport::synthetic_style;
+using testsupport::text_bytes;
 
 namespace {
-
-std::vector<std::byte> text_bytes(std::string_view s) {
-    std::vector<std::byte> out(s.size());
-    std::transform(s.begin(), s.end(), out.begin(), [](char c) { return static_cast<std::byte>(c); });
-    return out;
-}
-
-void append_u16(std::vector<std::byte>& out, u16 v) {
-    out.push_back(static_cast<std::byte>(v & 0xFF));
-    out.push_back(static_cast<std::byte>(v >> 8));
-}
-
-void append_chunk(std::vector<std::byte>& out, std::string_view type, std::size_t size) {
-    for (const char c : type)
-        out.push_back(static_cast<std::byte>(c));
-    for (int i = 0; i < 4; ++i)
-        out.push_back(static_cast<std::byte>((size >> (8 * i)) & 0xFF));
-    out.insert(out.end(), size, std::byte{0});
-}
-
-/// SYNTHETIC style: the smallest GBST container parse_sty accepts (palettes only, no tiles).
-std::vector<std::byte> synthetic_style() {
-    auto out = text_bytes("GBST");
-    append_u16(out, 700);
-    append_chunk(out, "PALX", 16384 * 2);
-    append_chunk(out, "PPAL", 64 * 1024);
-    append_chunk(out, "PALB", 16);
-    return out;
-}
-
-/// SYNTHETIC map with known aggregate counts (see the passing-fixture test).
-const std::vector<std::byte>& synthetic_map() {
-    static const std::vector<std::byte> bytes = [] {
-        GmpWriter w;
-        const BlockInfo road{0, 0, 0, 0, 7, 0, static_cast<u8>(GroundType::Road)};
-        const BlockInfo diagonal{0, 0, 0, 0, 1023, 0, static_cast<u8>((49 << 2) | 1)};
-        const BlockInfo reserved{0x400 | 995, 0, 0, 0, 996, 0, static_cast<u8>(GroundType::Pavement)};
-        w.set_block(1, 1, 0, road);
-        w.set_block(2, 1, 0, road);
-        w.set_block(3, 3, 2, diagonal);
-        w.set_block(4, 4, 5, reserved);
-        return w.build_dmap();
-    }();
-    return bytes;
-}
 
 /// A temporary SYNTHETIC installation with all 17 maps, their styles and configuration files.
 class Fixture {
@@ -72,24 +30,8 @@ public:
         std::random_device rd;
         root_ = std::filesystem::temp_directory_path() /
                 ("gta20-inventory-" + std::to_string(rd()) + "-" + std::to_string(rd()));
-        std::filesystem::create_directories(root_ / "data");
-        std::string seq;
-        std::set<std::string_view> styles;
-        for (const auto& a : original_map_styles()) {
-            write(a.map, synthetic_map());
-            styles.insert(a.style);
-            const auto map = std::filesystem::path(a.map).filename().string();
-            const auto style = std::filesystem::path(a.style).filename().string();
-            if (a.source == "data/test1.seq") {
-                seq += "MainOrBonus = MAIN\r\nGMPFile = " + map + "\r\nSTYFile = " + style + "\r\n\r\n";
-            } else {
-                write(a.source, text_bytes("[MapFiles]\r\nGMPFile = " + map + "\r\nSTYFile = " + style +
-                                           "\r\nPlayerCount = 2\r\n"));
-            }
-        }
-        write("data/test1.seq", text_bytes(seq));
-        for (const auto style : styles)
-            write(style, synthetic_style());
+        const auto written = testsupport::write_synthetic_install(root_);
+        REQUIRE_MESSAGE(written, (written ? "" : written.error().message));
     }
     ~Fixture() {
         std::error_code ec;
@@ -335,4 +277,95 @@ TEST_CASE("Strict map inventory: an unresolved association fails") {
     CHECK_FALSE(inv.passed());
     CHECK(mentions(inv, "unresolved style for data/wil.gmp (SYNTHETIC: unknown)"));
     CHECK(format_map_inventory(inv).find("style UNRESOLVED") != std::string::npos);
+}
+
+TEST_CASE("Map styles: names that differ only in letter case are grouped") {
+    const auto groups = case_only_duplicates({"data/wil.gmp", "data/ste.gmp", "data/WIL.GMP", "data/Wil.gmp"});
+    REQUIRE(groups.size() == 1);
+    CHECK(groups[0] == std::vector<std::string>{"data/WIL.GMP", "data/Wil.gmp", "data/wil.gmp"});
+    CHECK(case_only_duplicates({"data/wil.gmp", "data/ste.gmp"}).empty());
+    CHECK(case_only_duplicates({}).empty());
+}
+
+TEST_CASE("Strict map inventory: case-only duplicate files fail (case-sensitive file system)") {
+    Fixture f;
+    // Detect whether this file system keeps names that differ only in case apart.
+    f.write("data/probe.txt", text_bytes("a"));
+    f.write("data/PROBE.TXT", text_bytes("b"));
+    std::vector<std::filesystem::path> probes;
+    for (const auto& e : std::filesystem::directory_iterator(f.root() / "data")) {
+        if (e.path().extension() == ".txt" || e.path().extension() == ".TXT")
+            probes.push_back(e.path());
+    }
+    for (const auto& p : probes)
+        std::filesystem::remove(p);
+    if (probes.size() != 2) {
+        MESSAGE("case-insensitive file system - case-only duplicates cannot exist here, skipping");
+        return;
+    }
+    SUBCASE("maps") {
+        f.write("data/WIL.GMP", text_bytes("not a map"));
+        const auto inv = take_map_inventory(f.root());
+        CHECK_FALSE(inv.passed());
+        CHECK(mentions(inv, "map files differ only in letter case: data/WIL.GMP, data/wil.gmp"));
+        CHECK(mentions(inv, "found 18 maps"));
+    }
+    SUBCASE("configuration files") {
+        f.write("data/TEST1.SEQ", text_bytes("GMPFile = wil.gmp\nSTYFile = bil.sty\n"));
+        const auto inv = take_map_inventory(f.root());
+        CHECK_FALSE(inv.passed());
+        CHECK(mentions(inv, "configuration files differ only in letter case: data/TEST1.SEQ, data/test1.seq"));
+    }
+}
+
+TEST_CASE("Strict map inventory: failure reports are bounded") {
+    Fixture f;
+    const std::string long_name(230, 'u');
+    for (int i = 0; i < 150; ++i)
+        f.write("data/" + long_name + std::to_string(i) + ".gmp", {});
+    const std::string long_value(5000, 'n');
+    const std::string control = "evil" + std::string(1, '\x1b') + "[31m.gmp";
+    for (int i = 0; i < 60; ++i) {
+        f.write("data/res-" + std::to_string(i) + ".mmp",
+                text_bytes("GMPFile = " + long_value + ".gmp\nSTYFile = ste.sty\nGMPFile = " + control + "\n"));
+    }
+    const auto inv = take_map_inventory(f.root());
+    CHECK_FALSE(inv.passed());
+    CHECK(inv.problems.size() == kMaxInventoryProblems);
+    CHECK(inv.omitted_problems > 200);
+    CHECK(inv.problem_count() == inv.problems.size() + inv.omitted_problems);
+    bool cut = false;
+    for (const auto& p : inv.problems) {
+        CAPTURE(p);
+        CHECK(p.size() <= kMaxProblemChars);
+        CHECK(std::none_of(p.begin(), p.end(), [](unsigned char c) { return c < 0x20 || c == 0x7F; }));
+        cut = cut || p.ends_with(" [...]");
+    }
+    CHECK(cut);
+
+    const auto report = format_map_inventory(inv);
+    CHECK(report.size() <= kMaxInventoryReportBytes);
+    CHECK(report.find("problems (40 of " + std::to_string(inv.problem_count()) + " shown):") != std::string::npos);
+    CHECK(report.find("more problems not shown") != std::string::npos);
+    CHECK(report.ends_with("result: FAIL (" + std::to_string(inv.problem_count()) + " problems)\n"));
+}
+
+TEST_CASE("Strict map inventory: a huge report is cut but keeps its verdict") {
+    MapInventory inv;
+    inv.root = std::string(10000, 'r');
+    inv.maps.resize(200);
+    for (auto& m : inv.maps) {
+        m.map = std::string(1000, 'm');
+        m.slope_cells.fill(123456);
+    }
+    const auto passing = format_map_inventory(inv);
+    CHECK(passing.size() <= kMaxInventoryReportBytes);
+    CHECK(passing.find("... report truncated\n") != std::string::npos);
+    CHECK(passing.ends_with("result: PASS\n"));
+
+    inv.problems.assign(kMaxInventoryProblems, std::string(kMaxProblemChars, 'p'));
+    inv.omitted_problems = 7;
+    const auto failing = format_map_inventory(inv);
+    CHECK(failing.size() <= kMaxInventoryReportBytes);
+    CHECK(failing.ends_with("result: FAIL (47 problems)\n"));
 }
