@@ -692,6 +692,15 @@ class GfxTests(SimCase):
         plans = sorted(self.env.cfg.state_dir.glob("runs/*plan*/prompt.md"))
         self.assertIn("job 1 [done] probe all by astra: PASS", plans[-1].read_text())
 
+    def test_agent_run_cap_does_not_hold_back_ec2_runs(self) -> None:
+        self.env.cfg.data["limits"]["max_runs_per_day"] = 0
+        runner = FakeGfxRunner()
+        orch = self._orch(runner)
+        orch.gfx.enqueue([{"mode": "probe", "target": "all", "reason": "a"}], None, "owner", self.env.repo)
+        self.assertIn("gfx job 1", orch.step())
+        with self.assertRaises(Wait):
+            orch.step()  # then the agent cap applies as before
+
     def test_interrupted_run_is_charged_and_failed(self) -> None:
         orch = self._orch(FakeGfxRunner())
         orch.gfx.enqueue([{"mode": "probe", "target": "all", "reason": "a"}], None, "astra", self.env.repo)
