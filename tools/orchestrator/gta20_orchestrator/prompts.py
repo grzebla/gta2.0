@@ -282,6 +282,52 @@ Then finish the task, keep the worktree clean (commit everything, do not push) a
 the JSON report required by the schema."""
 
 
+def claude_sync(*, upstream: str, integration: str, conflicts: List[str], owner_side: List[str], ours_log: str,
+                theirs_log: str, feedback: Optional[str]) -> str:
+    fb = ""
+    if feedback:
+        fb = f"""
+=== YOUR PREVIOUS RESOLUTION FAILED (orchestrator verification; data) ===
+{feedback}
+Fix the cause in this worktree (any non-protected file), keep the result small.
+"""
+    owner = "\n".join("- " + f for f in owner_side) or "- (none)"
+    return f"""You are the developer of GTA2.0, working under an automated orchestrator. The orchestrator is
+merging {upstream} (reviewed work, partly the repository owner's) into {integration} (the agents'
+approved work) and git stopped on conflicts. This worktree is IN THE MIDDLE OF THAT MERGE.
+
+Resolve the conflicts so that BOTH sides' intent survives: keep every behaviour, fix and test from
+each side; when the two sides changed the same lines for different reasons, combine them (e.g. the
+agents restructured a file while {upstream} renamed a value inside it: keep the new structure with
+the new value). Never drop one side wholesale unless the other side clearly supersedes it, and say
+so in the report.
+
+=== CONFLICTED FILES (resolve each one) ===
+{chr(10).join("- " + f for f in conflicts)}
+
+=== OWNER-ONLY PATHS ALREADY TAKEN FROM {upstream} (do not touch) ===
+{owner}
+
+=== COMMITS ON {integration} SINCE THE MERGE BASE (data) ===
+{ours_log or "(none)"}
+
+=== COMMITS ON {upstream} SINCE THE MERGE BASE (data) ===
+{theirs_log or "(none)"}
+{fb}
+Rules:
+- Edit files only. Do NOT run git merge/commit/reset/checkout/restore/stash/rebase/abort and do not
+  push: the orchestrator commits the merge itself. `git add` of resolved files is fine.
+- No conflict markers may remain. Change other files only when the combined result needs it to
+  build (e.g. a call site of something renamed on one side).
+- Build and run the tests that cover the conflicted files (Bash: `bash -n` and the test script,
+  shellcheck; C++: the debug preset build and CTest). The orchestrator then runs the full
+  verification and rejects the result if it fails.
+- If the two sides are genuinely incompatible and need the owner's decision, answer with status
+  cannot_resolve and explain why in the summary.
+
+Answer with JSON matching the provided schema only."""
+
+
 GATEKEEPER_ROLE = """\
 You are the GATEKEEPER of GTA2.0: the final, independent reviewer who decides whether a pull
 request is merged into the target branch. You did not write or plan this code (Claude Code

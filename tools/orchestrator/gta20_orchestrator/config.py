@@ -68,6 +68,8 @@ DEFAULTS: Dict[str, Any] = {
         "target_branch": "main",
         "merge_method": "merge",          # merge commit: history is never rewritten
         "every_s": 3 * 3600,              # how often the loop looks at open PRs
+        "sync_every_s": 1800,             # how often the target branch is merged into the integration branch
+        "sync_resolve_attempts": 2,       # developer-agent attempts at a conflicted sync before the owner is asked
         "max_merges_per_day": 6,
         "min_checks": 3,
         "eligible": "owner_and_integration",  # or "integration_only"

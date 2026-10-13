@@ -314,6 +314,12 @@ class Orchestrator:
                 return "gfx: " + msg
         self.daily_cap()
         task = self.db.active_task()
+        if task is None and self.gatekeeper is not None and self.gatekeeper.sync_due():
+            # Keep the agents' branch close to main between Gatekeeper checks: small, frequent
+            # merges conflict less often, and a conflict is resolved by the developer agent.
+            state, msg = self.gatekeeper.sync_integration()
+            if state == "merged":
+                return "sync: " + msg
         if task is None and self.release_due():
             called, msg = self.gatekeeper.step()
             if msg:

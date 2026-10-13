@@ -15,20 +15,30 @@ gets a new review.
 from __future__ import annotations
 
 import datetime as _dt
+import os
 import re
 import subprocess
+import time
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import db as D
 from . import gitops, memory, prompts, schemas
 from .adapters.base import AgentFailed, AgentTimeout, ModelMismatch
+from .adapters.claude import build_settings
 from .util import dumps, find_secrets, iso, loads, now, truncate
-from .verify import protected_hits
+from .verify import command_env, protected_hits, run_commands
 
 TASK_SUBJECT = re.compile(r"^\[(T\d{4})\] ")
 MERGE_SUBJECT = re.compile(r"^Merge (T\d{4}): ")
 MEMORY_SUBJECT = re.compile(r"^agent-memory: ")
 SYNC_SUBJECT = "Sync %s into %s (orchestrator)"
+CONFLICT_MARKER = re.compile(r"^(<<<<<<< |>>>>>>> |=======$)", re.M)
+
+
+def unmerged(wt: Any) -> List[str]:
+    out = gitops.git(wt, "diff", "--name-only", "--diff-filter=U", check=False)
+    return sorted(set(f for f in out.splitlines() if f))
 
 
 class Gatekeeper:
@@ -214,14 +224,22 @@ class Gatekeeper:
         return sorted(sides[0] & sides[1])
 
     # ------------------------------------------------------------------ keeping the agents' branch current
+    def sync_due(self) -> bool:
+        last = float(self.db.get_meta("integration_sync_check", "0") or 0)
+        return now() - last >= float(self.rel.get("sync_every_s", 1800))
+
     def sync_integration(self) -> Tuple[str, str]:
         """Merge the target branch into the integration branch so the agents' PR stays mergeable.
 
         Returns (state, message): state is "current", "merged" (new head pushed, wait for CI) or
-        "conflict" (the owner must merge by hand; agents are never asked to - they cannot merge)."""
+        "conflict". A conflicted merge is resolved by the developer agent in its own worktree
+        (owner-only paths take the target branch's version) and kept only when the full
+        verification passes; the owner is asked only when that fails."""
         remote = self.cfg["remote"]
         wt = self.o.wt_int
         upstream = "%s/%s" % (remote, self.target)
+        with self.db.tx():
+            self.db.set_meta("integration_sync_check", str(now()))
         gitops.git(wt, "fetch", "--quiet", remote, self.target)
         if subprocess.run(["git", "merge-base", "--is-ancestor", upstream, "HEAD"], cwd=str(wt),
                           capture_output=True).returncode == 0:
@@ -229,28 +247,130 @@ class Gatekeeper:
         if not gitops.is_clean(wt):
             return "conflict", "integration worktree is not clean; not syncing %s" % upstream
         upstream_sha = gitops.rev(wt, upstream)
-        res = subprocess.run(["git", "merge", "--no-ff", "--no-edit", "-m", SYNC_SUBJECT % (upstream, self.integ),
-                              upstream], cwd=str(wt), capture_output=True, text=True)
+        if self.db.get_meta("integration_sync_conflict") == upstream_sha:
+            return "conflict", "waiting for the owner to merge %s (%s) by hand" % (upstream, upstream_sha[:9])
+        message = SYNC_SUBJECT % (upstream, self.integ)
+        res = subprocess.run(["git", "merge", "--no-ff", "--no-edit", "-m", message, upstream], cwd=str(wt),
+                             capture_output=True, text=True)
+        resolved_by = None
         if res.returncode != 0:
-            conflicts = [f for f in gitops.git(wt, "diff", "--name-only", "--diff-filter=U", check=False).splitlines() if f]
+            conflicts = unmerged(wt)
             gitops.git(wt, "merge", "--abort", check=False)
-            msg = ("%s conflicts with %s in: %s. Merge it by hand: pause, `git merge %s` in the integration "
-                   "worktree (%s), resolve, commit, push, resume." % (
-                       self.integ, upstream, ", ".join(conflicts) or "(unknown)", upstream, wt))
-            with self.db.tx():
-                if self.db.get_meta("integration_sync_conflict") != upstream_sha:
+            head, why = self.resolve_sync(upstream, upstream_sha, message, conflicts)
+            if head is None:
+                msg = ("%s conflicts with %s in: %s. The developer agent could not resolve it (%s). Merge it by "
+                       "hand: pause, `git merge %s` in the integration worktree (%s), resolve, commit, push, "
+                       "resume." % (self.integ, upstream, ", ".join(conflicts) or "(unknown)", why, upstream, wt))
+                with self.db.tx():
                     self.db.set_meta("integration_sync_conflict", upstream_sha)
                     self.db.set_meta("human_question", msg)
                     self.db.event("integration_sync_conflict", agent="orchestrator", outcome="conflict",
-                                  commits=[upstream_sha], detail={"files": conflicts})
-            return "conflict", msg
+                                  commits=[upstream_sha], detail={"files": conflicts, "why": why})
+                return "conflict", msg
+            gitops.git(wt, "merge", "--ff-only", "--quiet", head)
+            resolved_by = {"files": conflicts, "by": "claude"}
         head = gitops.rev(wt)
         with self.db.tx():
-            self.db.set_meta("integration_sync_conflict", "")
+            if self.db.get_meta("integration_sync_conflict"):
+                self.db.set_meta("integration_sync_conflict", "")
             self.db.event("integration_synced", agent="orchestrator", commits=[head, upstream_sha], outcome="merged",
-                          detail={"from": upstream})
+                          detail={"from": upstream, "conflicts": resolved_by})
         self.o.maybe_push(force_now=True)
-        return "merged", "synced %s into %s (%s); CI runs on the new head" % (upstream, self.integ, head[:9])
+        return "merged", "synced %s into %s (%s%s); CI runs on the new head" % (
+            upstream, self.integ, head[:9], ", conflicts resolved by the developer agent" if resolved_by else "")
+
+    def resolve_sync(self, upstream: str, upstream_sha: str, message: str,
+                     conflicts: List[str]) -> Tuple[Optional[str], str]:
+        """Redo the conflicted merge in the `sync` worktree and let the developer agent resolve it.
+
+        Returns (merge commit, "") when the result passes every check, else (None, reason)."""
+        wt = self.cfg.worktree("sync")
+        base = gitops.rev(self.o.wt_int)
+        gitops.ensure_worktree(self.o.repo, wt, detach=base)
+        gitops.git(wt, "merge", "--abort", check=False)
+        gitops.git(wt, "reset", "--quiet", "--hard")
+        gitops.git(wt, "clean", "-fdq")
+        gitops.checkout_detached(wt, base)
+        subprocess.run(["git", "merge", "--no-ff", "--no-commit", upstream_sha], cwd=str(wt), capture_output=True)
+        conflicts = unmerged(wt)
+        if not conflicts:
+            return None, "the merge did not reproduce in the sync worktree"
+        # The owner's files (protected paths) are never rewritten by an agent: main's version wins.
+        owner_side = protected_hits(conflicts, self.cfg["protected_paths"])
+        for f in owner_side:
+            if subprocess.run(["git", "cat-file", "-e", "%s:%s" % (upstream_sha, f)], cwd=str(wt)).returncode == 0:
+                gitops.git(wt, "checkout", upstream_sha, "--", f)
+            else:
+                gitops.git(wt, "rm", "--quiet", "--", f)
+        rest = [f for f in conflicts if f not in owner_side]
+        mb = gitops.git(wt, "merge-base", base, upstream_sha)
+        session = str(uuid.uuid4())
+        attempts = max(1, int(self.rel.get("sync_resolve_attempts", 2)))
+        feedback: Optional[str] = None
+        why = ""
+        for attempt in range(attempts):
+            if rest or feedback:
+                prompt = prompts.claude_sync(
+                    upstream=upstream, integration=self.integ, conflicts=rest, owner_side=owner_side,
+                    ours_log=gitops.log_oneline(wt, mb, base), theirs_log=gitops.log_oneline(wt, mb, upstream_sha),
+                    feedback=feedback)
+                settings = build_settings(
+                    worktree=wt, protected=self.cfg["protected_paths"],
+                    extra_write_dirs=[os.path.expanduser("~/.cache/uv"), os.path.expanduser("~/.cache/clang")],
+                    sandbox=bool(self.cfg["claude"].get("sandbox", True)),
+                    domains=self.cfg["claude"]["sandbox_domains"],
+                    allow_web=bool(self.cfg["claude"].get("allow_web", False)))
+                try:
+                    res = self.o.call(self.o.claude, kind="sync", task_id=None, prompt=prompt, cwd=wt,
+                                      schema=schemas.SYNC_REPORT, session_id=session, resume=attempt > 0,
+                                      extra={"settings": settings, "add_dirs": [], "env_extra": self.o.claude_env()})
+                except (AgentFailed, AgentTimeout, ModelMismatch) as exc:
+                    return None, "developer agent failed: %s" % truncate(str(exc), 300)
+                out = res.output or {}
+                if out.get("status") != "resolved":
+                    return None, "developer agent: %s" % truncate(out.get("summary") or "cannot resolve", 600)
+            problem = self.check_sync_result(wt, base, upstream_sha, conflicts, message)
+            if problem is None:
+                return gitops.rev(wt), ""
+            why = problem
+            feedback = problem
+        return None, why
+
+    def check_sync_result(self, wt: Any, base: str, upstream_sha: str, conflicts: List[str],
+                          message: str) -> Optional[str]:
+        """Commit the resolution (amending an earlier attempt) and verify it. None means it passed."""
+        marked = [f for f in conflicts if (wt / f).is_file() and CONFLICT_MARKER.search(
+            (wt / f).read_text(errors="replace"))]
+        if marked:
+            return "conflict markers remain in: %s" % ", ".join(marked)
+        gitops.git(wt, "add", "-A")
+        left = unmerged(wt)
+        if left:
+            return "files still unmerged: %s" % ", ".join(left)
+        merging = subprocess.run(["git", "rev-parse", "-q", "--verify", "MERGE_HEAD"], cwd=str(wt),
+                                 capture_output=True).returncode == 0
+        if merging:
+            gitops.git(wt, "commit", "--quiet", "--no-verify", "-m", message)
+        else:
+            parents = gitops.git(wt, "rev-list", "--parents", "-n", "1", "HEAD").split()[1:]
+            if parents != [base, upstream_sha]:
+                return "the merge commit was replaced (HEAD parents %s); agents must not commit" % parents
+            if subprocess.run(["git", "diff", "--cached", "--quiet"], cwd=str(wt)).returncode != 0:
+                gitops.git(wt, "commit", "--quiet", "--no-verify", "--amend", "-m", message)
+        head = gitops.rev(wt)
+        hits = protected_hits(self.hand_merged_files(head, [base, upstream_sha]), self.cfg["protected_paths"])
+        if hits:
+            return "the resolution rewrites protected paths: %s" % ", ".join(hits)
+        log_dir = self.o.runs_dir / ("%s-sync-verify" % time.strftime("%Y%m%d-%H%M%S"))
+        log_dir.mkdir(parents=True, exist_ok=True)
+        results = run_commands(self.cfg["verify"]["commands"], cwd=wt, env=command_env(self.cfg, self.o.tools_dir),
+                               log_dir=log_dir, timeout_s=float(self.cfg["verify"]["timeout_s"]))
+        failed = [c for c in results if c["returncode"] != 0]
+        if failed:
+            c = failed[0]
+            return "verification failed: `%s` (%s)\n```\n%s\n```" % (
+                c["command"], "timeout" if c["timed_out"] else "exit %s" % c["returncode"], c["tail"])
+        return None
 
     def follow_up_task(self, pr: Dict[str, Any], findings: List[str]) -> str:
         """Problems the Gatekeeper accepted for now but that must be fixed: Astra plans them."""
@@ -318,7 +438,7 @@ class Gatekeeper:
                 return False, sync_msg
         for pr in eligible:
             if pr.get("headRefName") == self.integ and sync_state == "conflict":
-                continue  # the owner was asked; an agent cannot resolve a merge
+                continue  # the developer agent could not resolve it; the owner was asked
             memo = self.memo(pr)
             if (memo.get("sha") == pr["headRefOid"] and memo.get("decision") != "HOLD" and not dry_run
                     and only_pr is None):
