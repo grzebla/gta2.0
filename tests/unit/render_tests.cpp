@@ -103,6 +103,13 @@ TEST_CASE("Render sizes: RGBA8 byte counts reject zero sizes and Uint32 overflow
         CHECK(contains(bytes.error().message, "atlas: "));
         CHECK(contains(bytes.error().message, "over the GPU transfer limit of 4294967295"));
     }
+
+    // Regression: 2^31 x 2^31 x 4 bytes is exactly 2^64, which wraps to 0 in uint64_t if the
+    // bytes are computed before the check.
+    const auto wrapped = render::rgba8_byte_size(2'147'483'648u, 2'147'483'648u, "atlas");
+    REQUIRE_FALSE(wrapped);
+    CHECK(contains(wrapped.error().message, "atlas: 2147483648x2147483648 RGBA8 is 4611686018427387904 pixels"));
+    CHECK_FALSE(render::rgba8_byte_size(2'147'483'648u, 2'147'483'649u, "atlas"));
 }
 
 TEST_CASE("Render sizes: instance byte counts and capacity growth stay within Uint32") {
@@ -140,7 +147,8 @@ TEST_CASE("Renderer: invalid sizes are rejected before any GPU allocation") {
     // An armed texture-creation fault survives every rejected call, so none of them reached
     // SDL_CreateGPUTexture (nor any allocation sized from the request).
     renderer->inject_fault(GpuFault::create_texture);
-    for (const auto& [w, h] : std::vector<std::pair<u32, u32>>{{0, kSide}, {kSide, 0}, {65'536, 65'536}}) {
+    for (const auto& [w, h] :
+         std::vector<std::pair<u32, u32>>{{0, kSide}, {kSide, 0}, {65'536, 65'536}, {2'147'483'648u, 2'147'483'648u}}) {
         CAPTURE(w);
         CAPTURE(h);
         CHECK(contains(renderer->render_offscreen(list, Camera2D{}, w, h, {}).error().message, "offscreen frame: "));
@@ -148,6 +156,8 @@ TEST_CASE("Renderer: invalid sizes are rejected before any GPU allocation") {
     const std::vector<u8> small(16, 255);
     CHECK(contains(renderer->set_atlas(0, 4, small).error().message, "atlas: zero image size 0x4"));
     CHECK(contains(renderer->set_atlas(65'536, 65'536, small).error().message, "over the GPU transfer limit"));
+    CHECK(contains(renderer->set_atlas(2'147'483'648u, 2'147'483'648u, small).error().message,
+                   "over the GPU transfer limit"));
     CHECK(contains(renderer->set_atlas(2, 2, std::vector<u8>(15, 255)).error().message, "(expected 16)"));
     CHECK(contains(renderer->set_atlas(1, 1, small).error().message, "(expected 4)"));
 
