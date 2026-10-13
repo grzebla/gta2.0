@@ -1,9 +1,14 @@
 {
-  "$comment": "Reference capture: GTA 2 9.6 frontend with DDrawCompat, no input. Verified setup 2026-10-13.",
   "id": "frontend-menu",
   "wrapper": "ddrawcompat",
-  "screen": { "start_mode": 1 },
+  "screen": {
+    "start_mode": 1
+  },
   "durationSeconds": 30,
-  "screenshotsAtSeconds": [8, 15, 25],
+  "screenshotsAtSeconds": [
+    8,
+    15,
+    25
+  ],
   "inputs": []
 }

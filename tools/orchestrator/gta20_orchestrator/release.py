@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
+import subprocess
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import db as D
@@ -27,6 +28,7 @@ from .verify import protected_hits
 TASK_SUBJECT = re.compile(r"^\[(T\d{4})\] ")
 MERGE_SUBJECT = re.compile(r"^Merge (T\d{4}): ")
 MEMORY_SUBJECT = re.compile(r"^agent-memory: ")
+SYNC_SUBJECT = "Sync %s into %s (orchestrator)"
 
 
 class Gatekeeper:
@@ -144,6 +146,10 @@ class Gatekeeper:
         task_ids = set()
         for line in out.splitlines():
             commit, _, subject = line.partition("\t")
+            sync = self.sync_merge_problems(commit, base)
+            if sync is not None:
+                problems += sync
+                continue
             files = [f for f in gitops.git(self.o.repo, "diff-tree", "--no-commit-id", "--name-only", "-r", "-m",
                                            commit).splitlines() if f]
             m = TASK_SUBJECT.match(subject) or MERGE_SUBJECT.match(subject)
@@ -174,6 +180,70 @@ class Gatekeeper:
             lines.append("- %s [%s] %s — Astra: %s" % (tid, t["status"], t["title"],
                                                          truncate(dec[0]["rationale"] if dec else "-", 300)))
         return problems, "\n".join(lines) or "(no task commits)"
+
+    def sync_merge_problems(self, commit: str, base: str) -> Optional[List[str]]:
+        """None when `commit` is not a merge of the target branch into the integration branch.
+
+        Such a merge (orchestrator sync or the owner resolving a conflict) brings in reviewed
+        target-branch work. Only files whose result differs from BOTH parents were written by
+        hand (conflict resolution, or a combined auto-merge); those must not touch protected
+        paths. The Gatekeeper model still sees the whole PR diff."""
+        parents = gitops.git(self.o.repo, "rev-list", "--parents", "-n", "1", commit).split()[1:]
+        if len(parents) != 2:
+            return None
+        anc = subprocess.run(["git", "merge-base", "--is-ancestor", parents[1], base], cwd=str(self.o.repo),
+                             capture_output=True)
+        if anc.returncode != 0:
+            return None
+        manual = self.hand_merged_files(commit, parents)
+        hits = protected_hits(manual, self.cfg["protected_paths"])
+        if hits:
+            return ["sync merge %s rewrites protected paths by hand: %s" % (commit[:9], ", ".join(hits))]
+        return []
+
+    def hand_merged_files(self, commit: str, parents: List[str]) -> List[str]:
+        sides = [set(f for f in gitops.git(self.o.repo, "diff", "--name-only", p, commit).splitlines() if f)
+                 for p in parents]
+        return sorted(sides[0] & sides[1])
+
+    # ------------------------------------------------------------------ keeping the agents' branch current
+    def sync_integration(self) -> Tuple[str, str]:
+        """Merge the target branch into the integration branch so the agents' PR stays mergeable.
+
+        Returns (state, message): state is "current", "merged" (new head pushed, wait for CI) or
+        "conflict" (the owner must merge by hand; agents are never asked to - they cannot merge)."""
+        remote = self.cfg["remote"]
+        wt = self.o.wt_int
+        upstream = "%s/%s" % (remote, self.target)
+        gitops.git(wt, "fetch", "--quiet", remote, self.target)
+        if subprocess.run(["git", "merge-base", "--is-ancestor", upstream, "HEAD"], cwd=str(wt),
+                          capture_output=True).returncode == 0:
+            return "current", ""
+        if not gitops.is_clean(wt):
+            return "conflict", "integration worktree is not clean; not syncing %s" % upstream
+        upstream_sha = gitops.rev(wt, upstream)
+        res = subprocess.run(["git", "merge", "--no-ff", "--no-edit", "-m", SYNC_SUBJECT % (upstream, self.integ),
+                              upstream], cwd=str(wt), capture_output=True, text=True)
+        if res.returncode != 0:
+            conflicts = [f for f in gitops.git(wt, "diff", "--name-only", "--diff-filter=U", check=False).splitlines() if f]
+            gitops.git(wt, "merge", "--abort", check=False)
+            msg = ("%s conflicts with %s in: %s. Merge it by hand: pause, `git merge %s` in the integration "
+                   "worktree (%s), resolve, commit, push, resume." % (
+                       self.integ, upstream, ", ".join(conflicts) or "(unknown)", upstream, wt))
+            with self.db.tx():
+                if self.db.get_meta("integration_sync_conflict") != upstream_sha:
+                    self.db.set_meta("integration_sync_conflict", upstream_sha)
+                    self.db.set_meta("human_question", msg)
+                    self.db.event("integration_sync_conflict", agent="orchestrator", outcome="conflict",
+                                  commits=[upstream_sha], detail={"files": conflicts})
+            return "conflict", msg
+        head = gitops.rev(wt)
+        with self.db.tx():
+            self.db.set_meta("integration_sync_conflict", "")
+            self.db.event("integration_synced", agent="orchestrator", commits=[head, upstream_sha], outcome="merged",
+                          detail={"from": upstream})
+        self.o.maybe_push(force_now=True)
+        return "merged", "synced %s into %s (%s); CI runs on the new head" % (upstream, self.integ, head[:9])
 
     def follow_up_task(self, pr: Dict[str, Any], findings: List[str]) -> str:
         """Problems the Gatekeeper accepted for now but that must be fixed: Astra plans them."""
@@ -230,7 +300,14 @@ class Gatekeeper:
         with self.db.tx():
             self.db.set_meta("gatekeeper_last_check", str(now()))
             self.db.set_meta("gatekeeper_skipped", dumps(skipped))
+        sync_state, sync_msg = "current", ""
+        if not dry_run and any(p.get("headRefName") == self.integ for p in eligible):
+            sync_state, sync_msg = self.sync_integration()
+            if sync_state == "merged":
+                return False, sync_msg
         for pr in eligible:
+            if pr.get("headRefName") == self.integ and sync_state == "conflict":
+                continue  # the owner was asked; an agent cannot resolve a merge
             memo = self.memo(pr)
             if (memo.get("sha") == pr["headRefOid"] and memo.get("decision") != "HOLD" and not dry_run
                     and only_pr is None):

@@ -46,7 +46,7 @@ def validate_scenario(data: Any, matrix: Dict[str, Any], scenario_id: str, max_s
     """Strict check of an agent-written scenario: it is data only (configuration, keys, times)."""
     if not isinstance(data, dict):
         raise ScenarioError("scenario must be a JSON object")
-    allowed = {"$comment", "id", "wrapper", "screen", "durationSeconds", "screenshotsAtSeconds", "inputs"}
+    allowed = {"id", "wrapper", "screen", "durationSeconds", "screenshotsAtSeconds", "inputs"}
     extra = set(data) - allowed
     if extra:
         raise ScenarioError("unknown fields: %s" % ", ".join(sorted(extra)))

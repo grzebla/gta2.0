@@ -34,7 +34,12 @@ flowchart LR
   - brak zmian w ścieżkach chronionych, plików gry i binarek;
   - brak plików > 5 MB i sekretów w dodanych liniach;
   - czy diff różni się od poprzedniej próby;
-  - build i testy (`cmake --preset debug`, build, `ctest`) z `GTA20_GAME_DIR`.
+  - build i testy (`cmake --preset debug`, build, `ctest`) z `GTA20_GAME_DIR`;
+  - te same kroki co `infra-lint`: shellcheck i offline'owe testy Bash (atrapa `aws`).
+
+  Narzędzia przypięte jak w CI (`.orchestrator/tools-venv`, także na PATH Claude): clang-format
+  23.1.3, shellcheck 0.10.0. Weryfikacja uruchamia kod agentów poza sandboxem, więc nie widzi
+  sesji AWS właściciela (`AWS_CONFIG_FILE=/dev/null`, zmienne `AWS_*` usunięte).
 - Astra nie może zatwierdzić commitu, który nie przeszedł weryfikacji — Orchestrator zamienia
   taką decyzję na `CHANGES_REQUESTED`.
 - Recenzja odbywa się w osobnym worktree `review`, w trybie detached na niezmiennym commicie.
@@ -59,13 +64,21 @@ Po każdym scaleniu sprawdza ponownie od razu, żeby przejść cały stos. Obsł
    - dzienny limit scaleń (6);
    - w PR agentów każdy commit musi być zadaniem zatwierdzonym przez Astrę i zweryfikowanym
      (`[Txxxx]` / `Merge Txxxx`) albo commitem pamięci zmieniającym tylko `docs/agent-memory/`.
-     Zadania nie mogą ruszać ścieżek chronionych.
+     Zadania nie mogą ruszać ścieżek chronionych. Dozwolone są też commity scalające `main` do
+     gałęzi integracyjnej: pliki rozwiązane ręcznie (różne od obu rodziców) nie mogą dotykać
+     ścieżek chronionych.
 
    Gdy CI jest czerwone lub bramka nie przechodzi:
    - PR agentów → zadanie naprawcze (priorytet 0);
    - PR właściciela → komentarz w PR.
 
    Gdy CI trwa → czekanie.
+   **Synchronizacja z `main`.** Zanim Gatekeeper oceni PR agentów, sprawdza, czy `main` jest już
+   w gałęzi integracyjnej. Jeśli nie, Orchestrator scala `origin/main` (commit „Sync origin/main
+   into agents/integration (orchestrator)”), wypycha i czeka na CI nowego heada. Konflikt nie
+   staje się zadaniem dla agentów, bo nie mogą scalać. Scalenie jest przerywane, a właściciel
+   dostaje pytanie z listą plików i instrukcją: `pause` → `git merge origin/main` w worktree
+   integracyjnym → rozwiązanie → commit → push → `resume`.
 3. **Review modelu.** Worktree `release` jest ustawiony na sprawdzanym commicie, z pełnym diffem
    względem `main`, wynikami CI, listą zadań i decyzjami Astry. Decyzje: `MERGE`,
    `REQUEST_CHANGES`, `HOLD`, `NEEDS_HUMAN`.

@@ -110,6 +110,9 @@ DEFAULTS: Dict[str, Any] = {
                 "sh", "-c", "git ls-files 'engine/*.cpp' 'engine/*.hpp' 'apps/*.cpp' 'tests/unit/*.cpp' "
                 "| xargs clang-format --dry-run --Werror"]},
             {"name": "module boundaries", "cmd": ["bash", "scripts/ci/check-module-boundaries.sh"]},
+            {"name": "shellcheck (as infra-lint)", "cmd": [
+                "sh", "-c", "shellcheck -x -P SCRIPTDIR scripts/ci/*.sh scripts/aws/*.sh infra/aws/*.sh tests/scripts/*.sh"]},
+            {"name": "offline bash tests (fake aws, as infra-lint)", "cmd": ["bash", "tests/scripts/ec2-gpu-session.test.sh"]},
             {"name": "headless configure (no game data)", "cmd": ["cmake", "--preset", "headless"],
              "unset": ["GTA20_GAME_DIR", "G2N_GAME_DIR", "GTA20_GAME_DIR_105"]},
             {"name": "headless build", "cmd": ["cmake", "--build", "--preset", "headless"]},
