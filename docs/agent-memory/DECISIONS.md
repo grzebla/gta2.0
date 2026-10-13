@@ -432,3 +432,15 @@ Reviewed immutable commit c37f03b0fef8e58452d9e61f57fac2a96d4b2423. All acceptan
 - [x] Keep vertices finite, indices valid and UVs inside drawable slots; never report unsupported geometry as complete M1. — check_map_mesh verifies finite bounded vertices, exact rebased indices and UV corners within a drawable atlas slot. The builder filters tiles before calling the existing validated append_face. MapMeshCoverage exposes only partial and provisional; original-city tests require partial.
 - [x] Document the partial contract while preserving app rendering and strict inventory behavior; defer full 17-map geometry validation. — world-mesh.md documents traversal, classification precedence, local coordinates and coverage limitations. The seven changed paths exclude renderer and inventory implementation. Builder call sites are tests only. Documentation explicitly defers full geometry validation and labels synthetic tests as local contracts.
 - [x] Complete required verification and preserve task constraints. — Confirmed pinned HEAD, clean worktree and passing committed git diff --check. Changes add no dependencies, renderer integration, simulation work or protected-path edits. Orchestrator reports passing formatting, boundaries, shellcheck, Bash tests, headless/Debug builds and tests, clang-tidy, and full ASan/UBSan tests.
+
+## 2026-10-13T17:07:50Z — Astra arch_review
+
+Reviewed clean integration HEAD 4dcbdeb167c147d36303089deaff37d69959ea8c. Retain the module graph and existing approvals. The scene/render separation supports M1, but WorldMesh is still test-only; the application rebuilds and uploads flat quads every frame, with no world depth buffer. Original-game fidelity remains unverified.
+
+Two immediate CI repairs are supported by inspected logs from native-ci run 38429483238: Windows fails on map_inventory.cpp:45 because std::tolower returns int; Linux fails three capture-directory tests because CMake wraps diagnostic text across lines. Rejection still occurs before rendering. Both affected files are unchanged at reviewed HEAD. The GitHub query returned no pull-request workflow runs for this HEAD, so previous task verification does not establish green integration CI.
+
+WorldMesh::append_face reserves size-plus-one-face on every append, risking quadratic copying. Existing local city-mesh tests took 62.09 seconds in Debug and 294.36 seconds under sanitizers; these are test durations, not isolated construction benchmarks. Fix growth before expanding the audit to 17 maps.
+
+The historical world-entry blocker is superseded: I inspected mcp-20261013-k/frame-010s.png and confirmed visible Downtown geometry. Its window-capture counterpart is black. These references need provenance and camera review before comparison use. The offline scenario validator also rejects the newly supported debug field. Prioritize CI repairs, allocation growth, strict GPU execution and bounded evidence work. Keep slope implementations evidence-gated. No additional paid capture is justified yet.
+
+New tasks: T0020, T0021, T0022, T0023, T0024
