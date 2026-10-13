@@ -123,6 +123,15 @@ DEFAULTS: Dict[str, Any] = {
             {"name": "debug configure", "cmd": ["cmake", "--preset", "debug"]},
             {"name": "debug build", "cmd": ["cmake", "--build", "--preset", "debug"]},
             {"name": "debug tests (with original data)", "cmd": ["ctest", "--preset", "debug", "--output-on-failure"]},
+            # As the CI clang-tidy step. The pip build of clang-tidy does not find the macOS SDK's
+            # C++ headers by itself (spurious findings), so it gets the SDK as sysroot there.
+            {"name": "clang-tidy 22.1.8 (as CI)", "cmd": [
+                "sh", "-c", "extra=''; if command -v xcrun >/dev/null 2>&1; then "
+                "extra=\"--extra-arg=-isysroot$(xcrun --show-sdk-path)\"; fi; "
+                "git ls-files 'engine/*.cpp' 'apps/*.cpp' | xargs clang-tidy -p build/debug --quiet $extra"]},
+            {"name": "asan configure (ASan + UBSan)", "cmd": ["cmake", "--preset", "asan"]},
+            {"name": "asan build", "cmd": ["cmake", "--build", "--preset", "asan"]},
+            {"name": "asan tests (with original data)", "cmd": ["ctest", "--preset", "asan", "--output-on-failure"]},
         ],
         "env": {"GTA20_GAME_DIR": "~/Games/GTA2"},
         "max_file_bytes": 5 * 1024 * 1024,

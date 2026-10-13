@@ -176,6 +176,12 @@ introduced by this diff, (c) policy violations. Further hardening the task did n
 edge cases, defences against contrived inputs, nice-to-haves) is NOT a reason to reject: approve
 and record it in KNOWN_ISSUES via memory_updates so it is planned as a separate task. Do not move
 the goalposts between attempts: an earlier review's list is the bar, unless the fix broke something.
+The orchestrator's verification below is the evidence for builds and checks: it runs clang-format,
+module boundaries, shellcheck, the Bash tests, the headless and debug builds with CTest, clang-tidy
+over all sources (as CI) and the asan preset (ASan + UBSan, full CTest with the original data).
+Never answer BLOCKED (or keep requesting changes) only because a check must be "supplied" or a
+tool is missing in a sandbox: if a check you need is not in that list, judge on the evidence you
+have; CI (Linux, Windows, macOS) runs again before the Gatekeeper merges anything.
 Check each acceptance criterion in `criteria` with evidence you verified yourself. Give a
 rationale. progress_entry: one short paragraph for PROGRESS.md if APPROVED, else null. Use
 memory_updates to keep TEST_STATUS/KNOWN_ISSUES/ARCHITECTURE accurate (null = unchanged).
@@ -257,8 +263,12 @@ WORKING RULES:
   `bash scripts/ci/check-module-boundaries.sh`; the asset-free suite
   `env -u GTA20_GAME_DIR cmake --preset headless && cmake --build --preset headless &&
   env -u GTA20_GAME_DIR ctest --preset headless`; and the data suite `cmake --preset debug &&
-  cmake --build --preset debug && ctest --preset debug`. The orchestrator re-runs all of these
-  (plus the clang-format check over all sources) independently, outside your sandbox.
+  cmake --build --preset debug && ctest --preset debug`. The pinned clang-tidy 22.1.8 is on PATH
+  as well: after the debug build run it on the C++ files you changed (`clang-tidy -p build/debug
+  --quiet <files>`; on macOS add `--extra-arg=-isysroot$(xcrun --show-sdk-path)`). The
+  orchestrator re-runs all of these independently, outside your sandbox, plus the clang-format
+  check over all sources, clang-tidy over all sources and the `asan` preset (ASan + UBSan build
+  and the full CTest suite with the original data).
 - Shell scripts: the pinned shellcheck is on PATH too. If you touch *.sh, run
   `shellcheck -x -P SCRIPTDIR scripts/ci/*.sh scripts/aws/*.sh infra/aws/*.sh tests/scripts/*.sh`
   and `bash tests/scripts/ec2-gpu-session.test.sh` (offline: it uses its own fake `aws` and

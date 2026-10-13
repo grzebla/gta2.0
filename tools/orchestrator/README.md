@@ -35,10 +35,14 @@ flowchart LR
   - brak plików > 5 MB i sekretów w dodanych liniach;
   - czy diff różni się od poprzedniej próby;
   - build i testy (`cmake --preset debug`, build, `ctest`) z `GTA20_GAME_DIR`;
-  - te same kroki co `infra-lint`: shellcheck i offline'owe testy Bash (atrapa `aws`).
+  - te same kroki co `infra-lint`: shellcheck i offline'owe testy Bash (atrapa `aws`);
+  - clang-tidy po całym kodzie, jak w CI (na macOS z sysroot SDK, bo clang-tidy z pip sam nie
+    znajduje nagłówków C++ i zgłasza fałszywe błędy);
+  - preset `asan` (ASan + UBSan): build i pełny CTest z danymi gry.
 
   Narzędzia przypięte jak w CI (`.orchestrator/tools-venv`, także na PATH Claude): clang-format
-  23.1.3, shellcheck 0.10.0. Weryfikacja uruchamia kod agentów poza sandboxem, więc nie widzi
+  23.1.3, clang-tidy 22.1.8, shellcheck 0.10.0. Astra ma w prompcie listę tych sprawdzeń i nie
+  może blokować zadania tylko dlatego, że „trzeba dostarczyć” wynik narzędzia. Weryfikacja uruchamia kod agentów poza sandboxem, więc nie widzi
   sesji AWS właściciela (`AWS_CONFIG_FILE=/dev/null`, zmienne `AWS_*` usunięte).
 - Astra nie może zatwierdzić commitu, który nie przeszedł weryfikacji — Orchestrator zamienia
   taką decyzję na `CHANGES_REQUESTED`.
