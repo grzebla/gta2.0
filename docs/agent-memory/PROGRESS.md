@@ -57,3 +57,7 @@ Approved T0019 at 486d30d. The slope specification covers all 64 codes, distingu
 ## 2026-10-13T16:17:43Z — T0013 Assemble textured block faces into an indexed CPU mesh
 
 Approved T0013 at 83fb43f. WorldMesh assembles explicitly selected textured block faces into scene-owned CPU vertices and u32 indices. Independent expectations cover all 40 face/transform combinations, tile rejection, winding, preserved contents and rebasing beyond 65535 vertices. Required orchestrator verification passes, including clang-tidy and ASan/UBSan. Awaiting Gatekeeper integration; M1 remains incomplete.
+
+## 2026-10-13T16:18:49Z — T0015 Check GPU transfer sizes and resource failures
+
+Approved T0015 at 3b2bfd7. Renderer transfer sizes are checked before allocation and narrowing; GPU failures return contextual errors with resource cleanup. Failed atlas replacement and instance-buffer growth preserve usable state. Boundary and injected-failure tests cover recovery and rendered-image equality. Required orchestrator verification passes, including clang-tidy and ASan/UBSan. Awaiting Gatekeeper integration; M1 remains incomplete.
