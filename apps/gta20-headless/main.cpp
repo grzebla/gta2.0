@@ -4,19 +4,26 @@
 //   gta20-headless run <scenario.json> --out <trace.jsonl> [--game-dir <dir>]
 //   gta20-headless compare <expected.jsonl> <actual.jsonl> --scenario <scenario.json> [--json f] [--markdown f]
 //   gta20-headless bench <scenario.json> [--repeat N] [--game-dir <dir>]
+//   gta20-headless inventory [--game-dir <dir>]
 //
 // Exit codes: 0 ok / traces match, 1 traces diverge, 2 usage or input error.
+// `inventory` is the strict original-data gate (docs/testing.md): 0 when the game directory
+// (--game-dir, else GTA20_GAME_DIR) holds exactly the 17 original maps with their styles, 1 when
+// it is missing, invalid or incomplete. It prints aggregate counts only.
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <string>
 #include <vector>
 
+#include "gta20/assets/game_install.hpp"
+#include "gta20/assets/map_inventory.hpp"
 #include "gta20/core/diagnostics.hpp"
 #include "gta20/testing/compare.hpp"
 #include "gta20/testing/runner.hpp"
@@ -55,7 +62,8 @@ int usage() {
                  "  gta20-headless run <scenario.json> --out <trace.jsonl> [--game-dir <dir>]\n"
                  "  gta20-headless compare <expected.jsonl> <actual.jsonl> --scenario <scenario.json> [--json f] "
                  "[--markdown f]\n"
-                 "  gta20-headless bench <scenario.json> [--repeat N] [--game-dir <dir>]\n";
+                 "  gta20-headless bench <scenario.json> [--repeat N] [--game-dir <dir>]\n"
+                 "  gta20-headless inventory [--game-dir <dir>]\n";
     return kUsage;
 }
 
@@ -174,6 +182,15 @@ int main(int argc, char** argv) try {
                     static_cast<unsigned long long>(st.p99_ns), static_cast<unsigned long long>(st.max_ns));
         std::printf("  peak RSS %.1f MiB\n", static_cast<double>(gta20::peak_rss_bytes()) / (1024.0 * 1024.0));
         return kOk;
+    }
+
+    if (command == "inventory" && args.positional.empty()) {
+        const auto named_dir = args.get("--game-dir");
+        const std::filesystem::path dir =
+            named_dir.empty() ? gta20::assets::game_dir_from_environment() : std::filesystem::path(named_dir);
+        const auto inventory = gta20::assets::take_map_inventory(dir);
+        std::cout << gta20::assets::format_map_inventory(inventory);
+        return inventory.passed() ? kOk : kDiverged;
     }
     return usage();
 } catch (const std::exception& e) {

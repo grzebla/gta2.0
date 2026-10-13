@@ -6,7 +6,9 @@
 | Determinizm scenariuszy | `tests/conformance/` | CTest `conformance.determinism.*` | nic |
 | Regresja scenariuszy | `tests/conformance/golden/` | CTest `conformance.regression.*` | nic |
 | Wrapper `cmake/RunConformance.cmake` | `tests/conformance/wrapper/` (atrapa `gta20-headless`) | CTest `conformance.wrapper.*` | nic |
-| Dane oryginalnej gry | testy oznaczone `[gamedata]` | `GTA20_GAME_DIR=… ctest` | własna instalacja GTA 2 |
+| Dane oryginalnej gry (opcjonalne) | testy oznaczone `[gamedata]` | `GTA20_GAME_DIR=… ctest` | własna instalacja GTA 2; bez niej SKIP/sukces |
+| Dane oryginalnej gry (ścisłe) | `gta20-headless inventory` | `cmake --build --preset <p> --target gamedata-strict` | własna instalacja GTA 2; bez niej błąd |
+| Ścisła bramka bez danych | `tests/unit/inventory_tests.cpp`, `tests/inventory/` | CTest `Strict map inventory: *`, `inventory.strict.*` | nic (instalacje SYNTHETIC) |
 | Benchmark CPU/pamięci | `gta20-headless bench` | CI (Release) → podsumowanie zadania | nic |
 | Czas klatki | `gta2 --frames N` | lokalnie | okno/GPU |
 | Render bez okna | `gta2 --offscreen WxH --screenshot f.bmp` | CI (lavapipe, próbne) / lokalnie | Vulkan/Metal/D3D12 |
@@ -14,6 +16,44 @@
 | Scenariusze zrzutów oryginału (offline) | `tests/gfx/scenarios/*.json`, `cmake/ValidateGfxScenario.cmake` | CTest `gfx.scenario.*`, `gfx.scenario-check.*` | nic (host nie jest wywoływany) |
 
 Sanitizery: preset `asan` (ASan + UBSan, `-fno-sanitize-recover`) w CI na Linux i macOS.
+
+## Ścisła inwentaryzacja map (`gamedata-strict`)
+
+Testy `[gamedata]` w CTest są **opcjonalne**: bez `GTA20_GAME_DIR` kończą się sukcesem, żeby
+zwykłe CI bez danych było zielone. Dlatego same nie dowodzą, że dane zostały sprawdzone.
+Obowiązkową weryfikację lokalnej instalacji daje osobne polecenie, które **kończy się błędem**,
+gdy danych brakuje albo są niekompletne:
+
+```sh
+GTA20_GAME_DIR=~/Games/GTA2 cmake --build --preset debug --target gamedata-strict
+# to samo bezpośrednio (katalog z --game-dir ma pierwszeństwo przed GTA20_GAME_DIR):
+GTA20_GAME_DIR=~/Games/GTA2 ./build/debug/bin/gta20-headless inventory
+```
+
+Kod wyjścia: `0` — instalacja kompletna, `1` — brak/błąd danych, `2` — błędne argumenty.
+Bramka (`engine/assets/src/map_inventory.cpp`) zgłasza błąd, gdy:
+
+* `GTA20_GAME_DIR` (ani `--game-dir`) nie jest ustawione, katalog nie istnieje lub nie ma `data/`;
+* `data/` nie zawiera **dokładnie** 17 map `.gmp` z listy w
+  [formats/map-styles.md](formats/map-styles.md) (brakująca, dodatkowa lub inna mapa);
+* któraś mapa się nie parsuje (DMAP) albo nie ma żadnego bloku;
+* styl przypisany mapie nie istnieje lub się nie parsuje, albo przypisanie jest nierozstrzygnięte;
+* pliki konfiguracyjne gry (`data/test1.seq`, `data/*.mmp`) nie deklarują zapisanych par
+  mapa → styl albo im przeczą.
+
+Wypisuje wyłącznie metadane i sumy: dla stylu wersję i liczbę kafli, dla mapy rozmiar pliku,
+liczbę unikalnych bloków i zajętych komórek, zakres poziomów `z` z niepustymi blokami, liczby
+komórek dla każdego użytego kodu skosu (0–63) oraz liczby ścian i pokryw z kaflami
+zarezerwowanymi 992–1022 i ze znacznikiem 1023 (liczone po komórkach siatki 256×256×8).
+Nie wypisuje rekordów bloków ani pikseli. Polecenie nie jest testem CTest, więc ani preset
+`headless`, ani `debug` bez danych nie przestają przechodzić.
+
+Zachowanie bramki bez oryginalnych danych sprawdzają testy CTest w każdym presecie:
+`Strict map inventory: *` (syntetyczna instalacja w katalogu tymczasowym: brak wejścia,
+uszkodzone mapy, zła liczba map, brakujące/uszkodzone style, sprzeczna konfiguracja,
+nierozstrzygnięte przypisanie oraz poprawna inwentaryzacja 17 map ze sprawdzonymi sumami) i
+`inventory.strict.*` (kod wyjścia `1` samego `gta20-headless inventory` bez `GTA20_GAME_DIR`,
+z nieistniejącym katalogiem, bez `data/`, z pustymi plikami map i z 16 mapami).
 
 ## Zrzuty renderu z oryginalnych danych (`gamedata.render.*`)
 
