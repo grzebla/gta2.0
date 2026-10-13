@@ -81,7 +81,7 @@ Szczegóły: [`docs/ci/gpu-testing.md`](../ci/gpu-testing.md). W skrócie:
 
 | Sprawdzenie | Wynik |
 |---|---|
-| Projekt / rola | konto `433213574600`, `AccountFullAccessRole` |
+| Projekt / rola | konto AWS projektu (numer w AWS Settings), `AccountFullAccessRole` |
 | Region | eu-north-1 (`~/.aws/config`) — potwierdź w AWS Settings > View all projects > Overview > Additional Info > Region |
 | Plan | ~~FREE~~ → **PAID** (przejście wykonane w AWS Settings, potwierdzone `GetAccountPlanState` 2026-10-12) |
 | G4dn w eu-north-1 | `g4dn.xlarge`/`2xlarge` w strefach a, b, c (T4 16 GiB) |
