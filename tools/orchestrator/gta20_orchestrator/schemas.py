@@ -17,6 +17,13 @@ STR = {"type": "string"}
 NSTR = {"type": ["string", "null"]}
 STRS = {"type": "array", "items": STR}
 
+# A run of the original game on the EC2 test host; the orchestrator validates and executes it.
+GFX_REQUESTS = {"type": "array", "items": _obj({
+    "mode": {"type": "string", "enum": ["probe", "compat", "capture"]},
+    "target": STR,
+    "reason": STR,
+})}
+
 MEMORY_UPDATES = _obj({
     "project": NSTR,
     "architecture": NSTR,
@@ -51,6 +58,7 @@ ASTRA_PLAN = _obj({
     "memory_updates": MEMORY_UPDATES,
     "needs_human": NSTR,
     "release_candidate": {"type": "boolean"},
+    "gfx_requests": GFX_REQUESTS,
 })
 
 ASTRA_REVIEW = _obj({
@@ -62,6 +70,7 @@ ASTRA_REVIEW = _obj({
     "memory_updates": MEMORY_UPDATES,
     "progress_entry": NSTR,
     "human_question": NSTR,
+    "gfx_requests": GFX_REQUESTS,
 })
 
 CLAUDE_REPORT = _obj({
@@ -75,6 +84,7 @@ CLAUDE_REPORT = _obj({
     "benchmarks": {"type": "array", "items": _obj({"name": STR, "value": STR, "notes": STR})},
     "unresolved": STRS,
     "questions_for_astra": STRS,
+    "gfx_requests": GFX_REQUESTS,
 })
 
 GATEKEEPER_REVIEW = _obj({

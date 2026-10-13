@@ -92,6 +92,48 @@ Ręcznie:
 Wyłączenie Gatekeepera: `"release": {"enabled": false}` w `.orchestrator/config.json`.
 Ograniczenie go do PR agentów: `"eligible": "integration_only"`.
 
+### Host testowy EC2: przebiegi oryginalnej gry na zlecenie agentów
+
+Agenci nie mają dostępu do AWS. Gdy potrzebują oryginalnego GTA 2 (stan hosta, macierz
+kompatybilności, zrzuty referencyjne ze skryptowanym wejściem), wpisują zlecenie w polu
+`gfx_requests` swojej odpowiedzi JSON (Astra w planie lub review, Claude w raporcie):
+`{"mode": "probe|compat|capture", "target": "...", "reason": "..."}`.
+
+Orchestrator (`gta20_orchestrator/gfx.py`):
+1. **waliduje** zlecenie: tryb z listy dozwolonych, id przypadków z `tests/gfx/compat-matrix.json`,
+   a dla `capture` scenariusz `tests/gfx/scenarios/<id>.json` według ścisłego schematu (tylko
+   dane: wrapper z macierzy, ustawienia ekranu, czas ≤ 300 s, ≤ 20 zrzutów, ≤ 100 klawiszy z
+   listy dozwolonych). Odrzucone zlecenie trafia do agentów z powodem.
+2. **pilnuje limitów** właściciela (sekcja `gfx`, decyzja 2026-10-13):
+
+   | Limit | Domyślnie | Skutek |
+   |---|---|---|
+   | `max_minutes_per_run` | 45 | twardy limit przebiegu (skrypt zawsze zatrzymuje instancję) |
+   | `max_runs_per_day` | 3 | zlecenie czeka do jutra |
+   | `monthly_budget_usd` (przy `usd_per_hour` 0,76) | 10 | zlecenie odrzucone + pytanie do właściciela |
+   | `max_pending` | 3 | nadmiarowe zlecenia odrzucone |
+
+   Przebieg przerwany restartem demona liczy się jako pełne 45 min.
+3. **sprawdza sesję AWS** (`aws sts get-caller-identity`). Gdy wygasła, ustawia pytanie
+   „run `aws login`” i ponawia po godzinie; zlecenie czeka.
+4. **uruchamia** `scripts/aws/run-gfx-compat-local.sh` z osobnego worktree `gfx` ustawionego na
+   `origin/main` (zrecenzowany kod, nigdy gałąź agenta), z `CONFIRM=uruchom-ec2`. Dla `capture`
+   wysyła na hosta tylko jeden znormalizowany plik scenariusza.
+5. **oddaje wyniki** jako dane: werdykty i lokalną ścieżkę wyników (`gfx.results_root`, domyślnie
+   `~/Games/GTA2-work/gfx-results`, poza repozytorium) w kolejnych promptach, w sekcji
+   „EC2 TEST HOST RUNS”.
+
+Przebiegi wykonują się między krokami, po kolei. Gdy Astra nie ma zadań i czeka na przebieg,
+pętla czeka zamiast planować ponownie.
+
+Ręcznie:
+- `gfx status` — kolejka, limity, wydatek w miesiącu;
+- `gfx request capture frontend-walk --reason "..."` — zlecenie od właściciela;
+- `gfx cancel --id N`;
+- `gfx run` — następne zlecenie teraz (gdy demon nie działa).
+
+Wyłączenie: `"gfx": {"enabled": false}`.
+
 ### Ochrona przed zapętleniem
 
 | Limit (`limits` w konfiguracji) | Domyślnie | Skutek |
@@ -160,6 +202,7 @@ $B restart [--now] [--timeout S]      # zastosuj zmiany konfiguracji / zainstalo
 $B unblock T0003 --note "..."         # decyzja właściciela dla BLOCKED/NEEDS_HUMAN
 $B answer "..."                       # odpowiedź na pytanie Astry (NEEDS_HUMAN)
 $B release status | review [--pr N] | run [--pr N]   # Gatekeeper ręcznie
+$B gfx status | request <mode> <target> | cancel --id N | run   # przebiegi na hoście EC2
 $B simulate [all|happy|quota_known_reset|...]   # pętla na atrapach w tymczasowym repo
 $B service install | status | uninstall
 ```
@@ -243,6 +286,9 @@ Zmiana kodu Orchestratora: `service install`, a potem `restart`.
 Agenci nie zmieniają:
 - `tools/orchestrator/`, `.orchestrator/`, `.claude/`, `docs/agent-memory/`;
 - `infra/`, `scripts/aws/`, workflowów `gfx-*` i `infra-lint`;
+- skryptów hosta testowego: `scripts/ci/ec2-gpu-session.sh`, `tests/gfx/windows/`,
+  `tests/gfx/compat-matrix.json` (scenariusze w `tests/gfx/scenarios/` są dozwolone: to dane
+  sprawdzane przez walidator);
 - `CLAUDE.md`, `.gitignore`.
 
 Pilnują tego dwie warstwy: reguły `deny` Claude (sprawdzone na żywo przez `doctor --live`) oraz

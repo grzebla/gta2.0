@@ -144,11 +144,15 @@ def run_loop(cfg: Config, *, max_steps: Optional[int], daemon: bool, fake: bool 
             astra = FakeAstra(plans=spec.get("astra_plans"), reviews=spec.get("astra_reviews"))
             claude = FakeClaude(script=spec.get("claude_script"))
             gk_agent, port = None, None  # the Gatekeeper never runs against fakes outside the sim
+            gfx_runner = None  # fakes never reach the EC2 host
             logging.warning("using FAKE agents (%s)", fake_spec or "default")
         else:
             astra, claude = make_agents(cfg)
             gk_agent, port = make_gatekeeper(cfg)
-        orch = Orchestrator(cfg, database, astra, claude, gatekeeper=gk_agent, github_port=port)
+            from .gfx import GfxRunner
+            gfx_runner = GfxRunner(cfg)
+        orch = Orchestrator(cfg, database, astra, claude, gatekeeper=gk_agent, github_port=port,
+                            gfx_runner=gfx_runner)
         install_signal_handlers(orch)
         result = orch.run(max_steps=max_steps, on_step=lambda: report.write(database, cfg.state_dir))
         report.write(database, cfg.state_dir)
@@ -439,6 +443,52 @@ def cmd_release(cfg: Config, args: argparse.Namespace) -> int:
         lock.release()
 
 
+def cmd_gfx(cfg: Config, args: argparse.Namespace) -> int:
+    """EC2 test host jobs: `status` (queue, limits, spend), `request` (owner queues a run like an
+    agent would), `cancel`, `run` (execute the next queued job now, outside the daemon)."""
+    from .gfx import GfxRunner
+    database = open_db(cfg)
+    astra, claude = make_agents(cfg)
+    orch = Orchestrator(cfg, database, astra, claude, gfx_runner=GfxRunner(cfg))
+    jobs = orch.gfx
+    if jobs is None:
+        print("gfx jobs are disabled (gfx.enabled=false)")
+        return 1
+    if args.action == "status":
+        lim = cfg["gfx"]
+        print("limits: %s min/run, %s runs/day (today %d), %.2f/%.2f USD this month" % (
+            lim["max_minutes_per_run"], lim["max_runs_per_day"], jobs.runs_today(), jobs.month_spend_usd(),
+            float(lim["monthly_budget_usd"])))
+        print(jobs.context(limit=args.limit))
+        return 0
+    if args.action == "request":
+        if not args.mode:
+            print("usage: gfx request <probe|compat|capture> <target> [--reason ...]")
+            return 2
+        for line in jobs.enqueue([{"mode": args.mode, "target": args.target or "all",
+                                   "reason": args.reason or "owner request"}], None, "owner", cfg.repo_root):
+            print(line)
+        return 0
+    if args.action == "cancel":
+        if not args.id:
+            print("usage: gfx cancel --id N")
+            return 2
+        ok = jobs.cancel(args.id)
+        print("gfx job %d %s" % (args.id, "cancelled" if ok else "is not queued"))
+        return 0 if ok else 1
+    lock = Lock(cfg.state_dir)
+    if not lock.acquire():
+        print("the orchestrator daemon is running; it executes queued jobs itself (or stop it first)")
+        return 1
+    try:
+        setup_logging(cfg.state_dir, args.verbose)
+        print(jobs.run_next() or "nothing runnable now (see `gfx status`)")
+        report.write(database, cfg.state_dir)
+        return 0
+    finally:
+        lock.release()
+
+
 def cmd_doctor(cfg: Config, args: argparse.Namespace) -> int:
     from . import doctor
     return doctor.run(cfg, live=args.live)
@@ -505,6 +555,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("action", choices=["status", "review", "run"])
     s.add_argument("--pr", type=int)
     s.set_defaults(fn=cmd_release)
+    s = sub.add_parser("gfx", help="EC2 test host runs of the original game (agents' gfx_requests)")
+    s.add_argument("action", choices=["status", "request", "cancel", "run"])
+    s.add_argument("mode", nargs="?", choices=["probe", "compat", "capture"])
+    s.add_argument("target", nargs="?")
+    s.add_argument("--reason")
+    s.add_argument("--id", type=int)
+    s.add_argument("--limit", type=int, default=10)
+    s.set_defaults(fn=cmd_gfx)
     s = sub.add_parser("simulate", help="run the loop against scripted fake agents in a temp repo")
     s.add_argument("scenario", nargs="?", default="all")
     s.add_argument("--keep", action="store_true")

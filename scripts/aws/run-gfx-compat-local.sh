@@ -2,16 +2,17 @@
 # Runs one gfx-compat session from your machine with your AWS CLI credentials.
 # Works WITHOUT GitHub OIDC / advanced features. The host is stopped on exit,
 # error, Ctrl-C or timeout (trap), on top of the on-instance watchdog and the reaper.
-# Usage: scripts/aws/run-gfx-compat-local.sh <probe|compat> [cases=all] [max_minutes=45]
+# Usage: scripts/aws/run-gfx-compat-local.sh <probe|compat|capture> [cases=all|scenario-id] [max_minutes=45]
 # shellcheck source=common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-export GFX_MODE="${1:?usage: $0 <probe|compat> [cases] [max_minutes]}"
+export GFX_MODE="${1:?usage: $0 <probe|compat|capture> [cases] [max_minutes]}"
 export GFX_CASES="${2:-all}"
 export MAX_MINUTES="${3:-45}"
 RUN_ID="local-$(date -u +%Y%m%d-%H%M%S)"
 export RUN_ID
-export RESULTS_DIR="$REPO_ROOT/gfx-results/$RUN_ID"
+# Original-game captures stay outside the checkout when GFX_RESULTS_ROOT is set (orchestrator).
+export RESULTS_DIR="${GFX_RESULTS_ROOT:-$REPO_ROOT/gfx-results}/$RUN_ID"
 export RUNNER_TEMP="${TMPDIR:-/tmp}"
 GFX_BUCKET="$(stack_output "$GFX_STACK" ArtifactsBucketName)"
 export GFX_BUCKET

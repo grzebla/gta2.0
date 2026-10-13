@@ -18,14 +18,17 @@ from pathlib import Path
 os.environ["GTA20_NO_LAUNCHD"] = "1"  # tests must never touch the real LaunchAgent
 HERE = Path(__file__).resolve().parent
 PKG_ROOT = HERE.parent
+REPO_ROOT = PKG_ROOT.parent.parent
 sys.path.insert(0, str(PKG_ROOT))
 
 from gta20_orchestrator import db as D  # noqa: E402
 from gta20_orchestrator import memory, schemas, sim  # noqa: E402
 from gta20_orchestrator.adapters.claude import build_settings, parse_stream, quota_from_stream  # noqa: E402
 from gta20_orchestrator.adapters.codex import parse_jsonl, read_rollout, reset_from_rate_limits  # noqa: E402
-from gta20_orchestrator.adapters.fake import FakeAstra, FakeClaude, fake_plan  # noqa: E402
+from gta20_orchestrator.adapters.fake import FakeAstra, FakeClaude, FakeGfxRunner, fake_plan  # noqa: E402
 from gta20_orchestrator.cli import Lock, main as cli_main  # noqa: E402
+from gta20_orchestrator.gfx import ScenarioError, validate_scenario  # noqa: E402
+from gta20_orchestrator.loop import Wait  # noqa: E402
 from gta20_orchestrator.gitops import GitError, git  # noqa: E402
 from gta20_orchestrator.util import find_secrets, redact  # noqa: E402
 from gta20_orchestrator.verify import protected_hits  # noqa: E402
@@ -491,6 +494,150 @@ class GatekeeperTests(SimCase):
         port.add_pr(14, "feat-z", "main")
         orch.setup()
         self.assertIn("gatekeeper: PR #14: MERGED", orch.step())
+
+
+# ------------------------------------------------------------------------------- EC2 test host jobs
+SCENARIO = {"id": "menu-walk", "wrapper": "ddrawcompat", "screen": {"start_mode": 1}, "durationSeconds": 40,
+            "screenshotsAtSeconds": [10, 20, 30], "inputs": [{"atSeconds": 12, "key": "ENTER", "holdMs": 80}]}
+
+
+class GfxTests(SimCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.matrix = json.loads((REPO_ROOT / "tests/gfx/compat-matrix.json").read_text())
+        dest = self.env.repo / "tests" / "gfx" / "compat-matrix.json"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(json.dumps(self.matrix))
+
+    def _orch(self, runner, astra=None, claude=None):
+        from gta20_orchestrator.loop import Orchestrator
+        return Orchestrator(self.env.cfg, self.env.db, astra or FakeAstra(plans=[fake_plan("M1", ["walls"])]),
+                            claude or FakeClaude(), use_github=False, sleep=lambda s: None, gfx_runner=runner)
+
+    def _jobs(self):
+        return [dict(r) for r in self.env.db.conn.execute("SELECT * FROM gfx_jobs ORDER BY id")]
+
+    def test_repository_scenarios_are_valid(self) -> None:
+        files = sorted((REPO_ROOT / "tests/gfx/scenarios").glob("*.json"))
+        self.assertTrue(files)
+        for f in files:
+            validate_scenario(json.loads(f.read_text()), self.matrix, f.stem, 45 * 60)
+
+    def test_scenario_validation_is_strict(self) -> None:
+        validate_scenario(dict(SCENARIO), self.matrix, "menu-walk", 2700)
+        bad = [
+            dict(SCENARIO, id="other"),
+            dict(SCENARIO, script="Remove-Item C:\\"),
+            dict(SCENARIO, wrapper="unknown"),
+            dict(SCENARIO, screen={"exe": 1}),
+            dict(SCENARIO, durationSeconds=301),
+            dict(SCENARIO, screenshotsAtSeconds=[10, 10]),
+            dict(SCENARIO, screenshotsAtSeconds=[50]),
+            dict(SCENARIO, inputs=[{"atSeconds": 1, "key": "F4"}]),
+            dict(SCENARIO, inputs=[{"atSeconds": 1, "key": "ENTER", "cmd": "x"}]),
+            dict(SCENARIO, inputs=[{"atSeconds": 1, "key": "ENTER", "holdMs": 60000}]),
+        ]
+        for b in bad:
+            with self.assertRaises(ScenarioError, msg=str(b)):
+                validate_scenario(b, self.matrix, "menu-walk", 2700)
+
+    def test_claude_capture_runs_and_results_reach_review(self) -> None:
+        runner = FakeGfxRunner()
+        claude = FakeClaude(script=[{"do": "commit", "scenario": SCENARIO,
+                                     "gfx": [{"mode": "capture", "target": "menu-walk", "reason": "reference"}]}])
+        astra = FakeAstra(plans=[fake_plan("M1", ["walls"])])
+        orch = self._orch(runner, astra, claude)
+        orch.run(max_steps=10)
+        self.assertEqual(len(runner.calls), 1)
+        call = runner.calls[0]
+        self.assertEqual((call["mode"], call["target"], call["minutes"], call["staged"]),
+                         ("capture", "menu-walk", 45, ["menu-walk.json"]))
+        job = self._jobs()[0]
+        self.assertEqual((job["status"], job["verdict"], job["task_id"], job["requested_by"]),
+                         ("done", "PASS", "T0001", "claude"))
+        review_prompts = sorted(self.env.cfg.state_dir.glob("runs/*T0001-astra-review/prompt.md"))
+        self.assertTrue(review_prompts)
+        text = review_prompts[-1].read_text()
+        self.assertIn("EC2 TEST HOST RUNS", text)
+        self.assertIn("capture-menu-walk=PASS", text)
+
+    def test_invalid_requests_are_rejected_without_running(self) -> None:
+        runner = FakeGfxRunner()
+        orch = self._orch(runner)
+        msgs = orch.gfx.enqueue([{"mode": "shell", "target": "x", "reason": ""},
+                                 {"mode": "compat", "target": "no-such-case", "reason": ""},
+                                 {"mode": "capture", "target": "missing", "reason": ""}], None, "astra", self.env.repo)
+        self.assertEqual(len(msgs), 3)
+        self.assertEqual([j["status"] for j in self._jobs()], ["rejected"] * 3)
+        self.assertIsNone(orch.gfx.run_next())
+        self.assertEqual(runner.calls, [])
+
+    def test_daily_limit_keeps_job_queued(self) -> None:
+        self.env.cfg.data["gfx"]["max_runs_per_day"] = 1
+        runner = FakeGfxRunner()
+        orch = self._orch(runner)
+        orch.gfx.enqueue([{"mode": "probe", "target": "all", "reason": "a"},
+                          {"mode": "probe", "target": "all", "reason": "b"}], None, "astra", self.env.repo)
+        self.assertIn("PASS", orch.gfx.run_next())
+        self.assertIsNone(orch.gfx.run_next())
+        self.assertEqual(len(runner.calls), 1)
+        self.assertEqual([j["status"] for j in self._jobs()], ["done", "queued"])
+        self.assertGreater(orch.gfx.next_possible(), time.time() + 60)
+
+    def test_monthly_budget_refuses_and_asks_owner(self) -> None:
+        self.env.cfg.data["gfx"]["monthly_budget_usd"] = 0.5
+        runner = FakeGfxRunner()
+        orch = self._orch(runner)
+        orch.gfx.enqueue([{"mode": "probe", "target": "all", "reason": "a"}], None, "astra", self.env.repo)
+        self.assertIn("monthly budget", orch.gfx.run_next())
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self._jobs()[0]["status"], "refused_budget")
+        self.assertIn("budget", self.env.db.get_meta("human_question"))
+
+    def test_expired_aws_session_waits_for_login(self) -> None:
+        runner = FakeGfxRunner(session=False)
+        orch = self._orch(runner)
+        orch.gfx.enqueue([{"mode": "probe", "target": "all", "reason": "a"}], None, "astra", self.env.repo)
+        self.assertIn("aws login", orch.gfx.run_next())
+        self.assertEqual(runner.calls, [])
+        self.assertEqual(self._jobs()[0]["status"], "queued")
+        self.assertIn("aws login", self.env.db.get_meta("human_question"))
+        self.assertIsNone(orch.gfx.run_next())  # backed off, no retry storm
+
+    def test_plan_waiting_for_run_does_not_halt_or_replan(self) -> None:
+        plan = dict(fake_plan("M1", []), gfx_requests=[{"mode": "probe", "target": "all", "reason": "health"}])
+        astra = FakeAstra(plans=[plan, fake_plan("M1", ["walls"])])
+        runner = FakeGfxRunner(session=False)
+        orch = self._orch(runner, astra)
+        orch.setup()
+        self.assertIn("plan", orch.step())
+        self.assertIn("aws login", orch.step())
+        with self.assertRaises(Wait):
+            orch.step()
+        self.assertEqual(len([c for c in astra.calls if c["kind"] == "plan"]), 1)
+        runner.session = True
+        self.env.db.set_meta("gfx_blocked_until", "0")
+        self.assertIn("gfx job 1", orch.step())
+        orch.step()  # re-plan with the result in the prompt
+        plans = sorted(self.env.cfg.state_dir.glob("runs/*plan*/prompt.md"))
+        self.assertIn("job 1 [done] probe all by astra: PASS", plans[-1].read_text())
+
+    def test_interrupted_run_is_charged_and_failed(self) -> None:
+        orch = self._orch(FakeGfxRunner())
+        orch.gfx.enqueue([{"mode": "probe", "target": "all", "reason": "a"}], None, "astra", self.env.repo)
+        self.env.db.conn.execute("UPDATE gfx_jobs SET status='running', started_at=?",
+                                 (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),))
+        orch.recover()
+        job = self._jobs()[0]
+        self.assertEqual((job["status"], job["minutes"]), ("failed", 45.0))
+        self.assertGreater(orch.gfx.month_spend_usd(), 0.5)
+
+    def test_host_scripts_are_protected(self) -> None:
+        prot = self.env.cfg["protected_paths"]
+        self.assertEqual(protected_hits(["tests/gfx/windows/Run-Gta2Case.ps1", "tests/gfx/compat-matrix.json",
+                                         "scripts/ci/ec2-gpu-session.sh", "tests/gfx/scenarios/x.json"], prot),
+                         ["tests/gfx/windows/Run-Gta2Case.ps1", "tests/gfx/compat-matrix.json",
+                          "scripts/ci/ec2-gpu-session.sh"])
 
 
 # ------------------------------------------------------------------------------- stage D

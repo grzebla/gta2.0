@@ -50,3 +50,18 @@ Describe 'Unattended host settings' {
     It 'suppresses WER dialogs' { $script:init | Should -Match 'DontShowUI -Value 1' }
     It 'disables the Basic Display Adapter only once the T4 runs WDDM' { $script:init | Should -Match "modelNow -eq 'WDDM'" }
 }
+
+Describe 'Capture mode (scripted input)' {
+    BeforeAll {
+        $script:invoke = Get-Content -Raw -Path (Join-Path $script:hostDir 'Invoke-GfxCompat.ps1')
+        $script:runner = Get-Content -Raw -Path (Join-Path $script:hostDir 'Run-Gta2Case.ps1')
+    }
+    It 'accepts capture as a mode' { $script:invoke | Should -Match "ValidateSet\('probe', 'compat', 'e2e', 'capture'\)" }
+    It 'reads the scenario only from the uploaded scenarios folder' { $script:invoke | Should -Match 'scenarios\\\$Cases\.json' }
+    It 'sends keys as scan codes (DirectInput reads scan codes)' { $script:runner | Should -Match 'KEYEVENTF_SCANCODE' }
+    It 'refuses keys outside the scan-code table' { $script:runner | Should -Match 'unsupported key' }
+    It 'records what was sent' { $script:runner | Should -Match 'inputsSent' }
+    It 'never evaluates scenario text as code' {
+        ($script:invoke + $script:runner) | Should -Not -Match 'Invoke-Expression|\biex\b|ScriptBlock\]::Create'
+    }
+}
