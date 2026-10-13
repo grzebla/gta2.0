@@ -1,3 +1,3 @@
 # Known Issues
 
-T0008 review found dependency-checker bypasses through generator expressions, semicolon lists, ignored unknown gta20_* targets and file-directory-based target ownership. Root/shared CMake target mutations are outside its scan. These require correction before approval; retain existing unrelated issues.
+T0008 attempt 2 fixes the previously identified generator-expression, list, unknown-target and target-ownership bypasses. Remaining reproduced bypasses: bracket-quoted target-link arguments and helper functions with both target and dependency supplied through variables. Both silently accept forbidden scene/render-to-sim edges. Retain unrelated known issues.
