@@ -176,7 +176,8 @@ używa wyłącznie arytmetyki całkowitej. Wszelkie przyszłe użycie `float`/`d
   **nie** jest to kafel 1023. `slot_uv` daje prostokąt z wcięciem pół teksela. Bez danych gry
   `make_white_atlas()` (sam biały slot). Aplikacja buduje atlas raz przy starcie (CPU, `scene`) i
   przekazuje piksele do `Renderer::set_atlas`, który tworzy teksturę i wysyła ją jednym przebiegiem
-  kopiowania; poprzednia tekstura jest zwalniana po `SDL_WaitForGPUIdle`. Zanim atlas zostanie
+  kopiowania; poprzednia tekstura jest zwalniana po `SDL_WaitForGPUIdle`, dopiero gdy nowa jest
+  w pełni wysłana — każdy błąd po drodze zostawia poprzedni atlas. Zanim atlas zostanie
   ustawiony, związana jest tekstura 1 × 1 biała. Sampler: najbliższy sąsiad, `CLAMP_TO_EDGE`.
 * **Co klatkę** `apps/gta2` (`build_frame`) czyści `DrawList` i od nowa dopisuje: pokrywy
   widocznych komórek wszystkich poziomów, od najniższego (`append_map_textured`; pomija kafel 0 i
@@ -185,7 +186,8 @@ używa wyłącznie arytmetyki całkowitej. Wszelkie przyszłe użycie `float`/`d
   jednostkowe.
 * **Co klatkę** `render` kopiuje **całą** listę do bufora transferowego (`cycle=true`, bez czekania
   na GPU) i przebiegiem kopiowania do bufora instancji w tym samym buforze poleceń. Oba bufory
-  rosną ×2 od 1024 instancji i nie są zmniejszane (bez alokacji w stanie ustalonym). Macierz
+  rosną ×2 od 1024 instancji i nie są zmniejszane (bez alokacji w stanie ustalonym); nowe bufory
+  zastępują stare dopiero po udanym utworzeniu obu, więc nieudany wzrost zostawia poprzednie. Macierz
   `Camera2D::view_projection` (ortograficzna, z = 0 w shaderach) idzie jako uniform wierzchołków.
   Rysowanie: **jedno** wywołanie instancjonowane (6 wierzchołków × liczba quadów), kolejność listy,
   mieszanie alfa, bez bufora głębi, bez cullingu ścian. Pipeline'y keszowane per format celu
@@ -195,6 +197,14 @@ używa wyłącznie arytmetyki całkowitej. Wszelkie przyszłe użycie `float`/`d
   świeżość sprawdzana w CI), DXIL/DXBC kompilowane przy buildzie na Windows (`dxc`/`fxc`
   z Windows SDK).
 * Render offscreen z odczytem pikseli (`--offscreen WxH --screenshot`) — do testów bez okna.
+* **Rozmiary i błędy GPU.** SDL_GPU liczy rozmiary w `Uint32`, więc każdy rozmiar w bajtach
+  (atlas, odczyt RGBA8, bufory instancji) jest liczony w 64 bitach i sprawdzany przed alokacją
+  (`transfer_size.hpp`: zerowy wymiar, > 4 GiB − 1 bajtów, > 107 374 182 quadów na klatkę → błąd).
+  Wynik mapowania bufora transferowego, bufor poleceń, przebiegi kopiowania/renderu i czekanie na
+  płot są sprawdzane; błąd zwraca `Result` z kontekstem („atlas: …”, „offscreen readback: …”), a
+  utworzone obiekty są zwalniane, bufor poleceń anulowany (po pobraniu tekstury swapchainu —
+  wysyłany, bo SDL zabrania anulowania). Testy wstrzykują awarie tych wywołań przez
+  `Renderer::inject_fault` (`tests/unit/render_tests.cpp`).
 * CPU-owe pomocniki geometrii (`block_geometry.hpp`: pięć ścian bloku; `face_texture.hpp`:
   narożniki tekstury A–D dla obrotu/odbicia) istnieją w `scene`, ale nic ich jeszcze nie rysuje.
 

@@ -1,5 +1,6 @@
 add_library(gta20_render
-    src/renderer.cpp)
+    src/renderer.cpp
+    src/transfer_size.cpp)
 add_library(gta20::render ALIAS gta20_render)
 target_include_directories(gta20_render PUBLIC include)
 target_link_libraries(gta20_render PUBLIC gta20::core gta20::scene ${GTA20_SDL_TARGET})
