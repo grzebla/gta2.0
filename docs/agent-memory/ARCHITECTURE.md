@@ -1,13 +1,37 @@
 # Architecture
 
-Inspected integration 12281ba. core provides math/types; assets parses game files and owns map/style associations; scene owns GPU-independent geometry and draw lists; render owns SDL_GPU resources; apps compose modules. scene must remain independent of sim, render and SDL.
+Reviewed integration a2e5232.
 
-Current runtime uses 40-byte QuadInstance records and a 2048x2048 tile atlas. Slot 1023 is an opaque white debug slot. Map rendering emits flat lids; quad shaders use constant depth and the pipeline has no world depth buffer. Map draw lists are rebuilt and instance data uploaded each frame.
+## Ownership
 
-T0001 supplies five unit-block faces with outward winding and lids at origin.z+1. T0005 maps texture corners for five faces and eight transforms. These are synthetic contracts; original wall orientation and GMP elevation remain unverified.
+- core: math, types, cameras and diagnostics.
+- assets: game-file decoding and map/style associations.
+- scene: GPU-independent face geometry, texture mapping, draw lists and future CPU world meshes. Depends on core/assets, never sim/render/SDL.
+- render: SDL_GPU shaders, buffers, textures, pipelines, depth targets and resource lifetime.
+- platform: SDL window/input and image output.
+- apps: module composition, scene replacement and camera control.
+- testing: simulation traces/comparison. Existing simulation goldens are prototype regressions, not original-game evidence.
 
-Next CPU contract: scene owns indexed position/UV meshes with u32 indices. Assemble explicitly selected faces first, then add a deterministic partial unsloped map builder with unsupported-content statistics. GPU ownership, camera projection and caching follow in separate tasks.
+Actual CMake links follow this general split. Integration's checker only examines selected include patterns. T0008's stronger checker and corrected documentation remain unapproved. Avoid turning its custom CMake lexer into an unlimited interpreter; supported syntax and rejection behavior must be explicit and tested.
 
-T0010 supplies strict local inventory and all 17 map/style associations. Inventory success does not prove geometry completeness or fidelity.
+## Current rendering
 
-T0008 remains unapproved on its branch. Integration still has the older include-only boundary checker and stale architecture documentation; its passing check does not establish complete dependency enforcement.
+QuadInstance is 40 bytes. The atlas is 2048x2048; slot 1023 is opaque white for debug quads and must not render GMP marker 1023. App build_frame rebuilds map/entity quads each frame; render uploads all instances. Buffer-capacity reuse is not static geometry caching.
+
+Shaders use world z=0. The pipeline blends color, disables culling and has no depth target. Camera2D is orthographic and ignores elevation. Offscreen rendering allocates and downloads a target per call, so its timings include costs absent from window rendering.
+
+T0001 supplies five outward-wound unit-block faces with lids at origin.z+1. T0005 supplies 40 face/rotation/flip contracts. Neither proves GMP elevation or original texture orientation.
+
+## Approved direction
+
+T0013/T0014 establish indexed CPU meshes and an explicitly partial map builder. Renderer-owned indexed resources consume that contract; scene receives no GPU handles. Preserve the quad path while a diagnostic geometry-only path gains configurable world projection, depth and binary-alpha cutout.
+
+Discard transparent world texels before depth writes. Test walls, roofs and stacked surfaces in both submission orders. Projection parameters remain provisional until original references establish them. Camera2D culling cannot be reused for elevated geometry without proof that bounds are conservative.
+
+Use explicit map/style/policy revisions for cache invalidation. Camera motion must only change view data or visibility selection. Test equal-sized content replacement, not only changed counts. Measure rebuilds and static uploads separately from dynamic quads.
+
+Add strict asset-free GPU tests with backend identity checks. Required Vulkan CI is one backend's evidence; Metal and D3D12 execution remains necessary. All-17-map geometry audits must distinguish partial coverage from completeness.
+
+## Debt
+
+renderer.cpp has unchecked transfer mappings and acquisition paths, plus unchecked GPU-size narrowing/multiplication. Harden these before extending buffers. Existing public architecture text incorrectly says QuadInstance is 24 bytes and lists the atlas as future work; resolve through existing T0008.
