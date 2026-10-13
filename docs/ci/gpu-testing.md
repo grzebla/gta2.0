@@ -235,4 +235,11 @@ Sprzątanie: `aws cloudformation delete-stack` dla obu stosów; bucket artefakt�
   `postmessage`, `activate-scancode` albo `cycle` (klawisz i używa metody i mod 4, do diagnozy).
 - `summary.json` zapisuje `harnessRevision` (commit skryptów wysłanych na hosta, `-dirty` przy
   lokalnych zmianach) i `inputMethod`; Orchestrator pokazuje je agentom przy wynikach.
+- Przebieg diagnostyczny `cycle` (job 2, `frontend-walk`, harness `c05b588`): werdykt PASS (D1
+  naprawione). Wszystkie cztery metody wysłały klawisze, okno gry miało fokus, pulpit wejściowy był
+  dostępny, gra nie wisiała i zużywała CPU, ale zrzut ekranu nie zmienił się ani razu. Dwie
+  hipotezy: gra ignoruje wstrzyknięte wejście albo zrzut GDI pokazuje zamrożoną klatkę
+  pełnoekranowej powierzchni. Dlatego każda klatka ma teraz także zrzut samego okna gry
+  (`PrintWindow`, `*-window.png`, `windowCapture`), a logi gry i wrappera z czasu przypadku trafiają
+  do `game-logs/`.
 

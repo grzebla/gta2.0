@@ -40,6 +40,7 @@ public struct INPUT { public uint type; public InputUnion u; }
 [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint n, INPUT[] inputs, int size);
 [DllImport("user32.dll", SetLastError = true)] public static extern bool PostMessage(System.IntPtr hWnd, uint msg, System.IntPtr wParam, System.IntPtr lParam);
 [DllImport("user32.dll")] public static extern bool IsHungAppWindow(System.IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool PrintWindow(System.IntPtr hWnd, System.IntPtr hdc, uint flags);
 [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
 [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
 [DllImport("user32.dll")] public static extern System.IntPtr SetFocus(System.IntPtr hWnd);
@@ -59,6 +60,42 @@ public struct RECT { public int Left; public int Top; public int Right; public i
 
 Import-Module (Join-Path $PSScriptRoot 'GfxAnalysis.psm1') -Force
 
+# Samples a bitmap (32bpp ARGB) with the shared analysis.
+function Get-BitmapSample([System.Drawing.Bitmap] $Bitmap) {
+    $rect = New-Object System.Drawing.Rectangle 0, 0, $Bitmap.Width, $Bitmap.Height
+    $data = $Bitmap.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly,
+        [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+    try {
+        $bytes = New-Object byte[] ($data.Stride * $data.Height)
+        [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
+        return Get-FrameSample -Bytes $bytes -Width $data.Width -Height $data.Height -Stride $data.Stride
+    } finally {
+        $Bitmap.UnlockBits($data)
+    }
+}
+
+# The game window's own content through PrintWindow(PW_RENDERFULLCONTENT). A screen grab (GDI
+# CopyFromScreen) can show a frozen frame of a fullscreen DirectX surface; this does not depend
+# on what is composed on the screen. Returns $null when the window has no area.
+function Get-WindowSample([IntPtr] $Window, [string] $Path) {
+    if ($Window -eq [IntPtr]::Zero) { return $null }
+    $r = New-Object Gta20.Native+RECT
+    if (-not [Gta20.Native]::GetWindowRect($Window, [ref] $r)) { return $null }
+    $w = $r.Right - $r.Left; $h = $r.Bottom - $r.Top
+    if ($w -le 0 -or $h -le 0) { return $null }
+    $bmp = New-Object System.Drawing.Bitmap $w, $h
+    $gfx = [System.Drawing.Graphics]::FromImage($bmp)
+    try {
+        $hdc = $gfx.GetHdc()
+        try { $ok = [Gta20.Native]::PrintWindow($Window, $hdc, 2) } finally { $gfx.ReleaseHdc($hdc) }
+        if (-not $ok) { return $null }
+        $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
+        return Get-BitmapSample $bmp
+    } finally {
+        $gfx.Dispose(); $bmp.Dispose()
+    }
+}
+
 function Get-ScreenSample([string] $Path) {
     $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
     $bmp = New-Object System.Drawing.Bitmap $bounds.Width, $bounds.Height
@@ -66,16 +103,7 @@ function Get-ScreenSample([string] $Path) {
     try {
         $gfx.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bmp.Size)
         $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
-        $rect = New-Object System.Drawing.Rectangle 0, 0, $bmp.Width, $bmp.Height
-        $data = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly,
-            [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-        try {
-            $bytes = New-Object byte[] ($data.Stride * $data.Height)
-            [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $bytes, 0, $bytes.Length)
-            return Get-FrameSample -Bytes $bytes -Width $data.Width -Height $data.Height -Stride $data.Stride
-        } finally {
-            $bmp.UnlockBits($data)
-        }
+        return Get-BitmapSample $bmp
     } finally {
         $gfx.Dispose(); $bmp.Dispose()
     }
@@ -234,6 +262,7 @@ try {
 
     $exe = Join-Path $case.gameDir $case.exe
     $lastSample = $baseline
+    $lastWindow = $null
     $proc = Start-Process -FilePath $exe -WorkingDirectory $case.gameDir -PassThru
     $result.pid = $proc.Id
     $t0 = Get-Date
@@ -267,6 +296,9 @@ try {
             $afterPng = Join-Path $outDir ('key-{0:D3}s-{1}-{2}.png' -f [int]$ev.at, $ev.key, $method)
             $after = Get-ScreenSample $afterPng
             $proc.Refresh()
+            $afterWin = Get-WindowSample $proc.MainWindowHandle ($afterPng -replace '\.png$', '-window.png')
+            if ($afterWin -and $lastWindow) { $diag.afterWindowChangedRatio = (Compare-FrameSample -Baseline $lastWindow -Frame $afterWin).ChangedRatio }
+            if ($afterWin) { $lastWindow = $afterWin }
             $diag.atSeconds = $ev.at
             $diag.key = $ev.key
             $diag.afterFile = (Split-Path -Leaf $afterPng)
@@ -280,6 +312,14 @@ try {
         $png = Join-Path $outDir ('frame-{0:D3}s.png' -f [int]$at)
         $m = Get-ScreenSample $png
         $lastSample = $m
+        $proc.Refresh()
+        $win = Get-WindowSample $proc.MainWindowHandle ($png -replace '\.png$', '-window.png')
+        $winInfo = $null
+        if ($win) {
+            $winInfo = [ordered]@{ width = $win.Width; height = $win.Height; uniqueColors = $win.UniqueColors
+                blackRatio = $win.BlackRatio; changedVsPrevious = $(if ($lastWindow) { (Compare-FrameSample -Baseline $lastWindow -Frame $win).ChangedRatio } else { $null }) }
+            $lastWindow = $win
+        }
         $diff = Compare-FrameSample -Baseline $baseline -Frame $m
         $proc.Refresh()
         $result.frames += [ordered]@{
@@ -293,6 +333,7 @@ try {
             sizeChanged  = $diff.SizeChanged
             processAlive = -not $proc.HasExited
             foreground   = ([Gta20.Native]::GetForegroundWindow() -eq $proc.MainWindowHandle)
+            windowCapture = $winInfo
         }
     }
 
@@ -316,6 +357,20 @@ try {
 } finally {
     if ($proc -and -not $proc.HasExited) {
         Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    }
+    # Logs the game or the wrapper (e.g. DDrawCompat-gta2.log) wrote during this case.
+    try {
+        $since = [datetime]::Parse($result.startedAt)
+        $logs = @(Get-ChildItem -Path $case.gameDir -Filter '*.log' -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -ge $since.ToLocalTime().AddSeconds(-5) -and $_.Length -le 1MB })
+        if ($logs.Count -gt 0) {
+            $logDir = Join-Path $outDir 'game-logs'
+            New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+            foreach ($l in $logs) { Copy-Item -Path $l.FullName -Destination $logDir -Force }
+            $result.gameLogs = @($logs | ForEach-Object { $_.Name })
+        }
+    } catch {
+        $result.gameLogsError = $_.Exception.Message
     }
     $result.finishedAt = (Get-Date).ToString('o')
     $result | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 -Path (Join-Path $outDir 'result.json')
