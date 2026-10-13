@@ -38,6 +38,14 @@ public struct InputUnion { [System.Runtime.InteropServices.FieldOffset(0)] publi
 [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
 public struct INPUT { public uint type; public InputUnion u; }
 [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint n, INPUT[] inputs, int size);
+[DllImport("user32.dll", SetLastError = true)] public static extern bool PostMessage(System.IntPtr hWnd, uint msg, System.IntPtr wParam, System.IntPtr lParam);
+[DllImport("user32.dll")] public static extern bool IsHungAppWindow(System.IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+[DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+[DllImport("user32.dll")] public static extern System.IntPtr SetFocus(System.IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool BringWindowToTop(System.IntPtr hWnd);
+[DllImport("user32.dll", SetLastError = true)] public static extern System.IntPtr OpenInputDesktop(uint flags, bool inherit, uint access);
+[DllImport("user32.dll")] public static extern bool CloseDesktop(System.IntPtr hDesk);
 public delegate bool EnumProc(System.IntPtr hWnd, System.IntPtr lParam);
 [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, System.IntPtr lParam);
 [DllImport("user32.dll")] public static extern bool EnumChildWindows(System.IntPtr parent, EnumProc cb, System.IntPtr lParam);
@@ -87,8 +95,8 @@ $result = [ordered]@{
     error      = $null
 }
 
-# Scan codes (set 1) for scripted input. DirectInput games read scan codes, not window
-# messages, so input goes through SendInput with KEYEVENTF_SCANCODE. [code, extended]
+# Scan codes (set 1) for scripted input. [code, extended]. DirectInput games read scan codes;
+# the injection method comes from the compat matrix (owner setting, see Send-GameKey).
 $script:ScanCodes = @{
     ENTER = @(0x1C, $false); ESC = @(0x01, $false); SPACE = @(0x39, $false); TAB = @(0x0F, $false)
     UP = @(0x48, $true); DOWN = @(0x50, $true); LEFT = @(0x4B, $true); RIGHT = @(0x4D, $true)
@@ -99,24 +107,87 @@ $letters = 'ASDFGHJKL'; for ($i = 0; $i -lt 9; $i++) { $script:ScanCodes[[string
 $letters = 'ZXCVBNM'; for ($i = 0; $i -lt 7; $i++) { $script:ScanCodes[[string]$letters[$i]] = @((0x2C + $i), $false) }
 $digits = '1234567890'; for ($i = 0; $i -lt 10; $i++) { $script:ScanCodes[[string]$digits[$i]] = @((0x02 + $i), $false) }
 
-function Send-GameKey([string] $Key, [int] $HoldMs, [IntPtr] $Window) {
+# Virtual-key codes for the same keys (methods 'vk' and 'postmessage').
+$script:VirtualKeys = @{
+    ENTER = 0x0D; ESC = 0x1B; SPACE = 0x20; TAB = 0x09; UP = 0x26; DOWN = 0x28; LEFT = 0x25; RIGHT = 0x27
+    LCTRL = 0xA2; LSHIFT = 0xA0; LALT = 0xA4; BACKSPACE = 0x08
+}
+foreach ($c in [char[]] 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') { $script:VirtualKeys[[string]$c] = [int][char]$c }
+$script:InputMethods = @('scancode', 'vk', 'postmessage', 'activate-scancode')
+
+function Get-WindowOwner([IntPtr] $Window) {
+    $owner = [uint32]0
+    $thread = [Gta20.Native]::GetWindowThreadProcessId($Window, [ref] $owner)
+    return [pscustomobject]@{ Pid = [int]$owner; Thread = $thread }
+}
+
+function Send-KeyEvent([uint16] $Vk, [uint16] $Scan, [uint32] $Flags) {
+    $in = New-Object Gta20.Native+INPUT
+    $in.type = 1
+    $ki = New-Object Gta20.Native+KEYBDINPUT
+    $ki.wVk = $Vk
+    $ki.wScan = $Scan
+    $ki.dwFlags = $Flags
+    $in.u.ki = $ki
+    $n = [Gta20.Native]::SendInput(1, @($in), [System.Runtime.InteropServices.Marshal]::SizeOf([type] [Gta20.Native+INPUT]))
+    return [pscustomobject]@{ Sent = [int]$n; Error = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error() }
+}
+
+# Sends one key press to the game and returns diagnostics (never proof that the game consumed it).
+# Methods: scancode = SendInput with KEYEVENTF_SCANCODE; vk = SendInput with virtual key + scan
+# code; postmessage = WM_KEYDOWN/WM_KEYUP posted to the game window; activate-scancode = attach
+# to the game's input thread, bring it to the top and focus it, then scancode.
+function Send-GameKey([string] $Key, [int] $HoldMs, [IntPtr] $Window, [string] $Method, [int] $GamePid) {
     if (-not $script:ScanCodes.ContainsKey($Key)) { throw "unsupported key '$Key'" }
+    if ($script:InputMethods -notcontains $Method) { throw "unsupported input method '$Method'" }
     $code = $script:ScanCodes[$Key]
-    if ($Window -ne [IntPtr]::Zero) { [Gta20.Native]::SetForegroundWindow($Window) | Out-Null }
-    $flags = [uint32]0x0008                     # KEYEVENTF_SCANCODE
-    if ($code[1]) { $flags = $flags -bor 0x0001 } # KEYEVENTF_EXTENDEDKEY
-    $sent = 0
+    $vk = [uint16] $script:VirtualKeys[$Key]
+    $scan = [uint16] $code[0]
+    $ext = [bool] $code[1]
+    $diag = [ordered]@{ method = $Method; window = [int64]$Window; sendInput = @(); postMessage = @() }
+    $before = [Gta20.Native]::GetForegroundWindow()
+    $diag.foregroundBefore = [ordered]@{ window = [int64]$before; pid = (Get-WindowOwner $before).Pid }
+    $desk = [Gta20.Native]::OpenInputDesktop(0, $false, 0x0100)  # DESKTOP_SWITCHDESKTOP
+    $diag.inputDesktopAccessible = ($desk -ne [IntPtr]::Zero)
+    if ($desk -ne [IntPtr]::Zero) { [Gta20.Native]::CloseDesktop($desk) | Out-Null }
+    if ($Window -ne [IntPtr]::Zero) {
+        $diag.hung = [Gta20.Native]::IsHungAppWindow($Window)
+        $attached = $false
+        $target = Get-WindowOwner $Window
+        if ($Method -eq 'activate-scancode') {
+            $attached = [Gta20.Native]::AttachThreadInput([Gta20.Native]::GetCurrentThreadId(), $target.Thread, $true)
+            [Gta20.Native]::BringWindowToTop($Window) | Out-Null
+        }
+        $diag.setForeground = [Gta20.Native]::SetForegroundWindow($Window)
+        if ($attached) {
+            [Gta20.Native]::SetFocus($Window) | Out-Null
+            [Gta20.Native]::AttachThreadInput([Gta20.Native]::GetCurrentThreadId(), $target.Thread, $false) | Out-Null
+        }
+        $diag.attachedThreadInput = $attached
+    }
+    $fg = [Gta20.Native]::GetForegroundWindow()
+    $diag.foregroundAtSend = [ordered]@{ window = [int64]$fg; pid = (Get-WindowOwner $fg).Pid; isGame = ((Get-WindowOwner $fg).Pid -eq $GamePid) }
     foreach ($up in @($false, $true)) {
-        $in = New-Object Gta20.Native+INPUT
-        $in.type = 1
-        $ki = New-Object Gta20.Native+KEYBDINPUT
-        $ki.wScan = [uint16] $code[0]
-        $ki.dwFlags = if ($up) { $flags -bor 0x0002 } else { $flags } # KEYEVENTF_KEYUP
-        $in.u.ki = $ki
-        $sent += [Gta20.Native]::SendInput(1, @($in), [System.Runtime.InteropServices.Marshal]::SizeOf([type] [Gta20.Native+INPUT]))
+        if ($Method -eq 'postmessage') {
+            $lp = [int64]1 -bor ([int64]$scan -shl 16)
+            if ($ext) { $lp = $lp -bor (1 -shl 24) }
+            if ($up) { $lp = $lp -bor 0xC0000000L }
+            $ok = [Gta20.Native]::PostMessage($Window, $(if ($up) { 0x0101 } else { 0x0100 }), [IntPtr][int64]$vk, [IntPtr]$lp)
+            $diag.postMessage += [ordered]@{ up = $up; ok = $ok; error = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error() }
+        } else {
+            if ($Method -eq 'vk') {
+                $flags = [uint32]0; $v = $vk
+            } else {
+                $flags = [uint32]0x0008; $v = [uint16]0       # KEYEVENTF_SCANCODE
+            }
+            if ($ext) { $flags = $flags -bor 0x0001 }       # KEYEVENTF_EXTENDEDKEY
+            if ($up) { $flags = $flags -bor 0x0002 }        # KEYEVENTF_KEYUP
+            $r = Send-KeyEvent -Vk $v -Scan $scan -Flags $flags
+            $diag.sendInput += [ordered]@{ up = $up; sent = $r.Sent; error = $r.Error }
+        }
         if (-not $up) { Start-Sleep -Milliseconds ([math]::Max(30, $HoldMs)) }
     }
-    return $sent
+    return $diag
 }
 
 # Visible dialog boxes (class #32770) owned by a process, with their static texts.
@@ -162,10 +233,16 @@ try {
         uniqueColors = $baseline.UniqueColors; blackRatio = $baseline.BlackRatio }
 
     $exe = Join-Path $case.gameDir $case.exe
+    $lastSample = $baseline
     $proc = Start-Process -FilePath $exe -WorkingDirectory $case.gameDir -PassThru
     $result.pid = $proc.Id
     $t0 = Get-Date
 
+    # Input method: one name, or 'cycle' (key i uses method i mod n - diagnosis of which
+    # injection the game accepts). Set by the owner in the compat matrix, never by a scenario.
+    $inputMethod = 'scancode'
+    if (($case.PSObject.Properties.Name -contains 'inputMethod') -and $case.inputMethod) { $inputMethod = [string]$case.inputMethod }
+    $keyIndex = 0
     # One timeline: screenshots and (capture mode) scripted key presses, in time order.
     $events = @()
     foreach ($at in $case.observe.screenshotsAtSeconds) { $events += [pscustomobject]@{ at = [double]$at; kind = 'shot'; key = $null; hold = 0 } }
@@ -181,13 +258,28 @@ try {
         if ($wait -gt 0) { Start-Sleep -Milliseconds ([int]($wait * 1000)) }
         if ($ev.kind -eq 'key') {
             $proc.Refresh()
-            $n = Send-GameKey -Key $ev.key -HoldMs $ev.hold -Window $proc.MainWindowHandle
-            $result.inputsSent += [ordered]@{ atSeconds = $ev.at; key = $ev.key; events = $n }
+            $method = if ($inputMethod -eq 'cycle') { $script:InputMethods[$keyIndex % $script:InputMethods.Count] } else { $inputMethod }
+            $keyIndex++
+            $cpuBefore = $proc.TotalProcessorTime.TotalMilliseconds
+            $diag = Send-GameKey -Key $ev.key -HoldMs $ev.hold -Window $proc.MainWindowHandle -Method $method -GamePid $proc.Id
+            # What the screen shows shortly after the key (evidence, not proof of consumption).
+            Start-Sleep -Milliseconds 1500
+            $afterPng = Join-Path $outDir ('key-{0:D3}s-{1}-{2}.png' -f [int]$ev.at, $ev.key, $method)
+            $after = Get-ScreenSample $afterPng
+            $proc.Refresh()
+            $diag.atSeconds = $ev.at
+            $diag.key = $ev.key
+            $diag.afterFile = (Split-Path -Leaf $afterPng)
+            $diag.afterChangedRatio = (Compare-FrameSample -Baseline $lastSample -Frame $after).ChangedRatio
+            $diag.gameCpuMsDuring = [math]::Round($proc.TotalProcessorTime.TotalMilliseconds - $cpuBefore)
+            $result.inputsSent += $diag
+            $lastSample = $after
             continue
         }
         $at = $ev.at
         $png = Join-Path $outDir ('frame-{0:D3}s.png' -f [int]$at)
         $m = Get-ScreenSample $png
+        $lastSample = $m
         $diff = Compare-FrameSample -Baseline $baseline -Frame $m
         $proc.Refresh()
         $result.frames += [ordered]@{
@@ -206,7 +298,8 @@ try {
 
     $proc.Refresh()
     $result.alive = -not $proc.HasExited
-    $result.dialogs = if ($result.alive) { @(Get-ProcessDialog -ProcessId $proc.Id) } else { @() }
+    # @(if ...) - an if-expression would unroll an empty array to $null (defect D1).
+    $result.dialogs = @(if ($result.alive) { Get-ProcessDialog -ProcessId $proc.Id })
     if ($proc.HasExited) {
         $result.exitCode = $proc.ExitCode
     } elseif ($proc.MainWindowHandle -ne [IntPtr]::Zero) {

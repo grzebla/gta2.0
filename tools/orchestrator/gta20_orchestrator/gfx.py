@@ -330,7 +330,8 @@ class GfxJobs:
         cases = ["%s=%s" % (c.get("id"), c.get("verdict")) for c in summary.get("cases") or []]
         status = "done" if res.get("rc") == 0 else "failed"
         self.finish(jid, status=status, minutes=res.get("minutes"), result_dir=res.get("result_dir"),
-                    verdict=verdict, summary=dumps({"cases": cases}),
+                    verdict=verdict, summary=dumps({"cases": cases, "harness": summary.get("harnessRevision"),
+                                                    "input": summary.get("inputMethod")}),
                     error=None if status == "done" else truncate(res.get("log_tail", ""), 1500))
         with self.db.tx():
             self.db.event("gfx_finished", task_id=job["task_id"], agent="orchestrator", outcome=verdict,
@@ -345,10 +346,12 @@ class GfxJobs:
                      self.lim["max_minutes_per_run"], self.lim["max_runs_per_day"],
                      float(self.lim["monthly_budget_usd"]), self.month_spend_usd())]
         for r in rows:
-            cases = (loads(r["summary"], {}) or {}).get("cases") or []
-            lines.append("- job %s [%s] %s %s by %s: %s%s%s" % (
+            info = loads(r["summary"], {}) or {}
+            cases = info.get("cases") or []
+            lines.append("- job %s [%s] %s %s by %s: %s%s%s%s" % (
                 r["id"], r["status"], r["mode"], r["target"], r["requested_by"], r["verdict"] or "-",
                 (" | " + ", ".join(cases[:8])) if cases else "",
+                (" | harness %s, input %s" % (info.get("harness"), info.get("input"))) if info.get("harness") else "",
                 (" | results (local, not in git): %s" % r["result_dir"]) if r["status"] == "done" and r["result_dir"] else
                 (" | " + r["error"][:200] if r["error"] else "")))
         if len(lines) == 1:

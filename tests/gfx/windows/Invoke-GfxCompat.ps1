@@ -143,8 +143,15 @@ function Merge-Setting($A, $B) {
 }
 
 # ---------------------------------------------------------------- case loop
+# Key injection method (owner setting in the matrix; scenarios cannot choose it).
+$inputMethod = 'scancode'
+if (($matrix.PSObject.Properties.Name -contains 'input') -and $matrix.input.method) { $inputMethod = [string]$matrix.input.method }
+# Which harness revision actually ran here (written by ec2-gpu-session.sh at upload).
+$revisionFile = Join-Path $scriptDir 'harness-revision.txt'
+$harnessRevision = if (Test-Path $revisionFile) { (Get-Content -Raw -Path $revisionFile).Trim() } else { 'unknown' }
 $summary = [ordered]@{
     runId = $RunId; mode = $Mode; startedAt = (Get-Date).ToString('o')
+    harnessRevision = $harnessRevision; inputMethod = $inputMethod
     gpu = @($envReport.adapters | Where-Object { $_.Name -like '*NVIDIA*' } | ForEach-Object { $_.Name }) -join '; '
     driverStrategy = $boot.Driver.strategy
     interactiveSession = [bool]$session
@@ -173,7 +180,7 @@ if ($Mode -ne 'probe') {
             minChangedRatio      = $matrix.observe.minChangedRatio
             caseTimeoutSeconds   = [int] $scenario.durationSeconds + 30
         }
-        $inputs = if ($names -contains 'inputs') { @($scenario.inputs) } else { @() }
+        $inputs = @(if ($names -contains 'inputs') { $scenario.inputs })
     } elseif ($Cases -ne 'all') {
         $wanted = $Cases.Split(',')
         $selected = @($selected | Where-Object { $wanted -contains $_.id })
@@ -217,7 +224,7 @@ if ($Mode -ne 'probe') {
             $caseFile = Join-Path $caseDir 'case.json'
             [ordered]@{
                 id = $c.id; gameDir = $gameDir; exe = $matrix.game.exe
-                outDir = $caseDir; observe = $observe; inputs = $inputs
+                outDir = $caseDir; observe = $observe; inputs = $inputs; inputMethod = $inputMethod
             } | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 $caseFile
             & icacls.exe $caseDir /grant "${env:COMPUTERNAME}\${TestUser}:(OI)(CI)M" /T /Q | Out-Null
 
