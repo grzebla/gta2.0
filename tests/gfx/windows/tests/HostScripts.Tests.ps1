@@ -90,4 +90,9 @@ Describe 'Input diagnostics and provenance' {
         $script:runner | Should -Match 'windowCapture'
     }
     It 'collects logs the game or wrapper wrote during the case' { $script:runner | Should -Match 'game-logs' }
+    It 'records a screenshot-independent progress signal (bytes read by the game)' {
+        $script:runner | Should -Match 'GetProcessIoCounters'
+        $script:runner | Should -Match 'gameReadBytesDuring'
+    }
+    It 'lists the 32-bit modules the game loaded' { $script:runner | Should -Match 'tasklist\.exe /m' }
 }
