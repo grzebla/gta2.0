@@ -1,3 +1,3 @@
 # Known Issues
 
-T0010 attempt-1 findings are resolved at c4c0c8b. Retain existing T0008 issues.
+T0011 is blocked at ba732b0. Independently reproduced the integration/main conflict in tests/scripts/ec2-gpu-session.test.sh. Run settings deny git merge, and the transcript confirms denial. Orchestrator intervention is required. Main's GFX_RESULTS_ROOT override must also be neutralized in the isolated test suite when resolving the conflict. Retain existing issues.

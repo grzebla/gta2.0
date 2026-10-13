@@ -267,3 +267,12 @@ Verified c4c0c8b4697f57b35701090b9370c51a0d6e5803 and confirmed all 20 changed f
 - [x] Synthetic tests cover missing input, malformed maps, incorrect map count and a successful fixture inventory. — Inspected fixture generation, unit assertions and CLI tests. Matching LastTest.log files record passes for all 16 inventory.strict cases and 13 association/inventory cases in both presets. Direct execution of three read-only unit cases passed all 50 assertions.
 - [x] Keep optional existing game-data tests available for ordinary headless CI. — gamedata_tests.cpp remains unchanged, and gamedata-strict is a separate custom target. Inspected 20261013-094133-T0010-verify logs confirm 150/150 headless tests pass without original data.
 - [x] Original files remain local; emit only bounded metadata and aggregate counts. — Inspected ProblemSink and report formatting: 40 retained problems, 240-byte diagnostic limit, control-character sanitization and a 32 KiB report cap preserving the verdict. Bound tests passed. The diff contains synthetic fixtures, not original assets.
+
+## 2026-10-13T09:03:48Z — T0011 BLOCKED
+
+Task T0011 "Fix integration PR #6 (gates_failed)" at ba732b059
+
+Verified ba732b05969242147d07456074bdca60341d1fbd. T0011 contains zero new commits, and a read-only three-way merge preview reproduces the conflict in tests/scripts/ec2-gpu-session.test.sh against origin/main d7b8be7. The actual run settings deny git merge, and the developer transcript records the command being denied. Resolving this requires orchestrator intervention outside the developer's permitted scope. Neither acceptance criterion is met.
+
+- [ ] Every listed problem is resolved with evidence — git merge-tree using merge base 8f820b7, HEAD ba732b0 and origin/main d7b8be7 produces conflict markers around the test workspace setup. agent/t0011 and agents/integration both resolve to ba732b0; their diff is empty.
+- [ ] CI is green on the new integration head — There is no new integration head. Inspected 20261013-110108-T0011-verify/summary.md reports zero task commits; that verification directory contains no build or test logs. Green CI for a resolved integration head is not established.

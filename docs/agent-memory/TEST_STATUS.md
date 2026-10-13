@@ -1,3 +1,3 @@
 # Test Status
 
-T0010 c4c0c8b4697f57b35701090b9370c51a0d6e5803: inspected 20261013-094133-T0010-verify logs and matching LastTest.log files confirm 150/150 headless and 153/153 Debug passes, including all three render smoke tests. All 20 changed files match the tested checkout. Astra directly ran GTA20_GAME_DIR='~/Games/GTA2' ../dev/build/debug/bin/gta20-headless inventory: exit 0, 17 maps, 8,102-byte aggregate report, PASS. Negative environment and argument probes passed. Three read-only unit cases passed 50 assertions. Filesystem collision checks skipped on case-insensitive APFS; pure collision-grouping tests passed.
+T0011 ba732b0 has zero new commits and no build/test verification logs in its verification directory. Mergeability remains unresolved; green CI on a resolved integration head is unverified. Earlier T0010 results remain historical evidence only.
