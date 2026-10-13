@@ -317,6 +317,7 @@ function Get-ProcessDialog([int] $ProcessId) {
 }
 
 $proc = $null
+$script:ProxyFiles = @()   # set before try: the finally block reads it under StrictMode
 try {
     # Desktop before the game starts: frames must differ from it to count as "rendered",
     # otherwise a live process over an unchanged desktop would look like success.
@@ -327,14 +328,45 @@ try {
     $exe = Join-Path $case.gameDir $case.exe
     $lastSample = $baseline
     $lastWindow = $null
+    $inputMethod = 'scancode'
+    if (($case.PSObject.Properties.Name -contains 'inputMethod') -and $case.inputMethod) { $inputMethod = [string]$case.inputMethod }
+    # Method dinput-proxy: our DirectInput 8 proxy (inject\dinput8.dll, uploaded with these scripts)
+    # feeds the scripted keys straight into what the game reads; nothing is sent through Windows.
+    $proxyMethod = ($inputMethod -eq 'dinput-proxy')
+    if ($proxyMethod) {
+        $proxySrc = Join-Path $PSScriptRoot 'inject\dinput8.dll'
+        if (-not (Test-Path $proxySrc)) { throw 'input method dinput-proxy needs inject\dinput8.dll next to the scripts' }
+        $proxyDst = Join-Path $case.gameDir 'dinput8.dll'
+        if (Test-Path $proxyDst) {
+            # A copy of our own proxy left by an interrupted case may be replaced; anything else not.
+            if ((Get-FileHash $proxyDst).Hash -ne (Get-FileHash $proxySrc).Hash) {
+                throw 'refusing to overwrite a dinput8.dll in the game directory that is not our proxy'
+            }
+            Remove-Item -Path $proxyDst -Force
+        }
+        Copy-Item -Path $proxySrc -Destination $proxyDst
+        $script:ProxyFiles = @($proxyDst, (Join-Path $case.gameDir 'gta20-input.txt'))
+        $lines = [System.Collections.Generic.List[string]]::new()
+        if (($case.PSObject.Properties.Name -contains 'inputs') -and $case.inputs) {
+            foreach ($k in @($case.inputs)) {
+                $code = $script:ScanCodes[[string]$k.key]
+                if (-not $code) { throw "unsupported key '$($k.key)'" }
+                $dik = [int]$code[0]; if ($code[1]) { $dik = $dik -bor 0x80 }
+                $hold = if ($k.PSObject.Properties.Name -contains 'holdMs') { [int]$k.holdMs } else { 80 }
+                $down = [int]([double]$k.atSeconds * 1000)
+                $lines.Add(('{0} down {1:x2}' -f $down, $dik))
+                $lines.Add(('{0} up {1:x2}' -f ($down + [math]::Max(30, $hold)), $dik))
+            }
+        }
+        Set-Content -Path $script:ProxyFiles[1] -Value $lines -Encoding ASCII
+        $result.proxyScript = @($lines)
+    }
     $proc = Start-Process -FilePath $exe -WorkingDirectory $case.gameDir -PassThru
     $result.pid = $proc.Id
     $t0 = Get-Date
 
     # Input method: one name, or 'cycle' (key i uses method i mod n - diagnosis of which
     # injection the game accepts). Set by the owner in the compat matrix, never by a scenario.
-    $inputMethod = 'scancode'
-    if (($case.PSObject.Properties.Name -contains 'inputMethod') -and $case.inputMethod) { $inputMethod = [string]$case.inputMethod }
     $keyIndex = 0
     # One timeline: screenshots and (capture mode) scripted key presses, in time order.
     $events = @()
@@ -355,7 +387,13 @@ try {
             $keyIndex++
             $cpuBefore = $proc.TotalProcessorTime.TotalMilliseconds
             $readBefore = Get-ReadByteCount $proc
-            $diag = Send-GameKey -Key $ev.key -HoldMs $ev.hold -Window $proc.MainWindowHandle -Method $method -GamePid $proc.Id
+            if ($proxyMethod) {
+                # The proxy delivers this key by itself; only wait for the hold and observe.
+                Start-Sleep -Milliseconds ([math]::Max(30, $ev.hold))
+                $diag = [ordered]@{ method = 'dinput-proxy' }
+            } else {
+                $diag = Send-GameKey -Key $ev.key -HoldMs $ev.hold -Window $proc.MainWindowHandle -Method $method -GamePid $proc.Id
+            }
             # What the screen shows shortly after the key (evidence, not proof of consumption).
             Start-Sleep -Milliseconds 1500
             $afterPng = Join-Path $outDir ('key-{0:D3}s-{1}-{2}.png' -f [int]$ev.at, $ev.key, $method)
@@ -438,7 +476,9 @@ try {
     if ($proc -and -not $proc.HasExited) {
         Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
     }
-    # Logs the game or the wrapper (e.g. DDrawCompat-gta2.log) wrote during this case.
+    # Files the game had open (e.g. the proxy DLL) can be removed only after it has exited.
+    if ($proc) { $proc.WaitForExit(15000) | Out-Null }
+    # Logs the game or the wrapper (e.g. DDrawCompat-gta2.log, gta20-dinput.log) wrote during this case.
     try {
         $since = [datetime]::Parse($result.startedAt)
         $logs = @(Get-ChildItem -Path $case.gameDir -Filter '*.log' -File -ErrorAction SilentlyContinue |
@@ -451,6 +491,14 @@ try {
         }
     } catch {
         $result.gameLogsError = $_.Exception.Message
+    }
+    # The proxy must never stay in the game directory for later cases.
+    foreach ($f in $script:ProxyFiles) {
+        for ($i = 0; $i -lt 10 -and (Test-Path $f); $i++) {
+            Remove-Item -Path $f -Force -ErrorAction SilentlyContinue
+            if (Test-Path $f) { Start-Sleep -Milliseconds 500 }
+        }
+        if (Test-Path $f) { $result.proxyCleanupError = "could not remove $f" }
     }
     $result.finishedAt = (Get-Date).ToString('o')
     $result | ConvertTo-Json -Depth 6 | Set-Content -Encoding UTF8 -Path (Join-Path $outDir 'result.json')

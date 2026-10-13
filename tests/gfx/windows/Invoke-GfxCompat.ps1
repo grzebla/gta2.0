@@ -165,16 +165,49 @@ function Merge-Setting($A, $B) {
     return [pscustomobject]$merged
 }
 
+# Builds our DirectInput 8 proxy (inject\dinput8_proxy.c) with a pinned zig compiler and puts it
+# at inject\dinput8.dll for Run-Gta2Case.ps1. Cached by source hash; no binary lives in git.
+function Initialize-InputProxy {
+    $p = $matrix.input.proxy
+    $src = Join-Path $scriptDir 'inject\dinput8_proxy.c'
+    $def = Join-Path $scriptDir 'inject\dinput8_proxy.def'
+    $srcHash = ((Get-FileHash $src).Hash + (Get-FileHash $def).Hash + $p.zigSha256).Substring(0, 16).ToLowerInvariant()
+    $cached = Join-Path $cacheDir "dinput8-proxy-$srcHash.dll"
+    if (-not (Test-Path $cached)) {
+        $zigDir = Join-Path $cacheDir "zig-$($p.zigVersion)"
+        $zigExe = Get-ChildItem -Path $zigDir -Filter 'zig.exe' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+        if (-not $zigExe) {
+            $zip = Join-Path $cacheDir "zig-$($p.zigVersion).zip"
+            Invoke-WebRequest -UseBasicParsing -Uri $p.zigUrl -OutFile $zip
+            $sha = (Get-FileHash -Algorithm SHA256 $zip).Hash.ToLowerInvariant()
+            if ($sha -ne $p.zigSha256) { Remove-Item -Force $zip; throw "zig SHA-256 mismatch: $sha" }
+            Expand-Archive -Path $zip -DestinationPath $zigDir -Force
+            Remove-Item -Force $zip
+            $zigExe = Get-ChildItem -Path $zigDir -Filter 'zig.exe' -Recurse | Select-Object -First 1
+        }
+        $out = Join-Path $cacheDir 'dinput8-build'
+        New-Item -ItemType Directory -Force -Path $out | Out-Null
+        $env:ZIG_GLOBAL_CACHE_DIR = Join-Path $cacheDir 'zig-cache'
+        & $zigExe.FullName cc -target x86-windows-gnu -shared -O2 -o (Join-Path $out 'dinput8.dll') $src $def
+        if ($LASTEXITCODE -ne 0) { throw "building the input proxy failed ($LASTEXITCODE)" }
+        Copy-Item -Path (Join-Path $out 'dinput8.dll') -Destination $cached -Force
+    }
+    Copy-Item -Path $cached -Destination (Join-Path $scriptDir 'inject\dinput8.dll') -Force
+    return $srcHash
+}
+
 # ---------------------------------------------------------------- case loop
 # Key injection method (owner setting in the matrix; scenarios cannot choose it).
 $inputMethod = 'scancode'
 if (($matrix.PSObject.Properties.Name -contains 'input') -and $matrix.input.method) { $inputMethod = [string]$matrix.input.method }
+$inputProxy = $null
+if ($inputMethod -eq 'dinput-proxy' -and $Mode -eq 'capture') { $inputProxy = Initialize-InputProxy }
 # Which harness revision actually ran here (written by ec2-gpu-session.sh at upload).
 $revisionFile = Join-Path $scriptDir 'harness-revision.txt'
 $harnessRevision = if (Test-Path $revisionFile) { (Get-Content -Raw -Path $revisionFile).Trim() } else { 'unknown' }
 $summary = [ordered]@{
     runId = $RunId; mode = $Mode; startedAt = (Get-Date).ToString('o')
-    harnessRevision = $harnessRevision; inputMethod = $inputMethod
+    harnessRevision = $harnessRevision; inputMethod = $inputMethod; inputProxy = $inputProxy
     gpu = @($envReport.adapters | Where-Object { $_.Name -like '*NVIDIA*' } | ForEach-Object { $_.Name }) -join '; '
     driverStrategy = $boot.Driver.strategy
     interactiveSession = [bool]$session

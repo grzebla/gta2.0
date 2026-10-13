@@ -243,3 +243,36 @@ Sprzątanie: `aws cloudformation delete-stack` dla obu stosów; bucket artefakt�
   (`PrintWindow`, `*-window.png`, `windowCapture`), a logi gry i wrappera z czasu przypadku trafiają
   do `game-logs/`.
 
+### Sterowanie oryginałem: proxy DirectInput (2026-10-13)
+
+**Problem.** Na hoście EC2 prawdziwy DirectInput nigdy nie zgłasza wciśniętego klawisza. Nie
+pomaga żadna metoda na poziomie Windows: `SendInput` z kodem skanowania lub wirtualnym klawiszem,
+`PostMessage`, `AttachThreadInput` z fokusem ani `WM_ACTIVATE`/`WM_SETFOCUS`. Okno gry ma przy
+tym fokus i aktywność (`GetGUIThreadInfo`), pulpit wejściowy jest dostępny, a `Acquire` się
+udaje. Najpewniej to skutek maszyny wirtualnej bez urządzenia klawiatury.
+
+**Rozwiązanie.** Własne proxy `dinput8.dll` (`tests/gfx/windows/inject/dinput8_proxy.c`).
+GTA 2 9.6 importuje DINPUT8, więc biblioteka w katalogu gry przejmuje `DirectInput8Create` i
+przekazuje wszystko do systemowego DirectInput. Dla klawiatury systemowej:
+- loguje, co robi gra (`gta20-dinput.log` w `game-logs/`);
+- dokłada klawisze ze skryptu (`gta20-input.txt`, czasy w ms od załadowania) w obu ścieżkach
+  odczytu gry: `GetDeviceState` w menu i buforowanym `GetDeviceData` w rozgrywce.
+
+Host kompiluje proxy ze źródła przypiętym `zig` (URL + SHA-256 w `compat-matrix.json`, wynik w
+pamięci podręcznej według skrótu źródła), więc w repozytorium nie ma binarki. Po każdym
+przypadku runner usuwa proxy z katalogu gry, dopiero gdy proces gry się zakończy.
+
+**Zweryfikowane (przebiegi `mcp-20261013-g`/`-i`):**
+- menu: ENTER → ekran gracza, DOWN → zmiana pozycji, ENTER → edycja nazwy, ESC → powrót;
+  każde naciśnięcie daje dokładnie jedno przejście;
+- Downtown (`skip_frontend`): UP prowadzi gracza do kościoła „Jesus Saves” (gra odpowiada
+  skryptem punktu zapisu), LEFT obraca postać, kamera podąża.
+
+**Inne ustalenia:**
+- Opcje debugowe gry (`debug` w scenariuszu, klucz rejestru `Debug`): `skip_frontend` z
+  `mapname`/`stylename`/`scriptname` startuje prosto w mapie.
+- Menu po ok. 60 s bez klawisza samo uruchamia demo, co przydaje się jako test, czy pętla
+  menu działa.
+- **Otwarte:** przy starcie przez `skip_frontend` Downtown nie ma pieszych ani ruchu ulicznego;
+  w demie z menu są.
+
