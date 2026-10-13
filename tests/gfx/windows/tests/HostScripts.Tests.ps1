@@ -85,4 +85,9 @@ Describe 'Input diagnostics and provenance' {
         foreach ($k in 'foregroundAtSend', 'sendInput', 'afterFile', 'inputDesktopAccessible', 'hung') { $script:runner | Should -Match $k }
     }
     It 'records the harness revision in the summary' { $script:invoke | Should -Match 'harnessRevision' }
+    It 'captures the game window itself, not only the screen (a fullscreen surface can look frozen)' {
+        $script:runner | Should -Match 'PrintWindow\(\$Window, \$hdc, 2\)'
+        $script:runner | Should -Match 'windowCapture'
+    }
+    It 'collects logs the game or wrapper wrote during the case' { $script:runner | Should -Match 'game-logs' }
 }
