@@ -103,7 +103,8 @@ function Get-CaseVerdict {
     if ($frames.Count -eq 0) { return 'ERROR_NO_FRAMES' }
     if (-not $Result.alive) { return 'FAIL_PROCESS_EXITED' }
     # The game stopped at its own message box (e.g. "Videomode 16x16x16 is not available").
-    if (($Result.PSObject.Properties.Name -contains 'dialogs') -and @($Result.dialogs).Count -gt 0) { return 'FAIL_GAME_DIALOG' }
+    # @($null).Count is 1: count real dialog entries only (defect D1 gave false FAIL_GAME_DIALOG).
+    if (($Result.PSObject.Properties.Name -contains 'dialogs') -and @($Result.dialogs | Where-Object { $null -ne $_ }).Count -gt 0) { return 'FAIL_GAME_DIALOG' }
 
     $rendered = @($frames | Where-Object { Test-FrameRendered -Frame $_ -Observe $Observe })
     if ($rendered.Count -eq 0) {

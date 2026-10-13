@@ -366,6 +366,75 @@ class GatekeeperTests(SimCase):
                       (self.env.cfg.worktree("integration") / "docs/agent-memory/DECISIONS.md").read_text())
         self.assertTrue(gk.calls[0]["cwd"].endswith("/wt/release"))
 
+    def _main_commit(self, path: str, content: str) -> None:
+        """The owner lands a change on main (as a merged PR would)."""
+        wt = self.env.tmp / ("main-%d" % len(list(self.env.tmp.glob("main-*"))))
+        subprocess.run(["git", "clone", "-q", "-b", "main", str(self.env.origin), str(wt)], check=True)
+        for k, v in (("user.email", "o@example.invalid"), ("user.name", "owner")):
+            subprocess.run(["git", "config", k, v], cwd=wt, check=True)
+        (wt / path).parent.mkdir(parents=True, exist_ok=True)
+        (wt / path).write_text(content)
+        subprocess.run(["git", "add", "-A"], cwd=wt, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "owner: " + path], cwd=wt, check=True)
+        subprocess.run(["git", "push", "-q", "origin", "main"], cwd=wt, check=True)
+
+    def _wt_int(self) -> Path:
+        return self.env.cfg.worktree("integration")
+
+    def _git_int(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["git", *args], cwd=self._wt_int(), capture_output=True, text=True)
+
+    def test_main_is_synced_into_integration_and_gate_accepts_the_merge(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.finish_one_task(self.env, orch)
+        self._main_commit("docs/owner.md", "owner work\n")
+        self._integration_pr(port)
+        called, msg = orch.gatekeeper.step()
+        self.assertFalse(called)
+        self.assertIn("synced origin/main into agents/integration", msg)
+        subprocess.run(["git", "fetch", "-q", "origin"], cwd=self.env.repo, check=True)
+        self.assertEqual(subprocess.run(["git", "merge-base", "--is-ancestor", "origin/main", "origin/agents/integration"],
+                                        cwd=self.env.repo).returncode, 0)
+        self._integration_pr(port)  # GitHub sees the new head
+        called, msg = orch.gatekeeper.step()
+        self.assertIn("MERGED", msg)
+        self.assertFalse([t for t in self.env.db.tasks() if t["created_by"] == "gatekeeper"])
+
+    def test_sync_conflict_asks_the_owner_not_an_agent(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.finish_one_task(self.env, orch)
+        head = self._git_int("rev-parse", "HEAD").stdout.strip()
+        self._main_commit("sim/T0001.txt", "owner version\n")
+        self._integration_pr(port)
+        called, msg = orch.gatekeeper.step()
+        self.assertFalse(called)
+        self.assertEqual(self._git_int("rev-parse", "HEAD").stdout.strip(), head)
+        self.assertEqual(self._git_int("status", "--porcelain").stdout.strip(), "")
+        self.assertFalse([t for t in self.env.db.tasks() if t["created_by"] == "gatekeeper"])
+        self.assertIn("sim/T0001.txt", self.env.db.get_meta("human_question"))
+        # The owner resolves it by hand (keeps the agents' version); the gate accepts that merge.
+        self._git_int("merge", "origin/main")
+        self._git_int("checkout", "--ours", "sim/T0001.txt")
+        self._git_int("commit", "-q", "-a", "--no-edit")
+        orch.maybe_push(force_now=True)
+        self._integration_pr(port)
+        called, msg = orch.gatekeeper.step()
+        self.assertIn("MERGED", msg)
+
+    def test_sync_merge_may_not_rewrite_protected_paths(self) -> None:
+        orch, gk, port = sim.gatekeeper_env(self.env)
+        sim.finish_one_task(self.env, orch)
+        self._main_commit("tools/orchestrator/x.txt", "reviewed\n")
+        self._git_int("fetch", "-q", "origin")
+        self._git_int("merge", "--no-commit", "origin/main")
+        (self._wt_int() / "tools/orchestrator/x.txt").write_text("rewritten during the merge\n")
+        self._git_int("commit", "-q", "-a", "--no-edit")
+        orch.maybe_push(force_now=True)
+        self._integration_pr(port)
+        g = orch.gatekeeper.gates(port.open_prs()[0])
+        self.assertTrue(any("rewrites protected paths by hand: tools/orchestrator/x.txt" in f for f in g["fails"]),
+                        g["fails"])
+
     def test_red_ci_creates_fix_task_without_model_call(self) -> None:
         orch, gk, port = sim.gatekeeper_env(self.env)
         sim.finish_one_task(self.env, orch)
@@ -560,6 +629,7 @@ class GfxTests(SimCase):
         text = review_prompts[-1].read_text()
         self.assertIn("EC2 TEST HOST RUNS", text)
         self.assertIn("capture-menu-walk=PASS", text)
+        self.assertIn("harness fakerev, input scancode", text)
 
     def test_invalid_requests_are_rejected_without_running(self) -> None:
         runner = FakeGfxRunner()
@@ -621,6 +691,15 @@ class GfxTests(SimCase):
         orch.step()  # re-plan with the result in the prompt
         plans = sorted(self.env.cfg.state_dir.glob("runs/*plan*/prompt.md"))
         self.assertIn("job 1 [done] probe all by astra: PASS", plans[-1].read_text())
+
+    def test_agent_run_cap_does_not_hold_back_ec2_runs(self) -> None:
+        self.env.cfg.data["limits"]["max_runs_per_day"] = 0
+        runner = FakeGfxRunner()
+        orch = self._orch(runner)
+        orch.gfx.enqueue([{"mode": "probe", "target": "all", "reason": "a"}], None, "owner", self.env.repo)
+        self.assertIn("gfx job 1", orch.step())
+        with self.assertRaises(Wait):
+            orch.step()  # then the agent cap applies as before
 
     def test_interrupted_run_is_charged_and_failed(self) -> None:
         orch = self._orch(FakeGfxRunner())

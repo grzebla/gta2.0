@@ -218,3 +218,28 @@ Sprzątanie: `aws cloudformation delete-stack` dla obu stosów; bucket artefakt�
   `tools/orchestrator/README.md`, sekcja „Host testowy EC2”.
 - Wymaga ważnej sesji `aws login` na Macu z Orchestratorem; po jej wygaśnięciu przebiegi czekają,
   a Orchestrator pyta właściciela.
+
+### Pierwszy przebieg `capture` zlecony przez Astrę (2026-10-13) i poprawki
+
+- `m1-downtown-baseline` (job 1, ok. 0,17 USD): gra uruchomiła się na pełnym ekranie (DDrawCompat
+  skaluje 640x480 do 1280x800 na monitorze głównym; T4 ma dwa wirtualne ekrany, razem 2304x800).
+  Menu główne zostało bez zmian przez 120 s mimo trzech ENTER: wejście `scancode` nie dotarło do
+  gry albo gra go nie odczytała.
+- **D1:** werdykt `FAIL_GAME_DIALOG` był fałszywy. `$x = if (...) { @(...) }` rozwija pustą tablicę do
+  `$null`, a `@($null).Count` to 1. Naprawione w runnerze i w `Get-CaseVerdict`; test Pestera.
+- Diagnostyka każdego klawisza (`result.inputsSent`): metoda, okno pierwszoplanowe przed i w chwili
+  wysłania (czy należy do gry), wynik `SetForegroundWindow`, wynik i błąd `SendInput`/`PostMessage`,
+  dostęp do pulpitu wejściowego, `IsHungAppWindow`, czas CPU gry i zrzut ekranu 1,5 s po klawiszu
+  (`key-<s>-<klawisz>-<metoda>.png`). To dowód pośredni, nie dowód odczytania przez grę.
+- Metoda wstrzykiwania jest ustawieniem właściciela w macierzy (`input.method`): `scancode`, `vk`,
+  `postmessage`, `activate-scancode` albo `cycle` (klawisz i używa metody i mod 4, do diagnozy).
+- `summary.json` zapisuje `harnessRevision` (commit skryptów wysłanych na hosta, `-dirty` przy
+  lokalnych zmianach) i `inputMethod`; Orchestrator pokazuje je agentom przy wynikach.
+- Przebieg diagnostyczny `cycle` (job 2, `frontend-walk`, harness `c05b588`): werdykt PASS (D1
+  naprawione). Wszystkie cztery metody wysłały klawisze, okno gry miało fokus, pulpit wejściowy był
+  dostępny, gra nie wisiała i zużywała CPU, ale zrzut ekranu nie zmienił się ani razu. Dwie
+  hipotezy: gra ignoruje wstrzyknięte wejście albo zrzut GDI pokazuje zamrożoną klatkę
+  pełnoekranowej powierzchni. Dlatego każda klatka ma teraz także zrzut samego okna gry
+  (`PrintWindow`, `*-window.png`, `windowCapture`), a logi gry i wrappera z czasu przypadku trafiają
+  do `game-logs/`.
+

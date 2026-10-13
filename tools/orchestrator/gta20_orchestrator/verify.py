@@ -95,6 +95,10 @@ def verify_task(cfg: Any, *, wt: Path, base: str, head: str, previous_hash: Opti
     if run_commands_too and structural_ok:
         env = agent_env(cfg.verify_env())
         env["GTA20_ORCHESTRATOR_VERIFY"] = "1"
+        # Verification runs agent-written code outside the sandbox: it must never see the
+        # owner's AWS session (`aws login` lives in ~/.aws).
+        env.update({"AWS_CONFIG_FILE": "/dev/null", "AWS_SHARED_CREDENTIALS_FILE": "/dev/null",
+                    "AWS_EC2_METADATA_DISABLED": "true"})
         if tools_dir:
             env["PATH"] = str(tools_dir) + ":" + env["PATH"]
         commands = run_commands(cfg["verify"]["commands"], cwd=wt, env=env, log_dir=log_dir,

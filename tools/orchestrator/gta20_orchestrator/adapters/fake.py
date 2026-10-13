@@ -202,7 +202,8 @@ class FakeGfxRunner:
         log.write_text("fake run\n")
         case = "capture-%s" % target if mode == "capture" else "c1"
         return {"rc": self.rc, "minutes": self.minutes, "result_dir": str(log.parent / "fake-results"),
-                "summary": {"overall": self.overall, "cases": [{"id": case, "verdict": self.overall}]},
+                "summary": {"overall": self.overall, "cases": [{"id": case, "verdict": self.overall}],
+                            "harnessRevision": "fakerev", "inputMethod": "scancode"},
                 "log_tail": "fake"}
 
 

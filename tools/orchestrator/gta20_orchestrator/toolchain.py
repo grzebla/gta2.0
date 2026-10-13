@@ -9,7 +9,9 @@ import sys
 from pathlib import Path
 from typing import Dict, Optional
 
-PINNED = {"clang-format": "23.1.3"}
+# pip package -> version; TOOLS: executable -> the package that provides it.
+PINNED = {"clang-format": "23.1.3", "shellcheck-py": "0.10.0.1"}
+TOOLS = {"clang-format": "clang-format", "shellcheck": "shellcheck-py"}
 
 
 def tools_bin(state_dir: Path) -> Path:
@@ -21,7 +23,7 @@ def ensure(state_dir: Path) -> Optional[Path]:
     bin_dir = tools_bin(state_dir)
     marker = venv / "pinned.txt"
     wanted = "\n".join("%s==%s" % kv for kv in sorted(PINNED.items()))
-    if marker.exists() and marker.read_text() == wanted and (bin_dir / "clang-format").exists():
+    if marker.exists() and marker.read_text() == wanted and all((bin_dir / t).exists() for t in TOOLS):
         return bin_dir
     try:
         if not (bin_dir / "python3").exists():
@@ -39,7 +41,7 @@ def versions(bin_dir: Optional[Path]) -> Dict[str, str]:
     out: Dict[str, str] = {}
     if not bin_dir:
         return out
-    for tool in PINNED:
+    for tool in TOOLS:
         try:
             r = subprocess.run([str(bin_dir / tool), "--version"], capture_output=True, text=True, timeout=30)
             out[tool] = r.stdout.strip()

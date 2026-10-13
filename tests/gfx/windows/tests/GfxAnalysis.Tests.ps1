@@ -94,6 +94,14 @@ Describe 'Get-CaseVerdict' {
         $r | Add-Member -NotePropertyName dialogs -NotePropertyValue @([pscustomobject]@{ title = 'Error!'; texts = @('Videomode 16x16x16 is not available') })
         Get-CaseVerdict -Result $r -Observe $Observe | Should -Be 'FAIL_GAME_DIALOG'
     }
+    It 'no dialog verdict for null or empty dialogs (defect D1: @($null).Count is 1)' {
+        $f = Frame $Game $Desktop
+        foreach ($value in @($null, @(), (, $null))) {
+            $r = Result @($f, $f, $f)
+            $r | Add-Member -NotePropertyName dialogs -NotePropertyValue $value
+            Get-CaseVerdict -Result $r -Observe $Observe | Should -Be 'PASS'
+        }
+    }
     It 'ERROR variants for missing or failed results' {
         Get-CaseVerdict -Result $null -Observe $Observe | Should -Be 'ERROR_NO_RESULT'
         Get-CaseVerdict -Result ([pscustomobject]@{ error = 'boom'; alive = $true; frames = @() }) -Observe $Observe | Should -Be 'ERROR'

@@ -94,6 +94,12 @@ cmd_upload() {
   local dest="s3://${GFX_BUCKET}/runs/${RUN_ID}/scripts/"
   aws s3 cp --region "$AWS_REGION" --recursive --only-show-errors "$REPO_ROOT/tests/gfx/windows/" "$dest"
   aws s3 cp --region "$AWS_REGION" --only-show-errors "$REPO_ROOT/tests/gfx/compat-matrix.json" "$dest"
+  # Which harness revision runs on the host (recorded in summary.json).
+  local rev
+  rev="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+  if [[ "$rev" != unknown && -n "$(git -C "$REPO_ROOT" status --porcelain -- tests/gfx scripts/ci 2>/dev/null)" ]]; then rev="$rev-dirty"; fi
+  printf '%s\n' "$rev" > "$RUNNER_TEMP/harness-revision.txt"
+  aws s3 cp --region "$AWS_REGION" --only-show-errors "$RUNNER_TEMP/harness-revision.txt" "$dest"
   # GFX_SCENARIOS_DIR: a directory of already validated scenarios (the orchestrator stages one).
   local scenarios="${GFX_SCENARIOS_DIR:-$REPO_ROOT/tests/gfx/scenarios}"
   if [[ -d "$scenarios" ]]; then

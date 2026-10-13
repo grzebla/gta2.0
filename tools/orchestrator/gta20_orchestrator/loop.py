@@ -302,11 +302,13 @@ class Orchestrator:
         return now() - last >= float(self.cfg["release"]["every_s"])
 
     def step(self) -> str:
-        self.daily_cap()
+        # EC2 runs are not agent runs: they have their own limits (gfx section), so the daily
+        # agent-run cap does not hold them back.
         if self.gfx and not self.agent_should_stop():
             msg = self.gfx.run_next()
             if msg:
                 return "gfx: " + msg
+        self.daily_cap()
         task = self.db.active_task()
         if task is None and self.release_due():
             called, msg = self.gatekeeper.step()

@@ -48,12 +48,13 @@ is really needed - each run costs money and takes ~15-45 min). Each item: mode, 
 - compat: the case matrix tests/gfx/compat-matrix.json; target "all" or comma-separated case ids.
 - capture: reference screenshots of the original game for one scenario,
   tests/gfx/scenarios/<target>.json (commit the scenario on your branch first). Scenario fields
-  (nothing else is accepted): id (= file name), wrapper (a key of "wrappers" in the matrix,
+  (nothing else is accepted, no comments - describe the scenario in tests/gfx/scenarios/<id>.md):
+  id (= file name), wrapper (a key of "wrappers" in the matrix,
   normally "ddrawcompat"), screen (registry screen settings, e.g. {"start_mode": 1}),
   durationSeconds (integer 10..300), screenshotsAtSeconds (1..20 distinct integers within the
   duration), inputs (<= 100 of {atSeconds, key, holdMs<=5000}; key one of ENTER ESC SPACE TAB UP
   DOWN LEFT RIGHT LCTRL LSHIFT LALT BACKSPACE A-Z 0-9; sent as scan codes to the game window).
-  Mark scenarios as reference captures; screenshots stay outside git (local results directory).
+  Screenshots stay outside git (local results directory).
 Runs execute between steps, in order; results (verdicts, local result paths) appear in later
 prompts under "EC2 TEST HOST RUNS". Requests over the limits are queued or refused, never run.
 """
@@ -163,6 +164,11 @@ Decide exactly one of:
 - CHANGES_REQUESTED: fixable problems; list concrete, actionable required_changes.
 - BLOCKED: a real obstacle the developer cannot remove (explain it in the rationale).
 - NEEDS_HUMAN: a decision only the owner can make (put the question in human_question).
+Scope of CHANGES_REQUESTED: only (a) acceptance criteria not met, (b) defects or regressions
+introduced by this diff, (c) policy violations. Further hardening the task did not promise (new
+edge cases, defences against contrived inputs, nice-to-haves) is NOT a reason to reject: approve
+and record it in KNOWN_ISSUES via memory_updates so it is planned as a separate task. Do not move
+the goalposts between attempts: an earlier review's list is the bar, unless the fix broke something.
 Check each acceptance criterion in `criteria` with evidence you verified yourself. Give a
 rationale. progress_entry: one short paragraph for PROGRESS.md if APPROVED, else null. Use
 memory_updates to keep TEST_STATUS/KNOWN_ISSUES/ARCHITECTURE accurate (null = unchanged).
@@ -246,6 +252,10 @@ WORKING RULES:
   env -u GTA20_GAME_DIR ctest --preset headless`; and the data suite `cmake --preset debug &&
   cmake --build --preset debug && ctest --preset debug`. The orchestrator re-runs all of these
   (plus the clang-format check over all sources) independently, outside your sandbox.
+- Shell scripts: the pinned shellcheck is on PATH too. If you touch *.sh, run
+  `shellcheck -x -P SCRIPTDIR scripts/ci/*.sh scripts/aws/*.sh infra/aws/*.sh tests/scripts/*.sh`
+  and `bash tests/scripts/ec2-gpu-session.test.sh` (offline: it uses its own fake `aws` and
+  is allowed; the orchestrator runs both too).
 - Small, focused changes. If something is impossible or needs a decision, stop and report it
   in `unresolved` / `questions_for_astra` with status "blocked" or "partial".
 - Your final answer is the JSON report (schema provided): exact commands run and their results,

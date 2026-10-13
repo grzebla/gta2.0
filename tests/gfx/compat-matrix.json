@@ -9,6 +9,10 @@
     "registryKey": "SOFTWARE\\DMA Design Ltd\\GTA2",
     "registryView": "Registry32"
   },
+  "input": {
+    "$comment": "How capture mode injects keys: scancode (SendInput + KEYEVENTF_SCANCODE), vk (SendInput virtual key + scan code), postmessage (WM_KEYDOWN/UP to the game window), activate-scancode (attach to the game's input thread, focus, then scancode) or cycle (key i uses method i mod 4, for diagnosis). 2026-10-13: scancode did not change the 9.6 frontend under DDrawCompat (run local-20261013-084136); cycle is set TEMPORARILY for one diagnosis run, then the working method becomes the default.",
+    "method": "cycle"
+  },
   "observe": {
     "warmupSeconds": 12,
     "screenshotsAtSeconds": [12, 20, 30],
