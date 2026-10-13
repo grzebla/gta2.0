@@ -27,6 +27,14 @@ ID_RE = re.compile(r"^[a-z0-9-]{1,64}$")
 CASES_RE = re.compile(r"^(all|[a-z0-9-]+(,[a-z0-9-]+)*)$")
 KEYS = {"ENTER", "ESC", "SPACE", "TAB", "UP", "DOWN", "LEFT", "RIGHT", "LCTRL", "LSHIFT", "LALT",
         "BACKSPACE"} | set("ABCDEFGHIJKLMNOPQRSTUVWXYZ") | set("0123456789")
+# GTA 2 developer options (registry subkey Debug) a scenario may switch on. A flag is ON when its
+# value exists, so flags are written as 1 and only listed when wanted. Strings name data files.
+DEBUG_FLAGS = {"skip_frontend", "skip_audio", "skip_quit_confirm", "do_invulnerable", "do_infinite_lives",
+               "keep_weapons_after_death", "skip_mission", "skip_police", "skip_dummies", "do_debug_keys",
+               "do_corner_window", "log_input", "log_directinput", "do_show_input", "do_show_ids",
+               "do_show_counters", "do_show_timing"}
+DEBUG_FILES = {"mapname": ".gmp", "stylename": ".sty", "scriptname": ".scr"}
+DATA_FILE_RE = re.compile(r"^[a-z0-9_]{1,16}\.(gmp|sty|scr)$")
 SCREEN_KEYS = {"start_mode", "full_width", "full_height", "window_width", "window_height", "renderdevice",
                "videodevice", "do_play_movie", "tripple_buffer"}
 
@@ -46,7 +54,7 @@ def validate_scenario(data: Any, matrix: Dict[str, Any], scenario_id: str, max_s
     """Strict check of an agent-written scenario: it is data only (configuration, keys, times)."""
     if not isinstance(data, dict):
         raise ScenarioError("scenario must be a JSON object")
-    allowed = {"id", "wrapper", "screen", "durationSeconds", "screenshotsAtSeconds", "inputs"}
+    allowed = {"id", "wrapper", "debug", "screen", "durationSeconds", "screenshotsAtSeconds", "inputs"}
     extra = set(data) - allowed
     if extra:
         raise ScenarioError("unknown fields: %s" % ", ".join(sorted(extra)))
@@ -60,6 +68,18 @@ def validate_scenario(data: Any, matrix: Dict[str, Any], scenario_id: str, max_s
     for k, v in screen.items():
         if not isinstance(v, int) or not 0 <= v <= 4096:
             raise ScenarioError("screen.%s must be an integer 0..4096" % k)
+    debug = data.get("debug") or {}
+    if not isinstance(debug, dict):
+        raise ScenarioError("debug must be an object")
+    for k, v in debug.items():
+        if k in DEBUG_FILES:
+            if not isinstance(v, str) or not DATA_FILE_RE.match(v.lower()) or not v.lower().endswith(DEBUG_FILES[k]):
+                raise ScenarioError("debug.%s must be a data file name ending in %s" % (k, DEBUG_FILES[k]))
+        elif k in DEBUG_FLAGS:
+            if v != 1 or isinstance(v, bool):
+                raise ScenarioError("debug.%s must be 1 (a flag is on when present)" % k)
+        else:
+            raise ScenarioError("debug.%s is not an allowed option (%s)" % (k, ", ".join(sorted(DEBUG_FLAGS | set(DEBUG_FILES)))))
     duration = data.get("durationSeconds")
     if not isinstance(duration, int) or not 10 <= duration <= min(300, max_seconds):
         raise ScenarioError("durationSeconds must be an integer 10..%d" % min(300, max_seconds))
@@ -81,9 +101,12 @@ def validate_scenario(data: Any, matrix: Dict[str, Any], scenario_id: str, max_s
         if not isinstance(hold, int) or not 0 <= hold <= 5000:
             raise ScenarioError("inputs[%d].holdMs must be 0..5000" % i)
     # Normalised copy: exactly the fields the host reads, defaults filled in (StrictMode on the host).
-    return {"id": scenario_id, "wrapper": data["wrapper"], "screen": dict(screen), "durationSeconds": duration,
+    out = {"id": scenario_id, "wrapper": data["wrapper"], "screen": dict(screen), "durationSeconds": duration,
             "screenshotsAtSeconds": list(shots),
             "inputs": [{"atSeconds": ev["atSeconds"], "key": ev["key"], "holdMs": ev.get("holdMs", 80)} for ev in inputs]}
+    if debug:
+        out["debug"] = {k: (v.lower() if isinstance(v, str) else 1) for k, v in debug.items()}
+    return out
 
 
 class GfxRunner:

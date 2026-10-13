@@ -128,6 +128,28 @@ function Reset-ScreenSetting {
     try { $base.DeleteSubKeyTree("$($matrix.game.registryKey)\Screen", $false) } finally { $base.Close() }
 }
 
+# GTA 2 developer options (registry subkey Debug). A flag is ON when its value exists, whatever
+# the number, so only flags that should be on are written; names are allowlisted by the caller.
+$script:DebugStrings = @('mapname', 'stylename', 'scriptname')
+function Set-DebugSetting($Settings) {
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry32')
+    $key = $base.CreateSubKey("$($matrix.game.registryKey)\Debug")
+    try {
+        foreach ($p in $Settings.PSObject.Properties) {
+            if ($script:DebugStrings -contains $p.Name) {
+                $key.SetValue($p.Name, [string]$p.Value, [Microsoft.Win32.RegistryValueKind]::String)
+            } else {
+                $key.SetValue($p.Name, 1, [Microsoft.Win32.RegistryValueKind]::DWord)
+            }
+        }
+    } finally { $key.Close(); $base.Close() }
+}
+
+function Reset-DebugSetting {
+    $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry32')
+    try { $base.DeleteSubKeyTree("$($matrix.game.registryKey)\Debug", $false) } finally { $base.Close() }
+}
+
 function Get-ScreenSetting([string] $Name) {
     $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Registry32')
     $key = $base.OpenSubKey("$($matrix.game.registryKey)\Screen")
@@ -171,7 +193,8 @@ if ($Mode -ne 'probe') {
         $scenario = Get-Content -Raw -Path $scenarioPath | ConvertFrom-Json
         $names = $scenario.PSObject.Properties.Name
         $scenarioScreen = if ($names -contains 'screen') { $scenario.screen } else { [pscustomobject]@{} }
-        $selected = @([pscustomobject]@{ id = "capture-$($scenario.id)"; wrapper = $scenario.wrapper; screen = $scenarioScreen })
+        $scenarioDebug = if ($names -contains 'debug') { $scenario.debug } else { $null }
+        $selected = @([pscustomobject]@{ id = "capture-$($scenario.id)"; wrapper = $scenario.wrapper; screen = $scenarioScreen; debug = $scenarioDebug })
         $observe = [pscustomobject]@{
             warmupSeconds        = $matrix.observe.warmupSeconds
             screenshotsAtSeconds = @($scenario.screenshotsAtSeconds)
@@ -218,8 +241,10 @@ if ($Mode -ne 'probe') {
             # Each case starts from the base settings only: values a previous case wrote
             # (e.g. renderdevice=2) or the game itself rewrote must not leak into the next case.
             Reset-ScreenSetting
+            Reset-DebugSetting
             $screen = Merge-Setting $matrix.baseScreen $c.screen
             Set-ScreenSetting $screen
+            if (($c.PSObject.Properties.Name -contains 'debug') -and $c.debug) { Set-DebugSetting $c.debug }
 
             $caseFile = Join-Path $caseDir 'case.json'
             [ordered]@{

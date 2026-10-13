@@ -618,6 +618,9 @@ class GfxTests(SimCase):
 
     def test_scenario_validation_is_strict(self) -> None:
         validate_scenario(dict(SCENARIO), self.matrix, "menu-walk", 2700)
+        ok = validate_scenario(dict(SCENARIO, debug={"skip_frontend": 1, "mapname": "WIL.gmp"}), self.matrix,
+                               "menu-walk", 2700)
+        self.assertEqual(ok["debug"], {"skip_frontend": 1, "mapname": "wil.gmp"})
         bad = [
             dict(SCENARIO, id="other"),
             dict(SCENARIO, script="Remove-Item C:\\"),
@@ -629,6 +632,10 @@ class GfxTests(SimCase):
             dict(SCENARIO, inputs=[{"atSeconds": 1, "key": "F4"}]),
             dict(SCENARIO, inputs=[{"atSeconds": 1, "key": "ENTER", "cmd": "x"}]),
             dict(SCENARIO, inputs=[{"atSeconds": 1, "key": "ENTER", "holdMs": 60000}]),
+            dict(SCENARIO, debug={"do_mike": 1}),
+            dict(SCENARIO, debug={"skip_frontend": 0}),
+            dict(SCENARIO, debug={"mapname": "..\\..\\x.gmp"}),
+            dict(SCENARIO, debug={"mapname": "wil.sty"}),
         ]
         for b in bad:
             with self.assertRaises(ScenarioError, msg=str(b)):

@@ -94,5 +94,9 @@ Describe 'Input diagnostics and provenance' {
         $script:runner | Should -Match 'GetProcessIoCounters'
         $script:runner | Should -Match 'gameReadBytesDuring'
     }
+    It 'writes developer options only to the Debug subkey and resets them before every case' {
+        $script:invoke | Should -Match 'Debug"\)'
+        $script:invoke | Should -Match 'Reset-DebugSetting'
+    }
     It 'lists the 32-bit modules the game loaded' { $script:runner | Should -Match 'tasklist\.exe /m' }
 }

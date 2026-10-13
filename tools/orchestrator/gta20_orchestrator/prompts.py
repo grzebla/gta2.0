@@ -54,7 +54,13 @@ is really needed - each run costs money and takes ~15-45 min). Each item: mode, 
   durationSeconds (integer 10..300), screenshotsAtSeconds (1..20 distinct integers within the
   duration), inputs (<= 100 of {atSeconds, key, holdMs<=5000}; key one of ENTER ESC SPACE TAB UP
   DOWN LEFT RIGHT LCTRL LSHIFT LALT BACKSPACE A-Z 0-9; sent as scan codes to the game window).
-  Screenshots stay outside git (local results directory).
+  Optional "debug": GTA 2 developer options, e.g. {"skip_frontend": 1, "mapname": "wil.gmp",
+  "stylename": "wil.sty", "scriptname": "wil.scr"} starts straight in a map without the menu
+  (flags must be 1; allowed flags: skip_frontend skip_audio skip_quit_confirm do_invulnerable
+  do_infinite_lives keep_weapons_after_death skip_mission skip_police skip_dummies do_debug_keys
+  do_corner_window log_input log_directinput do_show_input do_show_ids do_show_counters
+  do_show_timing). Keys in the menu are currently NOT consumed (owner investigation 2026-10-13);
+  prefer skip_frontend. Screenshots stay outside git (local results directory).
 Runs execute between steps, in order; results (verdicts, local result paths) appear in later
 prompts under "EC2 TEST HOST RUNS". Requests over the limits are queued or refused, never run.
 """
